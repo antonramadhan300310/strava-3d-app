@@ -20,7 +20,7 @@ import {
   type LocationWatch,
 } from '@/lib/location';
 import { clearSession, loadSession, saveSession, type SavedSession } from '@/lib/session';
-import { calculateElevationGain, fetchElevations, type ActivityType } from '@/lib/valhalla';
+import { snapRouteToRoad, type ActivityType } from '@/lib/valhalla';
 import { isSupabaseConfigured, saveRecordedActivity } from '@/lib/supabase';
 import type { LngLat, LngLatEle } from '@/lib/polyline';
 
@@ -251,16 +251,23 @@ export function useActivityRecorder() {
       return null;
     }
 
-    const line: LngLat[] = recorded.map((point) => [point.lng, point.lat]);
     const gpsAltitudes = recorded.map((point) => point.ele);
-    const { coordinates, usedFallback } = await fetchElevations(line, gpsAltitudes);
-    const usedGpsAltitude =
-      usedFallback && gpsAltitudes.some((value) => value !== null && Number.isFinite(value));
+    const gpsTrack: LngLatEle[] = recorded.map((point, index) => [
+      point.lng,
+      point.lat,
+      Number.isFinite(gpsAltitudes[index] ?? NaN) ? (gpsAltitudes[index] as number) : 0,
+    ]);
+
+    // Snap the raw GPS trace onto roads first; the helper falls back to the
+    // untouched track when Valhalla is unreachable, so Finish never fails here.
+    const snapped = await snapRouteToRoad(gpsTrack, activityRef.current);
+    const coordinates = snapped.coordinates;
+    const usedGpsAltitude = snapped.usedGpsAltitude;
 
     const result: FinishResult = {
       coordinates,
-      distanceMeters: Math.round(totalDistanceMeters(line)),
-      elevationGainMeters: calculateElevationGain(coordinates),
+      distanceMeters: snapped.distanceMeters,
+      elevationGainMeters: snapped.elevationGainMeters,
       durationSeconds: Math.round(activeMsRef.current / 1000),
       usedGpsAltitude,
     };
@@ -270,9 +277,11 @@ export function useActivityRecorder() {
     phaseRef.current = 'paused';
     persist();
     setNotice(
-      usedGpsAltitude
-        ? 'Elevasi kontur tidak tersedia (offline). Memakai elevasi GPS.'
-        : 'Elevasi kontur Valhalla berhasil diterapkan.',
+      !snapped.snapped
+        ? 'Gagal menempelkan ke jalan (offline). Rekaman GPS asli disimpan.'
+        : usedGpsAltitude
+          ? 'Rute ditempelkan ke jalan. Elevasi kontur tidak tersedia, memakai elevasi GPS.'
+          : 'Rute ditempelkan ke jalan dengan elevasi kontur Valhalla.',
     );
     return result;
   }, [flushElapsed, stopWatch, persist]);

@@ -214,7 +214,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
               className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-800 py-4 text-base font-bold text-slate-300 shadow-2xl"
             >
               <Loader2 size={22} className="animate-spin" />
-              Memproses elevasi…
+              Menempelkan ke jalan…
             </button>
           )}
         </div>

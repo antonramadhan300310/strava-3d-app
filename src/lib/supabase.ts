@@ -109,3 +109,27 @@ export async function deleteActivity(id: string | number): Promise<void> {
   const { error } = await supabase.from('activities').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }
+
+/** Rewrites an existing activity's geometry and the metrics derived from it. */
+export async function updateActivityTrack(
+  id: string | number,
+  track: {
+    distanceMeters: number;
+    elevationGain: number;
+    durationSeconds: number;
+    coordinates: LngLatEle[];
+  },
+): Promise<void> {
+  const supabase = getClient();
+  const { error } = await supabase
+    .from('activities')
+    .update({
+      distance_meters: track.distanceMeters,
+      elevation_gain: track.elevationGain,
+      duration_seconds: track.durationSeconds,
+      geojson: toLineStringZGeometry(track.coordinates),
+    })
+    .eq('id', id);
+
+  if (error) throw new Error(error.message);
+}

@@ -50,6 +50,16 @@ export default function AppShell() {
     void refreshActivities();
   }, [refreshActivities]);
 
+  // "Rapikan ke Jalan" rewrites the row, so the open record must follow it.
+  const replaceActivityInList = activities.replace;
+  const replaceActivity = useCallback(
+    (updated: ActivityRecord) => {
+      setOpenActivity(updated);
+      replaceActivityInList(updated);
+    },
+    [replaceActivityInList],
+  );
+
   return (
     <main className="relative h-dvh w-full overflow-hidden bg-slate-950">
       <MapView
@@ -73,7 +83,12 @@ export default function AppShell() {
       )}
 
       {openActivity && (
-        <ActivityDetail activity={openActivity} onClose={closeActivity} onNotice={setNotice} />
+        <ActivityDetail
+          activity={openActivity}
+          onClose={closeActivity}
+          onNotice={setNotice}
+          onTrackUpdated={replaceActivity}
+        />
       )}
 
       {notice && (
