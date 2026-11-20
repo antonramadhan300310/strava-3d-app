@@ -14,8 +14,11 @@ import { saveCardImage, shareCardImage, type SaveImageOutcome } from '@/lib/shar
 
 type Props = {
   activity: ActivityRecord;
-  /** Returns the live 3D map frame, or null when the map cannot be captured. */
-  captureFrame: () => HTMLCanvasElement | null;
+  /**
+   * Captures the whole route framed for the poster, or null when the map
+   * cannot be read. Never the current zoomed-in flyover camera.
+   */
+  captureFullRouteFrame: () => Promise<HTMLCanvasElement | null>;
   onClose: () => void;
   onNotice: (message: string) => void;
 };
@@ -33,7 +36,12 @@ const SAVE_NOTICES: Record<SaveImageOutcome['location'], string> = {
   download: 'Gambar berhasil diunduh',
 };
 
-export default function ShareCardModal({ activity, captureFrame, onClose, onNotice }: Props) {
+export default function ShareCardModal({
+  activity,
+  captureFullRouteFrame,
+  onClose,
+  onNotice,
+}: Props) {
   const [style, setStyle] = useState<ShareCardStyle>('poster');
   const [preview, setPreview] = useState<string | null>(null);
   const [rendering, setRendering] = useState(true);
@@ -42,15 +50,29 @@ export default function ShareCardModal({ activity, captureFrame, onClose, onNoti
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // The map keeps animating, so the frame is frozen once the modal opens.
   const frameRef = useRef<HTMLCanvasElement | null>(null);
+  const [frameReady, setFrameReady] = useState(false);
 
   const data = useMemo(() => buildShareCardData(activity), [activity]);
   const size = CARD_SIZES[style];
 
+  // The poster needs the whole route, so the map is re-framed and captured
+  // before the first render rather than grabbing the current flyover camera.
   useEffect(() => {
-    frameRef.current = captureFrame();
-  }, [captureFrame]);
+    let cancelled = false;
+    void (async () => {
+      const frame = await captureFullRouteFrame();
+      if (cancelled) return;
+      frameRef.current = frame;
+      setFrameReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [captureFullRouteFrame]);
 
   useEffect(() => {
+    if (!frameReady) return;
+
     let cancelled = false;
     setRendering(true);
     setError(null);
@@ -79,7 +101,7 @@ export default function ShareCardModal({ activity, captureFrame, onClose, onNoti
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [style, data, activity.coordinates]);
+  }, [style, data, activity.coordinates, frameReady]);
 
   const handleShare = useCallback(async () => {
     const canvas = canvasRef.current;

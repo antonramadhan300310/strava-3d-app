@@ -62,6 +62,13 @@ export function useActivities() {
     }
   }, []);
 
+  /** Swaps one row in place after it was rewritten (e.g. snapped to roads). */
+  const replace = useCallback((updated: ActivityRecord) => {
+    setActivities((current) =>
+      current.map((activity) => (activity.id === updated.id ? updated : activity)),
+    );
+  }, []);
+
   const visible = useMemo(
     () => activities.filter((activity) => matchesFilter(activity, filter)),
     [activities, filter],
@@ -87,6 +94,7 @@ export function useActivities() {
     setFilter,
     refresh,
     remove,
+    replace,
     dismissError: useCallback(() => setError(null), []),
   };
 }

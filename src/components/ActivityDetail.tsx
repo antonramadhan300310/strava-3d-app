@@ -8,6 +8,8 @@ import {
   EyeOff,
   Footprints,
   Gauge,
+  Layers,
+  Loader2,
   Mountain,
   Pause,
   Play,
@@ -15,8 +17,9 @@ import {
   Share2,
   Timer,
   TrendingUp,
+  Wand2,
 } from 'lucide-react';
-import FlyoverMap, { type FlyoverMapHandle } from '@/components/FlyoverMap';
+import FlyoverMap, { type FlyoverMapHandle, type FlyoverMapStyle } from '@/components/FlyoverMap';
 import ElevationChart from '@/components/ElevationChart';
 import ShareCardModal from '@/components/ShareCardModal';
 import { useFlyoverPlayback } from '@/hooks/useFlyoverPlayback';
@@ -30,7 +33,8 @@ import {
   formatSpeed,
   paceSecondsPerKm,
 } from '@/lib/metrics';
-import type { ActivityType } from '@/lib/valhalla';
+import { snapRouteToRoad, type ActivityType } from '@/lib/valhalla';
+import { updateActivityTrack } from '@/lib/supabase';
 
 const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
   ride: <Bike size={18} />,
@@ -42,12 +46,17 @@ type Props = {
   activity: ActivityRecord;
   onClose: () => void;
   onNotice: (message: string) => void;
+  /** Replaces the open activity after its track is rewritten in Supabase. */
+  onTrackUpdated: (activity: ActivityRecord) => void;
 };
 
-export default function ActivityDetail({ activity, onClose, onNotice }: Props) {
+export default function ActivityDetail({ activity, onClose, onNotice, onTrackUpdated }: Props) {
   const mapRef = useRef<FlyoverMapHandle | null>(null);
   const [cleanMode, setCleanMode] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [mapStyle, setMapStyle] = useState<FlyoverMapStyle>('outdoor');
+  const [snapping, setSnapping] = useState(false);
+  const [introPending, setIntroPending] = useState(false);
 
   const path = useMemo(() => buildFlyoverPath(activity.coordinates), [activity.coordinates]);
 
@@ -55,9 +64,76 @@ export default function ActivityDetail({ activity, onClose, onNotice }: Props) {
     mapRef.current?.applyFrame(sample, progress);
   }, []);
 
-  const captureFrame = useCallback(() => mapRef.current?.captureFrame() ?? null, []);
-
   const playback = useFlyoverPlayback(path, handleFrame);
+  // The share modal holds on to these callbacks, so they must stay stable.
+  const playbackRef = useRef(playback);
+  playbackRef.current = playback;
+
+  const captureFullRouteFrame = useCallback(async () => {
+    playbackRef.current.pause();
+    return (await mapRef.current?.captureFullRouteFrame()) ?? null;
+  }, []);
+
+  /**
+   * Play from the very start glides the camera to the first vertex first, so
+   * the flyover does not begin with a hard cut.
+   */
+  const handlePlayToggle = useCallback(async () => {
+    if (playback.isPlaying) {
+      playback.pause();
+      return;
+    }
+    if (playback.progress > 0.001 || introPending) {
+      playback.play();
+      return;
+    }
+
+    setIntroPending(true);
+    try {
+      await mapRef.current?.flyToStart();
+    } finally {
+      setIntroPending(false);
+    }
+    playback.play();
+  }, [introPending, playback]);
+
+  const toggleMapStyle = useCallback(() => {
+    const next: FlyoverMapStyle = mapStyle === 'outdoor' ? 'satellite' : 'outdoor';
+    mapRef.current?.setMapStyle(next);
+    setMapStyle(next);
+  }, [mapStyle]);
+
+  /** Re-snaps an old recording to the road network and saves it back. */
+  const snapToRoad = useCallback(async () => {
+    if (snapping) return;
+    setSnapping(true);
+    try {
+      const result = await snapRouteToRoad(activity.coordinates, activity.activityType);
+      if (!result.snapped) {
+        onNotice('Gagal menempelkan ke jalan. Periksa koneksi internet lalu coba lagi.');
+        return;
+      }
+
+      await updateActivityTrack(activity.id, {
+        distanceMeters: result.distanceMeters,
+        elevationGain: result.elevationGainMeters,
+        durationSeconds: activity.durationSeconds,
+        coordinates: result.coordinates,
+      });
+
+      onTrackUpdated({
+        ...activity,
+        coordinates: result.coordinates,
+        distanceMeters: result.distanceMeters,
+        elevationGain: result.elevationGainMeters,
+      });
+      onNotice('Rute dirapikan menempel ke jalan.');
+    } catch (cause) {
+      onNotice(cause instanceof Error ? cause.message : 'Gagal merapikan rute.');
+    } finally {
+      setSnapping(false);
+    }
+  }, [activity, onNotice, onTrackUpdated, snapping]);
 
   const summary = useMemo(() => {
     const averageSpeed = averageSpeedKmh(activity.distanceMeters, activity.durationSeconds);
@@ -121,6 +197,37 @@ export default function ActivityDetail({ activity, onClose, onNotice }: Props) {
         </div>
       </div>
 
+      {/* Quick actions sit under the telemetry HUD so nothing overlaps it. */}
+      <div
+        className={`absolute right-3 top-[calc(env(safe-area-inset-top)+9rem)] z-40 flex flex-col gap-2 transition-opacity duration-300 ${
+          cleanMode ? 'pointer-events-none opacity-0' : 'opacity-100'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={toggleMapStyle}
+          aria-label={
+            mapStyle === 'outdoor' ? 'Ganti ke gaya satelit' : 'Ganti ke gaya outdoor'
+          }
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-xl backdrop-blur active:scale-95"
+        >
+          <Layers size={18} />
+        </button>
+        {!activity.isPlannedRoute && (
+          <button
+            type="button"
+            onClick={() => void snapToRoad()}
+            disabled={snapping}
+            aria-label="Rapikan rute ke jalan"
+            aria-busy={snapping}
+            title="Rapikan ke Jalan"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-orange-300 shadow-xl backdrop-blur active:scale-95 disabled:opacity-60"
+          >
+            {snapping ? <Loader2 size={18} className="animate-spin" /> : <Wand2 size={18} />}
+          </button>
+        )}
+      </div>
+
       <button
         type="button"
         onClick={() => setCleanMode((value) => !value)}
@@ -134,7 +241,7 @@ export default function ActivityDetail({ activity, onClose, onNotice }: Props) {
       >
         {cleanMode ? <EyeOff size={18} /> : <Eye size={20} />}
       </button>
-      <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.75rem)] flex justify-center">
+      <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.75rem)] flex justify-center pr-14">
         <TelemetryHud
           distanceMeters={playback.telemetry.distanceMeters}
           elevationMeters={playback.telemetry.elevationMeters}
@@ -179,11 +286,22 @@ export default function ActivityDetail({ activity, onClose, onNotice }: Props) {
         <div className="mx-auto flex w-full max-w-md gap-2">
           <button
             type="button"
-            onClick={playback.toggle}
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-orange-500 py-3.5 text-base font-bold text-white shadow-2xl transition active:scale-[0.98]"
+            onClick={() => void handlePlayToggle()}
+            disabled={introPending}
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-orange-500 py-3.5 text-base font-bold text-white shadow-2xl transition active:scale-[0.98] disabled:opacity-70"
           >
-            {playback.isPlaying ? <Pause size={20} /> : <Play size={20} />}
-            {playback.isPlaying ? 'Pause 3D Flyover' : 'Play 3D Flyover'}
+            {introPending ? (
+              <Loader2 size={20} className="animate-spin" />
+            ) : playback.isPlaying ? (
+              <Pause size={20} />
+            ) : (
+              <Play size={20} />
+            )}
+            {introPending
+              ? 'Menyiapkan kamera…'
+              : playback.isPlaying
+                ? 'Pause 3D Flyover'
+                : 'Play 3D Flyover'}
           </button>
 
           <button
@@ -200,7 +318,7 @@ export default function ActivityDetail({ activity, onClose, onNotice }: Props) {
         <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/92 px-2.5 py-2 shadow-2xl backdrop-blur">
           <button
             type="button"
-            onClick={playback.toggle}
+            onClick={() => void handlePlayToggle()}
             aria-label={playback.isPlaying ? 'Pause' : 'Play'}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-100 active:scale-95"
           >
@@ -258,7 +376,7 @@ export default function ActivityDetail({ activity, onClose, onNotice }: Props) {
       {shareOpen && (
         <ShareCardModal
           activity={activity}
-          captureFrame={captureFrame}
+          captureFullRouteFrame={captureFullRouteFrame}
           onClose={() => setShareOpen(false)}
           onNotice={onNotice}
         />

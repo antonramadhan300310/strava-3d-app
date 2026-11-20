@@ -1,3 +1,4 @@
+import { length as turfLength } from '@turf/turf';
 import { decodePolyline, type LngLat, type LngLatEle } from './polyline';
 
 const VALHALLA_BASE = 'https://valhalla1.openstreetmap.de';
@@ -167,15 +168,160 @@ export type ElevationResult = {
   usedFallback: boolean;
 };
 
+/** Cap on points sent to the map-matching endpoint; longer tracks are resampled. */
+const MAX_TRACE_SAMPLES = 180;
 /**
- * Replaces the altitudes of a recorded track with ground elevations from
- * Valhalla's height endpoint, keeping GPS altitudes when the request fails.
+ * A successful match traces the same route, so its length stays close to the
+ * recording. Valhalla answers an unmatchable trace with a stub shape (two
+ * points, a few metres), which would silently replace a whole activity.
  */
-export async function fetchElevations(
-  points: LngLat[],
-  gpsAltitudes?: (number | null)[],
-): Promise<ElevationResult> {
-  return attachElevations(points, gpsAltitudes);
+// Wide enough for a noisy GPS track (zig-zag inflates the raw length) while
+// still rejecting the near-zero stub, which is orders of magnitude off.
+const MIN_SNAP_LENGTH_RATIO = 0.25;
+const MAX_SNAP_LENGTH_RATIO = 4;
+
+type ValhallaTraceResponse = {
+  trip?: {
+    summary?: { length?: number; time?: number };
+    legs?: { shape?: string }[];
+  };
+  error?: string;
+  error_code?: number;
+};
+
+export type SnapRouteResult = {
+  coordinates: LngLatEle[];
+  distanceMeters: number;
+  elevationGainMeters: number;
+  /** False when Valhalla was unreachable and the raw GPS track was kept. */
+  snapped: boolean;
+  /** True when ground elevations were unavailable and GPS altitudes were kept. */
+  usedGpsAltitude: boolean;
+};
+
+function lineFeature(coordinates: (LngLat | LngLatEle)[]): GeoJSON.Feature<GeoJSON.LineString> {
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates },
+  };
+}
+
+function lengthMeters(coordinates: (LngLat | LngLatEle)[]): number {
+  return Math.round(turfLength(lineFeature(coordinates), { units: 'meters' }));
+}
+
+/**
+ * Nearest-altitude lookup for the snapped shape.
+ *
+ * Matched points have no GPS altitude of their own, so each one borrows the
+ * altitude of the sampled fix at the same relative position along the track.
+ */
+function altitudeLookup(altitudes: number[], pointCount: number): (index: number) => number {
+  const last = altitudes.length - 1;
+  return (index) => {
+    if (last < 0) return 0;
+    if (last === 0) return altitudes[0];
+
+    const position = (index / Math.max(pointCount - 1, 1)) * last;
+    const lower = Math.min(Math.floor(position), last);
+    const upper = Math.min(lower + 1, last);
+    const ratio = position - lower;
+    const from = altitudes[lower];
+    const to = altitudes[upper];
+
+    if (!Number.isFinite(from)) return Number.isFinite(to) ? to : 0;
+    if (!Number.isFinite(to)) return from;
+    return from + (to - from) * ratio;
+  };
+}
+
+/**
+ * Snaps a recorded GPS track onto the road/path network with Valhalla's free
+ * FOSSGIS map-matching endpoint (`trace_route` with `shape_match: map_snap`).
+ *
+ * The matched geometry comes back as a precision-6 polyline, so distance and
+ * elevation are recomputed from it instead of trusting the noisy GPS fixes.
+ * Any network or server failure returns the untouched track, because losing a
+ * recording to a routing outage would be far worse than a jagged line.
+ */
+export async function snapRouteToRoad(
+  coordinates: (LngLat | LngLatEle)[],
+  activityType: ActivityType,
+): Promise<SnapRouteResult> {
+  const original: LngLatEle[] = coordinates.map(([lng, lat, ele]) => [
+    lng,
+    lat,
+    Number.isFinite(ele) ? (ele as number) : 0,
+  ]);
+
+  const fallback: SnapRouteResult = {
+    coordinates: original,
+    distanceMeters: lengthMeters(original),
+    elevationGainMeters: calculateElevationGain(original),
+    snapped: false,
+    usedGpsAltitude: true,
+  };
+
+  if (original.length < 2) return fallback;
+
+  const step = Math.max(1, Math.ceil(original.length / MAX_TRACE_SAMPLES));
+  const sampleIndices: number[] = [];
+  for (let i = 0; i < original.length; i += step) sampleIndices.push(i);
+  if (sampleIndices[sampleIndices.length - 1] !== original.length - 1) {
+    sampleIndices.push(original.length - 1);
+  }
+  if (sampleIndices.length < 2) return fallback;
+
+  const profile = getProfile(activityType);
+
+  try {
+    const body: Record<string, unknown> = {
+      shape: sampleIndices.map((index) => ({ lat: original[index][1], lon: original[index][0] })),
+      costing: profile.costing,
+      shape_match: 'map_snap',
+      directions_options: { units: 'kilometers' },
+    };
+    if (profile.costingOptions) body.costing_options = profile.costingOptions;
+
+    const data = await postJson<ValhallaTraceResponse>('/trace_route', body);
+    const legs = data.trip?.legs;
+    if (!legs || legs.length === 0) return fallback;
+
+    const points: LngLat[] = [];
+    for (const leg of legs) {
+      if (!leg.shape) continue;
+      for (const point of decodePolyline(leg.shape)) {
+        const last = points[points.length - 1];
+        if (last && last[0] === point[0] && last[1] === point[1]) continue;
+        points.push(point);
+      }
+    }
+    if (points.length < 2) return fallback;
+
+    const snappedLength = lengthMeters(points);
+    const ratio = snappedLength / Math.max(fallback.distanceMeters, 1);
+    if (ratio < MIN_SNAP_LENGTH_RATIO || ratio > MAX_SNAP_LENGTH_RATIO) return fallback;
+
+    const fallbackAltitude = altitudeLookup(
+      sampleIndices.map((index) => original[index][2]),
+      points.length,
+    );
+    const { coordinates: snapped, usedFallback } = await attachElevations(
+      points,
+      points.map((_, index) => fallbackAltitude(index)),
+    );
+
+    return {
+      coordinates: snapped,
+      distanceMeters: lengthMeters(snapped),
+      elevationGainMeters: calculateElevationGain(snapped),
+      snapped: true,
+      usedGpsAltitude: usedFallback,
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 export async function fetchRoute(

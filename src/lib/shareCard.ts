@@ -36,6 +36,13 @@ const FONT_STACK = '"Inter","Segoe UI",Roboto,system-ui,-apple-system,sans-serif
 const MARGIN = 72;
 const GRID_GAP = 32;
 
+/**
+ * Poster area (in card pixels) the captured 3D frame must keep the route
+ * inside: below the title block and above the stats grid. `FlyoverMap` reads
+ * this to frame the route, since the frame is drawn as a cropped cover image.
+ */
+export const POSTER_ROUTE_BAND = { top: 380, bottom: 800, left: 90, right: 990 };
+
 function font(size: number, weight: number | string = 600): string {
   return `${weight} ${size}px ${FONT_STACK}`;
 }
@@ -149,11 +156,12 @@ function drawSticker(
   width: number,
   height: number,
 ) {
+  // Upper band of the sticker: 120 → 740 leaves room for the stats row below.
   const routeBox = {
-    x: 96,
-    y: 104,
-    width: width - 192,
-    height: 552,
+    x: 120,
+    y: 120,
+    width: width - 240,
+    height: 620,
   };
   drawRouteGlow(ctx, coordinates, routeBox);
 
@@ -437,8 +445,13 @@ function drawEndpoint(ctx: CanvasRenderingContext2D, x: number, y: number, color
 const MERCATOR_LAT_LIMIT = 85.05112878;
 
 /**
- * Fits `[lng, lat]` into `box`, preserving shape, using Web Mercator so a
- * north-south route is not stretched against an east-west one.
+ * Fits `[lng, lat]` into `box` with one uniform scale on both axes.
+ *
+ * Longitude is multiplied by `cos(centerLat)` so a degree of longitude and a
+ * degree of latitude share the same on-screen length — the local form of the
+ * Web Mercator stretch the map itself applies. Without that factor the two axes
+ * need separate scales, which shears the route (the "gepeng" sticker): bearings
+ * and curves must match the real map, not merely fill the box.
  */
 export function projectCoordinates(
   coordinates: LngLatEle[],
@@ -446,13 +459,18 @@ export function projectCoordinates(
 ): { x: number; y: number }[] {
   if (coordinates.length < 2) return [];
 
-  const projected = coordinates.map(([lng, lat]) => {
-    const clamped = Math.min(Math.max(lat, -MERCATOR_LAT_LIMIT), MERCATOR_LAT_LIMIT);
-    return {
-      x: lng,
-      y: Math.log(Math.tan(Math.PI / 4 + (clamped * Math.PI) / 360)),
-    };
-  });
+  const lats = coordinates.map(([, lat]) =>
+    Math.min(Math.max(lat, -MERCATOR_LAT_LIMIT), MERCATOR_LAT_LIMIT),
+  );
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const centerLat = (minLat + maxLat) / 2;
+  const cosLat = Math.max(Math.cos((centerLat * Math.PI) / 180), 1e-6);
+
+  const projected = coordinates.map(([lng, lat]) => ({
+    x: lng * cosLat,
+    y: Math.min(Math.max(lat, -MERCATOR_LAT_LIMIT), MERCATOR_LAT_LIMIT),
+  }));
 
   let minX = Infinity;
   let maxX = -Infinity;
@@ -478,7 +496,7 @@ export function projectCoordinates(
 
   return projected.map((point) => ({
     x: box.x + box.width / 2 + (point.x - midX) * safeScale,
-    // Mercator y grows northwards while canvas y grows downwards.
+    // Latitude grows northwards while canvas y grows downwards.
     y: box.y + box.height / 2 - (point.y - midY) * safeScale,
   }));
 }
