@@ -44,6 +44,13 @@ type LineGradient = NonNullable<
 export type FlyoverMapHandle = {
   /** Moves the marker, redraws the reveal line and drives the camera. */
   applyFrame: (sample: FlyoverSample, progress: number) => void;
+  /**
+   * Copies the current WebGL frame into a detached 2D canvas.
+   *
+   * `preserveDrawingBuffer` keeps the frame readable after the draw call, and
+   * copying it immediately means a later repaint cannot blank the snapshot.
+   */
+  captureFrame: () => HTMLCanvasElement | null;
 };
 
 type Props = {
@@ -73,6 +80,9 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
       // MapLibre clamps pitch to 60 by default, which would flatten the requested 70.
       maxPitch: 85,
       attributionControl: { compact: true },
+      // Without this the WebGL buffer is cleared after each frame and the
+      // share poster captures an empty/black image on Android WebView.
+      preserveDrawingBuffer: true,
     });
     mapRef.current = map;
     map.touchZoomRotate.enableRotation();
@@ -162,6 +172,29 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
           pitch: FLYOVER_PITCH,
           zoom: FLYOVER_ZOOM,
         });
+      },
+      captureFrame: () => {
+        const map = mapRef.current;
+        if (!map) return null;
+
+        const source = map.getCanvas();
+        if (source.width === 0 || source.height === 0) return null;
+
+        const snapshot = document.createElement('canvas');
+        snapshot.width = source.width;
+        snapshot.height = source.height;
+        const context = snapshot.getContext('2d');
+        if (!context) return null;
+
+        try {
+          context.drawImage(source, 0, 0);
+          // Tiles served without CORS headers taint the buffer; reading it back
+          // throws here so the poster can fall back to the drawn route.
+          snapshot.toDataURL('image/png');
+        } catch {
+          return null;
+        }
+        return snapshot;
       },
     }),
     [],

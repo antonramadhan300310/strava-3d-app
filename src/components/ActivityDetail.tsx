@@ -1,20 +1,24 @@
 'use client';
 
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Bike,
+  Eye,
+  EyeOff,
   Footprints,
   Gauge,
   Mountain,
   Pause,
   Play,
   RotateCcw,
+  Share2,
   Timer,
   TrendingUp,
 } from 'lucide-react';
 import FlyoverMap, { type FlyoverMapHandle } from '@/components/FlyoverMap';
 import ElevationChart from '@/components/ElevationChart';
+import ShareCardModal from '@/components/ShareCardModal';
 import { useFlyoverPlayback } from '@/hooks/useFlyoverPlayback';
 import type { ActivityRecord } from '@/lib/activity';
 import { buildFlyoverPath, type FlyoverSample } from '@/lib/flyover';
@@ -37,16 +41,21 @@ const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
 type Props = {
   activity: ActivityRecord;
   onClose: () => void;
+  onNotice: (message: string) => void;
 };
 
-export default function ActivityDetail({ activity, onClose }: Props) {
+export default function ActivityDetail({ activity, onClose, onNotice }: Props) {
   const mapRef = useRef<FlyoverMapHandle | null>(null);
+  const [cleanMode, setCleanMode] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const path = useMemo(() => buildFlyoverPath(activity.coordinates), [activity.coordinates]);
 
   const handleFrame = useCallback((sample: FlyoverSample, progress: number) => {
     mapRef.current?.applyFrame(sample, progress);
   }, []);
+
+  const captureFrame = useCallback(() => mapRef.current?.captureFrame() ?? null, []);
 
   const playback = useFlyoverPlayback(path, handleFrame);
 
@@ -80,7 +89,21 @@ export default function ActivityDetail({ activity, onClose }: Props) {
     <section className="absolute inset-0 z-30 bg-slate-950">
       <FlyoverMap ref={mapRef} path={path} />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start gap-2 bg-gradient-to-b from-slate-950/90 to-transparent px-3 pb-8 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
+      {/* In clean mode a tap anywhere on the map brings the controls back. */}
+      {cleanMode && (
+        <button
+          type="button"
+          aria-label="Tampilkan kontrol pemutaran"
+          onClick={() => setCleanMode(false)}
+          className="absolute inset-0 z-10"
+        />
+      )}
+
+      <div
+        className={`pointer-events-none absolute inset-x-0 top-0 flex items-start gap-2 bg-gradient-to-b from-slate-950/90 to-transparent px-3 pb-8 pr-16 pt-[calc(env(safe-area-inset-top)+0.75rem)] transition-opacity duration-300 ${
+          cleanMode ? 'invisible opacity-0' : 'visible opacity-100'
+        }`}
+      >
         <button
           type="button"
           onClick={onClose}
@@ -98,6 +121,19 @@ export default function ActivityDetail({ activity, onClose }: Props) {
         </div>
       </div>
 
+      <button
+        type="button"
+        onClick={() => setCleanMode((value) => !value)}
+        aria-label={cleanMode ? 'Tampilkan kontrol flyover' : 'Mode bersih (sembunyikan kontrol)'}
+        aria-pressed={cleanMode}
+        className={`absolute right-3 top-[calc(env(safe-area-inset-top)+0.75rem)] z-40 flex items-center justify-center rounded-full border shadow-xl backdrop-blur transition active:scale-95 ${
+          cleanMode
+            ? 'h-9 w-9 border-white/20 bg-slate-950/35 text-slate-200/70'
+            : 'h-10 w-10 border-white/15 bg-slate-900/85 text-slate-100'
+        }`}
+      >
+        {cleanMode ? <EyeOff size={18} /> : <Eye size={20} />}
+      </button>
       <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.75rem)] flex justify-center">
         <TelemetryHud
           distanceMeters={playback.telemetry.distanceMeters}
@@ -107,7 +143,12 @@ export default function ActivityDetail({ activity, onClose }: Props) {
         />
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+      <div
+        className={`absolute inset-x-0 bottom-0 flex flex-col gap-2 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] transition-all duration-300 ${
+          cleanMode ? 'pointer-events-none translate-y-[120%] opacity-0' : 'opacity-100'
+        }`}
+        aria-hidden={cleanMode}
+      >
         <div className="mx-auto w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/92 p-3 shadow-2xl backdrop-blur">
           <div className="mb-2 flex items-center justify-between">
             <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -135,14 +176,26 @@ export default function ActivityDetail({ activity, onClose }: Props) {
           </dl>
         </div>
 
-        <button
-          type="button"
-          onClick={playback.toggle}
-          className="mx-auto flex w-full max-w-md items-center justify-center gap-2 rounded-2xl bg-orange-500 py-3.5 text-base font-bold text-white shadow-2xl transition active:scale-[0.98]"
-        >
-          {playback.isPlaying ? <Pause size={20} /> : <Play size={20} />}
-          {playback.isPlaying ? 'Pause 3D Flyover' : 'Play 3D Flyover'}
-        </button>
+        <div className="mx-auto flex w-full max-w-md gap-2">
+          <button
+            type="button"
+            onClick={playback.toggle}
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-orange-500 py-3.5 text-base font-bold text-white shadow-2xl transition active:scale-[0.98]"
+          >
+            {playback.isPlaying ? <Pause size={20} /> : <Play size={20} />}
+            {playback.isPlaying ? 'Pause 3D Flyover' : 'Play 3D Flyover'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShareOpen(true)}
+            aria-label="Bagikan atau unduh kartu aktivitas"
+            className="flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-slate-900/92 px-4 text-sm font-bold text-slate-100 shadow-2xl backdrop-blur transition active:scale-[0.98]"
+          >
+            <Share2 size={18} />
+            Share
+          </button>
+        </div>
 
         <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/92 px-2.5 py-2 shadow-2xl backdrop-blur">
           <button
@@ -201,6 +254,15 @@ export default function ActivityDetail({ activity, onClose }: Props) {
           </button>
         </div>
       </div>
+
+      {shareOpen && (
+        <ShareCardModal
+          activity={activity}
+          captureFrame={captureFrame}
+          onClose={() => setShareOpen(false)}
+          onNotice={onNotice}
+        />
+      )}
     </section>
   );
 }
