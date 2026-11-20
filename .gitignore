@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+
+# Local env
+.env
+.env*.local
+
+# OS / editor
+.DS_Store
+*.log
+
+# Native build artifacts (the android/ project itself stays tracked)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+
+# TypeScript incremental build info
+*.tsbuildinfo

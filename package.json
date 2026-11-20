@@ -11,7 +11,6 @@
   "dependencies": {
     "@capacitor/android": "^6.1.2",
     "@capacitor/core": "^6.1.2",
-    "@capgo/capacitor-background-geolocation": "^6.0.0",
     "@supabase/supabase-js": "^2.45.4",
     "@turf/turf": "^7.1.0",
     "lucide-react": "^0.453.0",
