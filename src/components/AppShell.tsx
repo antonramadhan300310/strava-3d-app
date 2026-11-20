@@ -1,33 +1,60 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import BottomNav, { type TabKey } from '@/components/BottomNav';
 import MapView, { type MapViewHandle } from '@/components/MapView';
 import RecordOverlay from '@/components/RecordOverlay';
 import RouteBuilderOverlay from '@/components/RouteBuilderOverlay';
+import ActivitiesPanel from '@/components/ActivitiesPanel';
+import ActivityDetail from '@/components/ActivityDetail';
 import { useActivityRecorder } from '@/hooks/useActivityRecorder';
+import { useActivities } from '@/hooks/useActivities';
 import { useRouteBuilder } from '@/hooks/useRouteBuilder';
+import type { ActivityRecord } from '@/lib/activity';
 
-const PLACEHOLDER = 'Segera hadir di Milestone berikutnya';
+const NOTICE_MS = 3000;
 
 export default function AppShell() {
   const [tab, setTab] = useState<TabKey>('routes');
+  const [openActivity, setOpenActivity] = useState<ActivityRecord | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const mapRef = useRef<MapViewHandle | null>(null);
   const builder = useRouteBuilder(mapRef);
   const recorder = useActivityRecorder();
+  const activities = useActivities();
   const isRoutes = tab === 'routes';
   const isRecord = tab === 'record';
+  const isActivities = tab === 'activities';
 
   // Recording keeps the camera locked on the blue dot; pausing releases it.
   const followEnabled = isRecord && recorder.isRecording;
   // A running session stays visible even while the user browses other tabs.
   const liveGps = isRecord || recorder.phase !== 'idle';
 
+  const refreshActivities = activities.refresh;
+  // Opening the feed or saving a route both change what should be listed.
+  const savedRouteSignal = builder.info;
+  useEffect(() => {
+    if (!isActivities) return;
+    void refreshActivities();
+  }, [isActivities, savedRouteSignal, refreshActivities]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const closeActivity = useCallback(() => {
+    setOpenActivity(null);
+    void refreshActivities();
+  }, [refreshActivities]);
+
   return (
     <main className="relative h-dvh w-full overflow-hidden bg-slate-950">
       <MapView
         ref={mapRef}
-        active={tab !== 'activities'}
+        active={!isActivities}
         waypoints={isRoutes ? builder.waypoints : []}
         route={isRoutes ? builder.coordinates : null}
         onMapClick={isRoutes ? builder.addWaypoint : undefined}
@@ -41,14 +68,22 @@ export default function AppShell() {
       {isRoutes && <RouteBuilderOverlay builder={builder} />}
       {isRecord && <RecordOverlay recorder={recorder} />}
 
-      {tab === 'activities' && (
-        <section className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-950 px-8 pb-20 text-center">
-          <h1 className="text-xl font-semibold text-slate-100">Activities</h1>
-          <p className="max-w-xs text-sm text-slate-400">{PLACEHOLDER}</p>
-        </section>
+      {isActivities && !openActivity && (
+        <ActivitiesPanel activities={activities} onOpen={setOpenActivity} onNotice={setNotice} />
       )}
 
-      <BottomNav active={tab} onChange={setTab} />
+      {openActivity && <ActivityDetail activity={openActivity} onClose={closeActivity} />}
+
+      {notice && (
+        <p
+          className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] z-40 mx-auto max-w-md rounded-xl bg-slate-900/95 px-3 py-2 text-center text-xs font-medium text-slate-100 shadow-lg backdrop-blur"
+          role="status"
+        >
+          {notice}
+        </p>
+      )}
+
+      {!openActivity && <BottomNav active={tab} onChange={setTab} />}
     </main>
   );
 }

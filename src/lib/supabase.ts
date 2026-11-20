@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityType } from './valhalla';
 import type { LngLatEle } from './polyline';
+import { toActivityRecord, type ActivityRecord, type ActivityRow } from './activity';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -76,5 +77,35 @@ export async function saveRecordedActivity(activity: RecordedActivity): Promise<
     geojson: toLineStringZGeometry(activity.coordinates),
   });
 
+  if (error) throw new Error(error.message);
+}
+
+const ACTIVITY_COLUMNS =
+  'id,title,activity_type,is_planned_route,distance_meters,elevation_gain,duration_seconds,geojson,created_at';
+
+/**
+ * Loads every saved activity, newest first.
+ *
+ * Rows whose geometry cannot be decoded are dropped instead of breaking the
+ * whole feed, because a single malformed row should not hide the rest.
+ */
+export async function fetchActivities(): Promise<ActivityRecord[]> {
+  const supabase = getClient();
+  const { data, error } = await supabase
+    .from('activities')
+    .select(ACTIVITY_COLUMNS)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  if (!Array.isArray(data)) return [];
+
+  return (data as ActivityRow[])
+    .map(toActivityRecord)
+    .filter((record): record is ActivityRecord => record !== null);
+}
+
+export async function deleteActivity(id: string | number): Promise<void> {
+  const supabase = getClient();
+  const { error } = await supabase.from('activities').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }
