@@ -31,7 +31,17 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 - `src/hooks/useFlyoverPlayback.ts` — `requestAnimationFrame` driver. Map updates go through
   `onFrame` every frame; React state (HUD, scrubber) is throttled to ~16 Hz.
 - `src/components/FlyoverMap.tsx` — imperative `applyFrame` handle; owns the map, marker,
-  base line and progressive-reveal gradient.
+  base line and progressive-reveal gradient. `captureFrame()` copies the WebGL buffer into a
+  detached 2D canvas for the share poster.
+- `src/lib/shareCard.ts` — HTML5 Canvas renderer for the share images. `poster` (1080×1350)
+  draws the map frame as a cover background plus scrims, stats and an elevation profile;
+  `sticker` (1080×1080) leaves the canvas transparent and draws only the glowing route and
+  stats, so it can be composited onto a photo.
+- `src/lib/shareImage.ts` — writes the PNG to `Directory.Cache` and opens the Android share
+  sheet, or to `Directory.Documents` when saving; falls back to `navigator.share`/download
+  on the web.
+- `src/components/ShareCardModal.tsx` — style tabs, preview (checkerboard behind the sticker)
+  and the share/save actions.
 
 ## Gotchas
 
@@ -39,6 +49,8 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   `FlyoverMap` nests a `h-full w-full` div inside a positioned wrapper; keep that structure.
 - MapLibre clamps `pitch` to `maxPitch`, default 60. The flyover uses pitch 70, so the map is
   created with `maxPitch: 85`.
+- The flyover map needs `preserveDrawingBuffer: true`; without it the WebGL buffer is cleared
+  after each frame and `map.getCanvas()` captures a blank poster on Android WebView.
 - PostgREST returns a PostGIS `geometry` column as hex EWKB, not GeoJSON.
   `parseActivityGeometry` in `src/lib/activity.ts` handles both.
 - `line-gradient` stops must be strictly ascending — see `gradient()` in `FlyoverMap.tsx`.

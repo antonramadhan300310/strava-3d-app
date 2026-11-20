@@ -72,11 +72,13 @@ export default function AppShell() {
         <ActivitiesPanel activities={activities} onOpen={setOpenActivity} onNotice={setNotice} />
       )}
 
-      {openActivity && <ActivityDetail activity={openActivity} onClose={closeActivity} />}
+      {openActivity && (
+        <ActivityDetail activity={openActivity} onClose={closeActivity} onNotice={setNotice} />
+      )}
 
       {notice && (
         <p
-          className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] z-40 mx-auto max-w-md rounded-xl bg-slate-900/95 px-3 py-2 text-center text-xs font-medium text-slate-100 shadow-lg backdrop-blur"
+          className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] mx-auto max-w-md rounded-xl bg-slate-900/95 px-3 py-2 text-center text-xs font-medium text-slate-100 shadow-lg backdrop-blur"
           role="status"
         >
           {notice}
