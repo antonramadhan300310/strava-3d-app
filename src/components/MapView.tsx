@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import type { StyleSpecification } from 'maplibre-gl';
 import { Layers, LocateFixed, Mountain, Square } from 'lucide-react';
+import type { LngLat, LngLatEle } from '@/lib/polyline';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? '';
@@ -31,21 +32,51 @@ const FALLBACK_STYLE: StyleSpecification = {
 };
 
 const TERRAIN_SOURCE_ID = 'terrain-source';
+const ROUTE_SOURCE_ID = 'route-line';
+const ROUTE_CASING_LAYER_ID = 'route-line-casing';
+const ROUTE_LAYER_ID = 'route-line-layer';
+const ROUTE_COLOR = '#f97316';
 const DEFAULT_CENTER: [number, number] = [107.6191, -6.9175];
 const DEFAULT_ZOOM = 13;
 const PITCH_3D = 60;
 
-type Props = {
-  active: boolean;
+export type MapViewHandle = {
+  flyTo: (center: LngLat, zoom?: number) => void;
+  fitCoordinates: (coordinates: (LngLat | LngLatEle)[]) => void;
+  toggleDimension: () => void;
+  toggleStyle: () => void;
+  locate: () => void;
 };
 
-export default function MapView({ active }: Props) {
+type Props = {
+  active: boolean;
+  waypoints?: LngLat[];
+  route?: LngLatEle[] | null;
+  onMapClick?: (lngLat: LngLat) => void;
+};
+
+const EMPTY_LINE: GeoJSON.Feature<GeoJSON.LineString> = {
+  type: 'Feature',
+  properties: {},
+  geometry: { type: 'LineString', coordinates: [] },
+};
+
+const MapView = forwardRef<MapViewHandle, Props>(function MapView(
+  { active, waypoints = [], route = null, onMapClick },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
+  const routeRef = useRef<LngLatEle[] | null>(route);
+  const clickRef = useRef(onMapClick);
   const [mapStyle, setMapStyle] = useState<MapStyle>('outdoor');
   const [is3D, setIs3D] = useState(true);
   const [locating, setLocating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  routeRef.current = route;
+  clickRef.current = onMapClick;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -80,9 +111,48 @@ export default function MapView({ active }: Props) {
       }
     };
 
-    map.on('style.load', enableTerrain);
+    // setStyle() discards custom sources and layers, so both are rebuilt here.
+    const ensureRouteLayers = () => {
+      if (!map.getSource(ROUTE_SOURCE_ID)) {
+        map.addSource(ROUTE_SOURCE_ID, {
+          type: 'geojson',
+          data: EMPTY_LINE,
+          lineMetrics: true,
+        });
+      }
+      if (!map.getLayer(ROUTE_CASING_LAYER_ID)) {
+        map.addLayer({
+          id: ROUTE_CASING_LAYER_ID,
+          type: 'line',
+          source: ROUTE_SOURCE_ID,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#0f172a', 'line-width': 9, 'line-opacity': 0.5 },
+        });
+      }
+      if (!map.getLayer(ROUTE_LAYER_ID)) {
+        map.addLayer({
+          id: ROUTE_LAYER_ID,
+          type: 'line',
+          source: ROUTE_SOURCE_ID,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': ROUTE_COLOR, 'line-width': 5 },
+        });
+      }
+      applyRoute(map, routeRef.current);
+    };
+
+    map.on('style.load', () => {
+      enableTerrain();
+      ensureRouteLayers();
+    });
+
+    map.on('click', (event) => {
+      clickRef.current?.([event.lngLat.lng, event.lngLat.lat]);
+    });
 
     return () => {
+      for (const marker of markersRef.current) marker.remove();
+      markersRef.current = [];
       map.remove();
       mapRef.current = null;
     };
@@ -91,6 +161,27 @@ export default function MapView({ active }: Props) {
   useEffect(() => {
     if (active) mapRef.current?.resize();
   }, [active]);
+
+  useEffect(() => {
+    if (mapRef.current) applyRoute(mapRef.current, route);
+  }, [route]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    for (const marker of markersRef.current) marker.remove();
+    markersRef.current = waypoints.map((position, index) => {
+      const element = document.createElement('div');
+      element.className =
+        'flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-orange-500 text-[11px] font-bold text-white shadow-lg';
+      element.textContent = String(index + 1);
+      // Markers live inside the canvas container, so an un-stopped tap would
+      // also register as a map click and add a duplicate waypoint.
+      element.addEventListener('click', (event) => event.stopPropagation());
+      return new maplibregl.Marker({ element, anchor: 'center' }).setLngLat(position).addTo(map);
+    });
+  }, [waypoints]);
 
   const toggleDimension = useCallback(() => {
     const map = mapRef.current;
@@ -101,17 +192,31 @@ export default function MapView({ active }: Props) {
   }, [is3D]);
 
   const toggleStyle = useCallback(() => {
-    const map = mapRef.current;
     const next: MapStyle = mapStyle === 'outdoor' ? 'satellite' : 'outdoor';
-    if (map && HAS_KEY) map.setStyle(STYLE_URLS[next], { diff: false });
+    if (HAS_KEY) mapRef.current?.setStyle(STYLE_URLS[next], { diff: false });
     setMapStyle(next);
     if (!HAS_KEY) setNotice('Kunci MapTiler belum diatur.');
   }, [mapStyle]);
 
-  const locateMe = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) return;
+  const flyTo = useCallback((center: LngLat, zoom = 16) => {
+    mapRef.current?.flyTo({ center, zoom, duration: 1200 });
+  }, []);
 
+  const fitCoordinates = useCallback((coordinates: (LngLat | LngLatEle)[]) => {
+    const map = mapRef.current;
+    if (!map || coordinates.length === 0) return;
+
+    const bounds = coordinates.reduce(
+      (acc, [lng, lat]) => acc.extend([lng, lat] as LngLat),
+      new maplibregl.LngLatBounds(
+        [coordinates[0][0], coordinates[0][1]],
+        [coordinates[0][0], coordinates[0][1]],
+      ),
+    );
+    map.fitBounds(bounds, { padding: 64, maxZoom: 16, duration: 1200 });
+  }, []);
+
+  const locate = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setNotice('Perangkat ini tidak mendukung layanan lokasi.');
       return;
@@ -122,11 +227,7 @@ export default function MapView({ active }: Props) {
       (position) => {
         setLocating(false);
         setNotice(null);
-        map.flyTo({
-          center: [position.coords.longitude, position.coords.latitude],
-          zoom: 16,
-          duration: 1200,
-        });
+        flyTo([position.coords.longitude, position.coords.latitude]);
       },
       (error) => {
         setLocating(false);
@@ -138,7 +239,13 @@ export default function MapView({ active }: Props) {
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
-  }, []);
+  }, [flyTo]);
+
+  useImperativeHandle(
+    ref,
+    () => ({ flyTo, fitCoordinates, toggleDimension, toggleStyle, locate }),
+    [flyTo, fitCoordinates, toggleDimension, toggleStyle, locate],
+  );
 
   useEffect(() => {
     if (!notice) return;
@@ -176,23 +283,38 @@ export default function MapView({ active }: Props) {
         >
           <Layers size={20} />
         </FloatingButton>
-        <FloatingButton label="Lokasi Saya" onClick={locateMe} busy={locating}>
+        <FloatingButton label="Lokasi Saya" onClick={locate} busy={locating}>
           <LocateFixed size={20} />
         </FloatingButton>
       </div>
     </div>
   );
+});
+
+function applyRoute(map: maplibregl.Map, route: LngLatEle[] | null) {
+  const source = map.getSource(ROUTE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  if (!source) return;
+  source.setData({
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'LineString',
+      coordinates: route && route.length > 1 ? route : [],
+    },
+  });
 }
 
-function FloatingButton({
+export function FloatingButton({
   label,
   onClick,
   busy = false,
+  disabled = false,
   children,
 }: {
   label: string;
   onClick: () => void;
   busy?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -201,8 +323,8 @@ function FloatingButton({
       onClick={onClick}
       aria-label={label}
       aria-busy={busy}
-      className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-xl backdrop-blur transition active:scale-95 active:bg-slate-800 disabled:opacity-60"
-      disabled={busy}
+      disabled={busy || disabled}
+      className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-xl backdrop-blur transition active:scale-95 active:bg-slate-800 disabled:opacity-40"
     >
       {busy ? (
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-500 border-t-slate-100" />
@@ -212,3 +334,5 @@ function FloatingButton({
     </button>
   );
 }
+
+export default MapView;
