@@ -5,6 +5,7 @@ import maplibregl from 'maplibre-gl';
 import type { StyleSpecification } from 'maplibre-gl';
 import { Layers, LocateFixed, Mountain, Square } from 'lucide-react';
 import type { LngLat, LngLatEle } from '@/lib/polyline';
+import { gpsBadgeText, gpsQuality, type GpsQuality } from '@/lib/metrics';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? '';
@@ -36,9 +37,21 @@ const ROUTE_SOURCE_ID = 'route-line';
 const ROUTE_CASING_LAYER_ID = 'route-line-casing';
 const ROUTE_LAYER_ID = 'route-line-layer';
 const ROUTE_COLOR = '#f97316';
+const TRACK_SOURCE_ID = 'live-track';
+const TRACK_CASING_LAYER_ID = 'live-track-casing';
+const TRACK_LAYER_ID = 'live-track-layer';
+const TRACK_COLOR = '#22d3ee';
 const DEFAULT_CENTER: [number, number] = [107.6191, -6.9175];
 const DEFAULT_ZOOM = 13;
 const PITCH_3D = 60;
+const FOLLOW_ZOOM = 16.5;
+
+/** Web Mercator metres-per-pixel, used to size the accuracy halo in screen space. */
+function metersToPixels(meters: number, latitude: number, zoom: number): number {
+  const metersPerPixel = (156543.03392 * Math.cos((latitude * Math.PI) / 180)) / 2 ** zoom;
+  if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0) return 0;
+  return meters / metersPerPixel;
+}
 
 export type MapViewHandle = {
   flyTo: (center: LngLat, zoom?: number) => void;
@@ -53,6 +66,16 @@ type Props = {
   waypoints?: LngLat[];
   route?: LngLatEle[] | null;
   onMapClick?: (lngLat: LngLat) => void;
+  /** Latest GPS fix, drawn as the blue dot with an accuracy halo. */
+  livePosition?: { lng: number; lat: number; accuracy: number } | null;
+  /** Recorded track drawn live on top of the map. */
+  liveTrack?: LngLatEle[] | null;
+  /** Accuracy of the latest fix in metres; `null` while no fix has arrived. */
+  gpsAccuracy?: number | null;
+  /** While true, the camera follows the blue dot until the user pans away. */
+  followEnabled?: boolean;
+  /** Shows the GPS signal badge; enabled on the Record tab. */
+  showGpsStatus?: boolean;
 };
 
 const EMPTY_LINE: GeoJSON.Feature<GeoJSON.LineString> = {
@@ -61,22 +84,56 @@ const EMPTY_LINE: GeoJSON.Feature<GeoJSON.LineString> = {
   geometry: { type: 'LineString', coordinates: [] },
 };
 
+const EMPTY_TRACK: GeoJSON.Feature<GeoJSON.LineString> = {
+  type: 'Feature',
+  properties: {},
+  geometry: { type: 'LineString', coordinates: [] },
+};
+
+const GPS_BADGE_STYLES: Record<GpsQuality, string> = {
+  good: 'bg-emerald-500/95 text-white',
+  fair: 'bg-amber-400/95 text-slate-900',
+  poor: 'bg-slate-900/90 text-slate-100',
+};
+
 const MapView = forwardRef<MapViewHandle, Props>(function MapView(
-  { active, waypoints = [], route = null, onMapClick },
+  {
+    active,
+    waypoints = [],
+    route = null,
+    onMapClick,
+    livePosition = null,
+    liveTrack = null,
+    gpsAccuracy = null,
+    followEnabled = false,
+    showGpsStatus = false,
+  },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const haloRef = useRef<HTMLDivElement | null>(null);
   const routeRef = useRef<LngLatEle[] | null>(route);
+  const trackRef = useRef<LngLatEle[] | null>(liveTrack);
   const clickRef = useRef(onMapClick);
+  const positionRef = useRef(livePosition);
   const [mapStyle, setMapStyle] = useState<MapStyle>('outdoor');
   const [is3D, setIs3D] = useState(true);
   const [locating, setLocating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [autoFollow, setAutoFollow] = useState(followEnabled);
 
   routeRef.current = route;
+  trackRef.current = liveTrack;
   clickRef.current = onMapClick;
+  positionRef.current = livePosition;
+
+  useEffect(() => {
+    if (!followEnabled) setAutoFollow(false);
+    else setAutoFollow(true);
+  }, [followEnabled]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -111,7 +168,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       }
     };
 
-    // setStyle() discards custom sources and layers, so both are rebuilt here.
+    // setStyle() discards custom sources and layers, so they are all rebuilt here.
     const ensureRouteLayers = () => {
       if (!map.getSource(ROUTE_SOURCE_ID)) {
         map.addSource(ROUTE_SOURCE_ID, {
@@ -138,7 +195,33 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
           paint: { 'line-color': ROUTE_COLOR, 'line-width': 5 },
         });
       }
+      if (!map.getSource(TRACK_SOURCE_ID)) {
+        map.addSource(TRACK_SOURCE_ID, {
+          type: 'geojson',
+          data: EMPTY_TRACK,
+          lineMetrics: true,
+        });
+      }
+      if (!map.getLayer(TRACK_CASING_LAYER_ID)) {
+        map.addLayer({
+          id: TRACK_CASING_LAYER_ID,
+          type: 'line',
+          source: TRACK_SOURCE_ID,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#0f172a', 'line-width': 10, 'line-opacity': 0.45 },
+        });
+      }
+      if (!map.getLayer(TRACK_LAYER_ID)) {
+        map.addLayer({
+          id: TRACK_LAYER_ID,
+          type: 'line',
+          source: TRACK_SOURCE_ID,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': TRACK_COLOR, 'line-width': 6 },
+        });
+      }
       applyRoute(map, routeRef.current);
+      applyTrack(map, trackRef.current);
     };
 
     map.on('style.load', () => {
@@ -150,13 +233,97 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       clickRef.current?.([event.lngLat.lng, event.lngLat.lat]);
     });
 
+    // Panning by hand means the user wants to look elsewhere; following would
+    // fight their finger, so it stays off until "Lokasi Saya" is tapped.
+    map.on('dragstart', () => setAutoFollow(false));
+
     return () => {
       for (const marker of markersRef.current) marker.remove();
       markersRef.current = [];
+      userMarkerRef.current?.remove();
+      userMarkerRef.current = null;
+      haloRef.current = null;
       map.remove();
       mapRef.current = null;
     };
   }, []);
+
+  const resizeHalo = useCallback(() => {
+    const map = mapRef.current;
+    const halo = haloRef.current;
+    const position = positionRef.current;
+    if (!map || !halo) return;
+
+    const meters = position && Number.isFinite(position.accuracy) ? position.accuracy : 0;
+    const latitude = position?.lat ?? 0;
+    const diameter = metersToPixels(meters, latitude, map.getZoom()) * 2;
+    const size = Math.min(Math.max(diameter, 0), 4000);
+    halo.style.width = `${size}px`;
+    halo.style.height = `${size}px`;
+  }, []);
+
+  // The blue dot marker is created once and then only moved, so it never
+  // flickers between GPS fixes.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!livePosition) {
+      userMarkerRef.current?.remove();
+      userMarkerRef.current = null;
+      haloRef.current = null;
+      return;
+    }
+
+    if (!userMarkerRef.current) {
+      const element = document.createElement('div');
+      element.className = 'pointer-events-none relative flex items-center justify-center';
+
+      const halo = document.createElement('div');
+      halo.className =
+        'absolute rounded-full bg-sky-400/20 ring-1 ring-sky-300/40 transition-[width,height] duration-300';
+      halo.style.transform = 'translate(-50%, -50%)';
+      halo.style.left = '50%';
+      halo.style.top = '50%';
+      haloRef.current = halo;
+
+      const dot = document.createElement('div');
+      dot.className =
+        'relative h-4 w-4 rounded-full border-2 border-white bg-sky-500 shadow-[0_0_12px_rgba(56,189,248,0.9)]';
+
+      element.appendChild(halo);
+      element.appendChild(dot);
+
+      userMarkerRef.current = new maplibregl.Marker({ element, anchor: 'center' })
+        .setLngLat([livePosition.lng, livePosition.lat])
+        .addTo(map);
+    } else {
+      userMarkerRef.current.setLngLat([livePosition.lng, livePosition.lat]);
+    }
+
+    resizeHalo();
+  }, [livePosition, resizeHalo]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.on('zoom', resizeHalo);
+    return () => {
+      map.off('zoom', resizeHalo);
+    };
+  }, [resizeHalo]);
+
+  // Smart auto-follow: only recentres while following is on, so a manual drag
+  // is never overridden.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !livePosition || !autoFollow) return;
+    map.easeTo({
+      center: [livePosition.lng, livePosition.lat],
+      zoom: Math.max(map.getZoom(), FOLLOW_ZOOM),
+      duration: 800,
+    });
+  }, [livePosition, autoFollow]);
 
   useEffect(() => {
     if (active) mapRef.current?.resize();
@@ -165,6 +332,10 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   useEffect(() => {
     if (mapRef.current) applyRoute(mapRef.current, route);
   }, [route]);
+
+  useEffect(() => {
+    if (mapRef.current) applyTrack(mapRef.current, liveTrack);
+  }, [liveTrack]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -217,6 +388,19 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   }, []);
 
   const locate = useCallback(() => {
+    setAutoFollow(true);
+
+    // A live fix is already on the map; recentre on it without a fresh request.
+    if (livePosition) {
+      mapRef.current?.easeTo({
+        center: [livePosition.lng, livePosition.lat],
+        zoom: Math.max(mapRef.current.getZoom(), FOLLOW_ZOOM),
+        duration: 800,
+      });
+      setNotice(null);
+      return;
+    }
+
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setNotice('Perangkat ini tidak mendukung layanan lokasi.');
       return;
@@ -239,7 +423,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
-  }, [flyTo]);
+  }, [flyTo, livePosition]);
 
   useImperativeHandle(
     ref,
@@ -253,6 +437,8 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     return () => clearTimeout(timer);
   }, [notice]);
 
+  const quality = gpsQuality(gpsAccuracy);
+
   return (
     <div className="absolute inset-0">
       <div ref={containerRef} className="h-full w-full" />
@@ -264,6 +450,21 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
         {!HAS_KEY && (
           <p className="rounded-full bg-amber-500/90 px-4 py-1.5 text-center text-xs font-medium text-slate-900 shadow-lg">
             NEXT_PUBLIC_MAPTILER_KEY belum diatur — peta dasar tidak dapat dimuat.
+          </p>
+        )}
+        {showGpsStatus && (
+          <p
+            className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold shadow-lg ${
+              GPS_BADGE_STYLES[quality]
+            }`}
+            role="status"
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                quality === 'poor' ? 'animate-pulse bg-slate-400' : 'bg-white'
+              }`}
+            />
+            {gpsBadgeText(gpsAccuracy)}
           </p>
         )}
         {notice && (
@@ -300,6 +501,19 @@ function applyRoute(map: maplibregl.Map, route: LngLatEle[] | null) {
     geometry: {
       type: 'LineString',
       coordinates: route && route.length > 1 ? route : [],
+    },
+  });
+}
+
+function applyTrack(map: maplibregl.Map, track: LngLatEle[] | null) {
+  const source = map.getSource(TRACK_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  if (!source) return;
+  source.setData({
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'LineString',
+      coordinates: track && track.length > 1 ? track : [],
     },
   });
 }
