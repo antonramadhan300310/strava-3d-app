@@ -82,9 +82,21 @@ type ValhallaHeightResponse = {
  * Valhalla's height endpoint returns `[distanceAlongShape, height]` pairs for
  * the sampled points only, so intermediate coordinates are filled by linear
  * interpolation between the nearest surrounding samples.
+ *
+ * `fallbackAltitudes` (one per point) is used when the request fails, so a
+ * recorded track keeps its GPS altitudes while offline instead of flattening
+ * to sea level.
  */
-async function attachElevations(points: LngLat[]): Promise<LngLatEle[]> {
-  if (points.length === 0) return [];
+async function attachElevations(
+  points: LngLat[],
+  fallbackAltitudes?: (number | null)[],
+): Promise<ElevationResult> {
+  if (points.length === 0) return { coordinates: [], usedFallback: false };
+
+  const fallbackAt = (index: number): number => {
+    const value = fallbackAltitudes?.[index];
+    return value !== null && value !== undefined && Number.isFinite(value) ? value : 0;
+  };
 
   const step = Math.max(1, Math.ceil(points.length / MAX_HEIGHT_SAMPLES));
   const sampleIndices: number[] = [];
@@ -100,7 +112,14 @@ async function attachElevations(points: LngLat[]): Promise<LngLatEle[]> {
     };
     const data = await postJson<ValhallaHeightResponse>('/height', payload);
     const heights = data.range_height;
-    if (!heights || heights.length === 0) return points.map((p) => [p[0], p[1], 0]);
+    if (!heights || heights.length === 0) {
+      return {
+        coordinates: points.map(
+          (point, index) => [point[0], point[1], fallbackAt(index)] as LngLatEle,
+        ),
+        usedFallback: true,
+      };
+    }
 
     const elevationAt = (pointIndex: number): number => {
       const exact = sampleIndices.indexOf(pointIndex);
@@ -116,9 +135,19 @@ async function attachElevations(points: LngLat[]): Promise<LngLatEle[]> {
       return from + (to - from) * ratio;
     };
 
-    return points.map((point, index) => [point[0], point[1], elevationAt(index)] as LngLatEle);
+    return {
+      coordinates: points.map(
+        (point, index) => [point[0], point[1], elevationAt(index)] as LngLatEle,
+      ),
+      usedFallback: false,
+    };
   } catch {
-    return points.map((point) => [point[0], point[1], 0] as LngLatEle);
+    return {
+      coordinates: points.map(
+        (point, index) => [point[0], point[1], fallbackAt(index)] as LngLatEle,
+      ),
+      usedFallback: true,
+    };
   }
 }
 
@@ -130,6 +159,23 @@ export function calculateElevationGain(coordinates: LngLatEle[]): number {
     if (delta > 0.5) gain += delta;
   }
   return Math.round(gain);
+}
+
+export type ElevationResult = {
+  coordinates: LngLatEle[];
+  /** True when Valhalla was unreachable and GPS altitudes were kept instead. */
+  usedFallback: boolean;
+};
+
+/**
+ * Replaces the altitudes of a recorded track with ground elevations from
+ * Valhalla's height endpoint, keeping GPS altitudes when the request fails.
+ */
+export async function fetchElevations(
+  points: LngLat[],
+  gpsAltitudes?: (number | null)[],
+): Promise<ElevationResult> {
+  return attachElevations(points, gpsAltitudes);
 }
 
 export async function fetchRoute(
@@ -163,7 +209,7 @@ export async function fetchRoute(
 
   if (points.length < 2) throw new ValhallaError('Rute terlalu pendek untuk ditampilkan.');
 
-  const coordinates = await attachElevations(points);
+  const { coordinates } = await attachElevations(points);
   const summary = data.trip?.summary ?? {};
 
   return {

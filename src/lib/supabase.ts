@@ -54,3 +54,27 @@ export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
 
   if (error) throw new Error(error.message);
 }
+
+export type RecordedActivity = {
+  title: string;
+  activityType: ActivityType;
+  distanceMeters: number;
+  elevationGain: number;
+  durationSeconds: number;
+  coordinates: LngLatEle[];
+};
+
+export async function saveRecordedActivity(activity: RecordedActivity): Promise<void> {
+  const supabase = getClient();
+  const { error } = await supabase.from('activities').insert({
+    title: activity.title,
+    activity_type: activity.activityType,
+    is_planned_route: false,
+    distance_meters: activity.distanceMeters,
+    elevation_gain: activity.elevationGain,
+    duration_seconds: activity.durationSeconds,
+    geojson: toLineStringZGeometry(activity.coordinates),
+  });
+
+  if (error) throw new Error(error.message);
+}

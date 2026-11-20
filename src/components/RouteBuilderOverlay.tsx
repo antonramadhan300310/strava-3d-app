@@ -166,7 +166,7 @@ export default function RouteBuilderOverlay({ builder }: Props) {
       </div>
 
       {showSave && (
-        <div className="absolute inset-0 z-20 flex items-end justify-center bg-slate-950/60 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] backdrop-blur-sm sm:items-center">
+        <div className="absolute inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-950/60 px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] backdrop-blur-sm sm:items-center sm:pb-4">
           <div className="w-full max-w-sm rounded-2xl bg-slate-900 p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-100">Simpan Rute</h2>
