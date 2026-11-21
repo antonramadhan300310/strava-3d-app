@@ -6,6 +6,7 @@ import type { StyleSpecification } from 'maplibre-gl';
 import { Layers, LocateFixed, Mountain, Square } from 'lucide-react';
 import type { LngLat, LngLatEle } from '@/lib/polyline';
 import { gpsBadgeText, gpsQuality, type GpsQuality } from '@/lib/metrics';
+import { applySky } from '@/lib/mapSky';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? '';
@@ -121,6 +122,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   const positionRef = useRef(livePosition);
   const [mapStyle, setMapStyle] = useState<MapStyle>('outdoor');
   const [is3D, setIs3D] = useState(true);
+  const is3DRef = useRef(is3D);
   const [locating, setLocating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [autoFollow, setAutoFollow] = useState(followEnabled);
@@ -129,6 +131,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   trackRef.current = liveTrack;
   clickRef.current = onMapClick;
   positionRef.current = livePosition;
+  is3DRef.current = is3D;
 
   useEffect(() => {
     if (!followEnabled) setAutoFollow(false);
@@ -225,6 +228,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     };
 
     map.on('style.load', () => {
+      if (is3DRef.current) applySky(map);
       enableTerrain();
       ensureRouteLayers();
     });
@@ -359,6 +363,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     if (!map) return;
     const next = !is3D;
     map.easeTo({ pitch: next ? PITCH_3D : 0, duration: 600 });
+    if (next) applySky(map);
     setIs3D(next);
   }, [is3D]);
 

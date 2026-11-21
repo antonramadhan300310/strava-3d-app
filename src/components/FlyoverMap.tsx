@@ -4,10 +4,11 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import type { StyleSpecification } from 'maplibre-gl';
 import { CARD_SIZES, POSTER_ROUTE_BAND } from '@/lib/shareCard';
+import { applySky } from '@/lib/mapSky';
 import {
   FLYOVER_PITCH,
   FLYOVER_ZOOM,
-  lerpBearing,
+  bearingAt,
   type FlyoverPath,
   type FlyoverSample,
 } from '@/lib/flyover';
@@ -45,16 +46,29 @@ const BASE_COLOR = '#f97316';
 const REVEAL_COLOR = '#fde047';
 
 /** Keeps the marker in the lower third so the 3D panorama ahead stays visible. */
-const FOLLOW_PADDING = { top: 240, bottom: 60, left: 0, right: 0 };
+const FOLLOW_PADDING = { top: 200, bottom: 40, left: 0, right: 0 };
 const NO_PADDING = { top: 0, bottom: 0, left: 0, right: 0 };
 /** The framed box must keep at least this share of the viewport free. */
 const POSTER_USABLE_SHARE = 0.25;
 const POSTER_PITCH = 45;
+/** Poster framing may zoom closer than the flyover camera so short routes fill the card. */
+const POSTER_MAX_ZOOM = 15.5;
 const CAPTURE_IDLE_TIMEOUT_MS = 1500;
-const INTRO_DURATION_MS = 1200;
+const INTRO_DURATION_MS = 2400;
+const INTRO_FALLBACK_MS = 2500;
 
-/** Camera rotation smoothing; low enough to glide through corners. */
-const BEARING_LERP = 0.14;
+/**
+ * Camera damping. Bearing eases towards the long look-ahead heading and is
+ * rate-limited so a hairpin cannot whip the horizon; the centre trails the
+ * marker like a drone gimbal.
+ */
+const BEARING_SMOOTHING = 1.5;
+const MAX_TURN_DEG_PER_SEC = 18;
+const CENTER_SMOOTHING = 4;
+/** Longest frame delta honoured, so a backgrounded tab does not jump the camera. */
+const MAX_FRAME_SECONDS = 0.25;
+/** A scrubber jump larger than this snaps the camera instead of gliding. */
+const SEEK_PROGRESS_THRESHOLD = 0.02;
 
 type LineGradient = NonNullable<
   Extract<maplibregl.LayerSpecification, { type: 'line' }>['paint']
@@ -86,6 +100,10 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const bearingRef = useRef<number | null>(null);
+  /** Spring-followed camera centre, so the view trails the marker instead of locking to it. */
+  const cameraCenterRef = useRef<[number, number] | null>(null);
+  const lastFrameRef = useRef<number | null>(null);
+  const lastProgressRef = useRef<number | null>(null);
   const paddingRef = useRef<PaddingMode>('none');
   /** Last reveal progress, so a poster capture can repaint and restore it. */
   const revealRef = useRef(0);
@@ -105,7 +123,7 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
       zoom: FLYOVER_ZOOM,
       pitch: FLYOVER_PITCH,
       bearing: 0,
-      // MapLibre clamps pitch to 60 by default, which would flatten the requested 70.
+      // Headroom above MapLibre's default 60° pitch clamp for steeper views.
       maxPitch: 85,
       attributionControl: { compact: true },
       // Without this the WebGL buffer is cleared after each frame and the
@@ -126,6 +144,7 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
 
     // setStyle() (or a late style load) drops custom sources, so they are rebuilt.
     const onStyleLoad = () => {
+      applySky(map);
       enableTerrain(map);
       installLayers(map, pathRef.current);
       setRevealProgress(map, revealRef.current);
@@ -153,6 +172,9 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
 
     const start = path.coordinates[0];
     bearingRef.current = null;
+    cameraCenterRef.current = null;
+    lastFrameRef.current = null;
+    lastProgressRef.current = null;
     markerRef.current?.setLngLat([start[0], start[1]]);
 
     const apply = () => {
@@ -195,15 +217,46 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
         // The padding only matters while the camera is chasing the marker.
         syncPadding(map, paddingRef, progress > 0 ? 'follow' : 'none');
 
-        // Smoothing the heading keeps corners from snapping the camera.
-        const current = bearingRef.current;
-        const next =
-          current === null ? sample.bearing : lerpBearing(current, sample.bearing, BEARING_LERP);
-        bearingRef.current = next;
+        const now = performance.now();
+        const dt =
+          lastFrameRef.current === null
+            ? 0
+            : Math.min((now - lastFrameRef.current) / 1000, MAX_FRAME_SECONDS);
+        lastFrameRef.current = now;
+
+        // Dragging the scrubber teleports the marker; snap rather than glide
+        // the camera across the whole route in a single frame.
+        const seeked =
+          lastProgressRef.current !== null &&
+          Math.abs(progress - lastProgressRef.current) > SEEK_PROGRESS_THRESHOLD;
+        lastProgressRef.current = progress;
+
+        const marker: [number, number] = [sample.lng, sample.lat];
+        let bearing = bearingRef.current;
+        let center = cameraCenterRef.current;
+
+        if (bearing === null || center === null || seeked) {
+          bearing = sample.bearing;
+          center = marker;
+        } else {
+          const delta = shortestAngleDelta(bearing, sample.bearing);
+          const eased = delta * (1 - Math.exp(-BEARING_SMOOTHING * dt));
+          const maxStep = MAX_TURN_DEG_PER_SEC * dt;
+          bearing = (bearing + clamp(eased, -maxStep, maxStep) + 360) % 360;
+
+          const alpha = 1 - Math.exp(-CENTER_SMOOTHING * dt);
+          center = [
+            center[0] + (marker[0] - center[0]) * alpha,
+            center[1] + (marker[1] - center[1]) * alpha,
+          ];
+        }
+
+        bearingRef.current = bearing;
+        cameraCenterRef.current = center;
 
         map.jumpTo({
-          center: [sample.lng, sample.lat],
-          bearing: next,
+          center,
+          bearing,
           pitch: FLYOVER_PITCH,
           zoom: FLYOVER_ZOOM,
         });
@@ -212,29 +265,42 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
         const map = mapRef.current;
         if (!map) return Promise.resolve();
 
-        const start = pathRef.current.coordinates[0];
-        bearingRef.current = null;
-        markerRef.current?.setLngLat([start[0], start[1]]);
+        const path = pathRef.current;
+        const start = path.coordinates[0];
+        const startCenter: [number, number] = [start[0], start[1]];
+        const initialBearing = bearingAt(path, 0);
+
+        markerRef.current?.setLngLat(startCenter);
         revealRef.current = 0;
         setRevealProgress(map, 0);
         syncPadding(map, paddingRef, 'follow');
 
+        bearingRef.current = initialBearing;
+        cameraCenterRef.current = startCenter;
+        lastFrameRef.current = null;
+        lastProgressRef.current = null;
+
+        // Let the swoop finish (or time out) before playback drives the camera,
+        // so tiles and terrain are rendered for the opening frame.
         return new Promise<void>((resolve) => {
           let settled = false;
           const finish = () => {
             if (settled) return;
             settled = true;
             map.off('moveend', finish);
+            window.clearTimeout(timer);
             resolve();
           };
+          const timer = window.setTimeout(finish, INTRO_FALLBACK_MS);
           map.once('moveend', finish);
-          window.setTimeout(finish, INTRO_DURATION_MS + 300);
           map.flyTo({
-            center: [start[0], start[1]],
+            center: startCenter,
             zoom: FLYOVER_ZOOM,
             pitch: FLYOVER_PITCH,
-            bearing: 0,
+            bearing: initialBearing,
+            padding: FOLLOW_PADDING,
             duration: INTRO_DURATION_MS,
+            essential: true,
           });
         });
       },
@@ -284,6 +350,10 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
             padding: camera.padding,
           });
           paddingRef.current = isSamePadding(camera.padding, FOLLOW_PADDING) ? 'follow' : 'none';
+          bearingRef.current = null;
+          cameraCenterRef.current = null;
+          lastFrameRef.current = null;
+          lastProgressRef.current = null;
           capturingRef.current = false;
         }
       },
@@ -334,6 +404,15 @@ function enableTerrain(map: maplibregl.Map) {
 }
 
 type PaddingMode = 'none' | 'follow';
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/** Signed shortest rotation from `from` to `to`, in [-180, 180). */
+function shortestAngleDelta(from: number, to: number): number {
+  return ((to - from + 540) % 360) - 180;
+}
 
 /** Applies the follow/none padding once, so playback does not thrash the camera. */
 function syncPadding(
@@ -406,7 +485,7 @@ function frameRouteInBand(map: maplibregl.Map, coordinates: [number, number][]) 
     pitch: POSTER_PITCH,
     bearing: 0,
     duration: 0,
-    maxZoom: FLYOVER_ZOOM,
+    maxZoom: POSTER_MAX_ZOOM,
   });
 
   if (!framed) return;
@@ -436,7 +515,7 @@ function frameRouteInBand(map: maplibregl.Map, coordinates: [number, number][]) 
     const dy = (minY + maxY) / 2 - (band.top + band.bottom) / 2;
     if (Math.abs(scale - 1) < 0.02 && Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
 
-    const zoom = Math.min(map.getZoom() + Math.log2(scale), FLYOVER_ZOOM);
+    const zoom = Math.min(map.getZoom() + Math.log2(scale), POSTER_MAX_ZOOM);
     const centre = map.project(map.getCenter());
     map.jumpTo({
       center: map.unproject([centre.x + dx, centre.y + dy]),
