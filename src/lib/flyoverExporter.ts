@@ -13,8 +13,10 @@ export type FlyoverExportFps = 30 | 60;
 
 export const FLYOVER_EXPORT_WIDTH = 720;
 export const FLYOVER_EXPORT_HEIGHT = 1280;
-/** Both qualities render the same 14-second clip; only the frame count differs. */
-export const FLYOVER_EXPORT_SECONDS = 14;
+export const FLYOVER_EXPORT_MIN_SECONDS = 10;
+export const FLYOVER_EXPORT_MAX_SECONDS = 60;
+/** Above this length the bitrate drops so the file stays around 35–42 MB. */
+export const FLYOVER_EXPORT_LONG_SECONDS = 30;
 
 /** Hard cap per frame so a slow tile fetch cannot stall the whole export. */
 export const EXPORT_FRAME_TIMEOUT_MS = 350;
@@ -36,24 +38,47 @@ export type FlyoverExportQuality = {
   totalFrames: number;
 };
 
-export const FLYOVER_EXPORT_QUALITIES: Record<FlyoverExportFps, FlyoverExportQuality> = {
-  30: {
-    fps: 30,
-    bitrate: 4_500_000,
-    label: '30fps (Cepat)',
-    hint: 'Render cepat • Cocok untuk WhatsApp',
-    qualityLabel: '720p 30fps',
-    totalFrames: 30 * FLYOVER_EXPORT_SECONDS,
-  },
-  60: {
-    fps: 60,
-    bitrate: 7_500_000,
-    label: '60fps (Mulus)',
-    hint: 'Gerakan ekstra halus • Cocok untuk IG Story',
-    qualityLabel: '720p 60fps',
-    totalFrames: 60 * FLYOVER_EXPORT_SECONDS,
-  },
-};
+/** 2 km or less → 10 s, 20 km or more → 60 s, linear in between. */
+export function calculateFlyoverDuration(distanceMeters: number): number {
+  const distanceKm = distanceMeters / 1000;
+  if (distanceKm <= 2) return FLYOVER_EXPORT_MIN_SECONDS;
+  if (distanceKm >= 20) return FLYOVER_EXPORT_MAX_SECONDS;
+  return Math.round(
+    FLYOVER_EXPORT_MIN_SECONDS + ((distanceKm - 2) / 18) * 50,
+  );
+}
+
+export function flyoverExportBitrate(
+  fps: FlyoverExportFps,
+  durationSeconds: number,
+): number {
+  const long = durationSeconds > FLYOVER_EXPORT_LONG_SECONDS;
+  if (fps === 30) return long ? 3_500_000 : 4_500_000;
+  return long ? 5_500_000 : 7_500_000;
+}
+
+export function buildFlyoverExportQualities(
+  durationSeconds: number,
+): Record<FlyoverExportFps, FlyoverExportQuality> {
+  return {
+    30: {
+      fps: 30,
+      bitrate: flyoverExportBitrate(30, durationSeconds),
+      label: '30fps (Cepat)',
+      hint: 'Render cepat • Cocok untuk WhatsApp',
+      qualityLabel: '720p 30fps',
+      totalFrames: 30 * durationSeconds,
+    },
+    60: {
+      fps: 60,
+      bitrate: flyoverExportBitrate(60, durationSeconds),
+      label: '60fps (Mulus)',
+      hint: 'Gerakan ekstra halus • Cocok untuk IG Story',
+      qualityLabel: '720p 60fps',
+      totalFrames: 60 * durationSeconds,
+    },
+  };
+}
 
 export type FlyoverExportHud = {
   title: string;
@@ -76,6 +101,8 @@ export type FlyoverFrameCapture = {
 
 export type ExportFlyoverVideoOptions = {
   fps: FlyoverExportFps;
+  /** Auto duration from `calculateFlyoverDuration`; drives frames and bitrate. */
+  durationSeconds: number;
   hud: FlyoverExportHud;
   /** Drives the map to `progress` and returns the rendered frame. */
   captureFrame: (progress: number) => Promise<FlyoverFrameCapture | null>;
@@ -162,12 +189,13 @@ function buildEncoderConfig(
  */
 export async function exportFlyoverVideo({
   fps,
+  durationSeconds,
   hud,
   captureFrame,
   signal,
   onProgress,
 }: ExportFlyoverVideoOptions): Promise<Blob> {
-  const quality = FLYOVER_EXPORT_QUALITIES[fps];
+  const quality = buildFlyoverExportQualities(durationSeconds)[fps];
   const codec = await pickSupportedH264Codec(fps, quality.bitrate);
   if (!codec) throw new FlyoverExportUnsupportedError();
 
@@ -228,7 +256,7 @@ export async function exportFlyoverVideo({
         duration: frameDurationMicros,
       });
       encoder.encode(videoFrame, { keyFrame: index % fps === 0 });
-      // Closing right away keeps the GPU/CPU memory flat over 840 frames.
+      // Closing right away keeps GPU/CPU memory flat even on 3 600-frame clips.
       videoFrame.close();
 
       await drainEncoder(encoder, signal);
@@ -245,6 +273,21 @@ export async function exportFlyoverVideo({
   } finally {
     if (encoder.state !== 'closed') encoder.close();
   }
+}
+
+/**
+ * Base64-encodes the muxed MP4 for `@capacitor/filesystem`. Chunked so a
+ * ~40 MB buffer never overflows the call stack via `String.fromCharCode(...)`.
+ */
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 8192;
+  const parts: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    parts.push(String.fromCharCode.apply(null, Array.from(chunk)));
+  }
+  return btoa(parts.join(''));
 }
 
 function throwIfAborted(signal?: AbortSignal) {

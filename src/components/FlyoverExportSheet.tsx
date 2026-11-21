@@ -1,17 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Check, Download, Loader2, Share2, Video, X } from 'lucide-react';
 import type { ActivityRecord } from '@/lib/activity';
 import {
-  FLYOVER_EXPORT_QUALITIES,
+  FLYOVER_EXPORT_LONG_SECONDS,
   FlyoverExportAbortedError,
   FlyoverExportUnsupportedError,
   UNSUPPORTED_MESSAGE,
+  arrayBufferToBase64,
   buildFlyoverExportHud,
+  buildFlyoverExportQualities,
+  calculateFlyoverDuration,
   exportFlyoverVideo,
   pickSupportedH264Codec,
   type FlyoverExportFps,
@@ -51,6 +54,16 @@ export default function FlyoverExportSheet({
   const blobRef = useRef<Blob | null>(null);
   const percentRef = useRef(0);
 
+  const distanceKm = activity.distanceMeters / 1000;
+  const durationSeconds = useMemo(
+    () => calculateFlyoverDuration(activity.distanceMeters),
+    [activity.distanceMeters],
+  );
+  const qualities = useMemo(
+    () => buildFlyoverExportQualities(durationSeconds),
+    [durationSeconds],
+  );
+
   const removeTempFile = useCallback(async () => {
     if (!Capacitor.isNativePlatform()) return;
     try {
@@ -64,13 +77,13 @@ export default function FlyoverExportSheet({
   // instead of a failed render.
   useEffect(() => {
     let cancelled = false;
-    void pickSupportedH264Codec(30, FLYOVER_EXPORT_QUALITIES[30].bitrate).then((codec) => {
+    void pickSupportedH264Codec(30, qualities[30].bitrate).then((codec) => {
       if (!cancelled) setSupported(codec !== null);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [qualities]);
 
   useEffect(() => {
     return () => {
@@ -95,6 +108,7 @@ export default function FlyoverExportSheet({
       try {
         const blob = await exportFlyoverVideo({
           fps: quality,
+          durationSeconds,
           hud: buildFlyoverExportHud(activity),
           captureFrame,
           signal: controller.signal,
@@ -112,7 +126,7 @@ export default function FlyoverExportSheet({
           await removeTempFile();
           await Filesystem.writeFile({
             path: TEMP_FILE,
-            data: await blobToBase64(blob),
+            data: arrayBufferToBase64(await blob.arrayBuffer()),
             directory: Directory.Cache,
             recursive: true,
           });
@@ -135,7 +149,7 @@ export default function FlyoverExportSheet({
         abortRef.current = null;
       }
     },
-    [activity, captureFrame, onClose, removeTempFile],
+    [activity, captureFrame, durationSeconds, onClose, removeTempFile],
   );
 
   const cancel = useCallback(() => {
@@ -231,7 +245,7 @@ export default function FlyoverExportSheet({
     onClose();
   }, [onClose, removeTempFile]);
 
-  const quality = FLYOVER_EXPORT_QUALITIES[fps];
+  const quality = qualities[fps];
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4">
@@ -264,8 +278,20 @@ export default function FlyoverExportSheet({
               </p>
             ) : (
               <div className="flex flex-col gap-2">
+                <div className="rounded-2xl border border-white/10 bg-slate-800/40 p-3">
+                  <p className="text-[11px] font-semibold text-slate-200">
+                    Durasi otomatis: {durationSeconds} detik • rute{' '}
+                    {distanceKm.toFixed(1)} km
+                  </p>
+                  {durationSeconds > FLYOVER_EXPORT_LONG_SECONDS && (
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+                      Video &gt; 30 dtk otomatis dibagi 2 klip di Status WA (utuh di IG
+                      Reels &amp; Chat WA)
+                    </p>
+                  )}
+                </div>
                 {([30, 60] as const).map((value) => {
-                  const option = FLYOVER_EXPORT_QUALITIES[value];
+                  const option = qualities[value];
                   return (
                     <button
                       key={value}
@@ -403,18 +429,6 @@ function describeError(cause: unknown, fallback = 'Gagal membuat video.'): strin
   if (cause instanceof FlyoverExportUnsupportedError) return cause.message;
   if (cause instanceof Error && cause.message) return cause.message;
   return fallback;
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result ?? '');
-      resolve(result.slice(result.indexOf(',') + 1));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('Gagal membaca berkas video.'));
-    reader.readAsDataURL(blob);
-  });
 }
 
 function formatFileSize(bytes: number): string {
