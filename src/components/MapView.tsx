@@ -2,38 +2,22 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
-import type { StyleSpecification } from 'maplibre-gl';
 import { Layers, LocateFixed, Mountain, Square } from 'lucide-react';
 import type { LngLat, LngLatEle } from '@/lib/polyline';
 import { gpsBadgeText, gpsQuality, type GpsQuality } from '@/lib/metrics';
 import { applySky } from '@/lib/mapSky';
+import { MAP_PROVIDER_LABELS, type MapProvider } from '@/lib/mapProvider';
+import {
+  hasMaptilerKey,
+  initialMapStyle,
+  installTerrain,
+  resolveMapStyle,
+  type BaseMapStyle,
+} from '@/lib/mapStyle';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? '';
-const HAS_KEY = MAPTILER_KEY.length > 0;
-
-type MapStyle = 'outdoor' | 'satellite';
-
-const STYLE_URLS: Record<MapStyle, string> = {
-  outdoor: `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`,
-  satellite: `https://api.maptiler.com/maps/hybrid/style.json?key=${MAPTILER_KEY}`,
-};
-
-const TERRAIN_URL = `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${MAPTILER_KEY}`;
-
-const FALLBACK_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {},
-  layers: [
-    {
-      id: 'background',
-      type: 'background',
-      paint: { 'background-color': '#0f172a' },
-    },
-  ],
-};
-
 const TERRAIN_SOURCE_ID = 'terrain-source';
+const HILLSHADE_LAYER_ID = 'map-hillshade';
 const ROUTE_SOURCE_ID = 'route-line';
 const ROUTE_CASING_LAYER_ID = 'route-line-casing';
 const ROUTE_LAYER_ID = 'route-line-layer';
@@ -63,6 +47,10 @@ export type MapViewHandle = {
 };
 
 type Props = {
+  /** Which tile stack to render (chosen in the provider modal). */
+  provider: MapProvider;
+  /** Opens the provider modal again from the floating badge. */
+  onProviderBadgeClick: () => void;
   active: boolean;
   waypoints?: LngLat[];
   route?: LngLatEle[] | null;
@@ -99,6 +87,8 @@ const GPS_BADGE_STYLES: Record<GpsQuality, string> = {
 
 const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   {
+    provider,
+    onProviderBadgeClick,
     active,
     waypoints = [],
     route = null,
@@ -120,18 +110,22 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   const trackRef = useRef<LngLatEle[] | null>(liveTrack);
   const clickRef = useRef(onMapClick);
   const positionRef = useRef(livePosition);
-  const [mapStyle, setMapStyle] = useState<MapStyle>('outdoor');
+  const providerRef = useRef(provider);
+  const [mapStyle, setMapStyle] = useState<BaseMapStyle>('outdoor');
   const [is3D, setIs3D] = useState(true);
   const is3DRef = useRef(is3D);
   const [locating, setLocating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [autoFollow, setAutoFollow] = useState(followEnabled);
+  /** Provider+style currently handed to MapLibre, to avoid reloading on mount. */
+  const appliedStyleRef = useRef(`${provider}:outdoor`);
 
   routeRef.current = route;
   trackRef.current = liveTrack;
   clickRef.current = onMapClick;
   positionRef.current = livePosition;
   is3DRef.current = is3D;
+  providerRef.current = provider;
 
   useEffect(() => {
     if (!followEnabled) setAutoFollow(false);
@@ -143,7 +137,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: HAS_KEY ? STYLE_URLS.outdoor : FALLBACK_STYLE,
+      style: initialMapStyle(providerRef.current),
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
       pitch: PITCH_3D,
@@ -154,22 +148,6 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     mapRef.current = map;
     map.touchZoomRotate.enableRotation();
     map.dragRotate.enable();
-
-    const enableTerrain = () => {
-      if (!HAS_KEY) return;
-      try {
-        if (!map.getSource(TERRAIN_SOURCE_ID)) {
-          map.addSource(TERRAIN_SOURCE_ID, {
-            type: 'raster-dem',
-            url: TERRAIN_URL,
-            tileSize: 256,
-          });
-        }
-        map.setTerrain({ source: TERRAIN_SOURCE_ID, exaggeration: 1.5 });
-      } catch {
-        // Terrain is a progressive enhancement: the map stays usable without it.
-      }
-    };
 
     // setStyle() discards custom sources and layers, so they are all rebuilt here.
     const ensureRouteLayers = () => {
@@ -229,7 +207,10 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
 
     map.on('style.load', () => {
       if (is3DRef.current) applySky(map);
-      enableTerrain();
+      installTerrain(map, providerRef.current, {
+        source: TERRAIN_SOURCE_ID,
+        hillshade: HILLSHADE_LAYER_ID,
+      });
       ensureRouteLayers();
     });
 
@@ -251,6 +232,27 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       mapRef.current = null;
     };
   }, []);
+
+  // Reloads the base style when the provider or Outdoor/Satellite choice
+  // changes. `setStyle` fires `style.load`, which re-installs terrain, sky and
+  // the route layers on top of the new base map.
+  useEffect(() => {
+    const key = `${provider}:${mapStyle}`;
+    if (appliedStyleRef.current === key) return;
+    appliedStyleRef.current = key;
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    let cancelled = false;
+    void resolveMapStyle(provider, mapStyle).then((style) => {
+      if (cancelled || mapRef.current !== map) return;
+      map.setStyle(style, { diff: false });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, mapStyle]);
 
   const resizeHalo = useCallback(() => {
     const map = mapRef.current;
@@ -368,11 +370,8 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   }, [is3D]);
 
   const toggleStyle = useCallback(() => {
-    const next: MapStyle = mapStyle === 'outdoor' ? 'satellite' : 'outdoor';
-    if (HAS_KEY) mapRef.current?.setStyle(STYLE_URLS[next], { diff: false });
-    setMapStyle(next);
-    if (!HAS_KEY) setNotice('Kunci MapTiler belum diatur.');
-  }, [mapStyle]);
+    setMapStyle((current) => (current === 'outdoor' ? 'satellite' : 'outdoor'));
+  }, []);
 
   const flyTo = useCallback((center: LngLat, zoom = 16) => {
     mapRef.current?.flyTo({ center, zoom, duration: 1200 });
@@ -452,7 +451,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
         className="pointer-events-none absolute inset-x-0 top-0 flex flex-col items-center gap-2 px-4 pt-[calc(env(safe-area-inset-top)+1rem)]"
         aria-live="polite"
       >
-        {!HAS_KEY && (
+        {provider === 'maptiler' && !hasMaptilerKey && (
           <p className="rounded-full bg-amber-500/90 px-4 py-1.5 text-center text-xs font-medium text-slate-900 shadow-lg">
             NEXT_PUBLIC_MAPTILER_KEY belum diatur — peta dasar tidak dapat dimuat.
           </p>
@@ -479,7 +478,16 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
         )}
       </div>
 
-      <div className="absolute right-3 top-[calc(env(safe-area-inset-top)+1rem)] flex flex-col gap-3">
+      <div className="absolute right-3 top-[calc(env(safe-area-inset-top)+1rem)] flex flex-col items-end gap-3">
+        <button
+          type="button"
+          onClick={onProviderBadgeClick}
+          aria-label="Ganti mesin peta"
+          title="Ganti mesin peta"
+          className="rounded-full border border-white/15 bg-slate-900/85 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-100 shadow-lg backdrop-blur transition active:scale-95"
+        >
+          {MAP_PROVIDER_LABELS[provider]}
+        </button>
         <FloatingButton label={is3D ? 'Tampilan 2D' : 'Tampilan 3D'} onClick={toggleDimension}>
           {is3D ? <Square size={20} /> : <Mountain size={20} />}
         </FloatingButton>

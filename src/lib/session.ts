@@ -1,4 +1,4 @@
-import type { ActivityType } from './valhalla';
+import { normalizeActivityType, type ActivityType } from './valhalla';
 import type { AcceptedPoint } from './metrics';
 
 const STORAGE_KEY = 'tracker3d:active-session:v1';
@@ -41,12 +41,19 @@ export function loadSession(): SavedSession | null {
     if (parsed.version !== 1 || !Array.isArray(parsed.points) || parsed.points.length === 0) {
       return null;
     }
-    if (parsed.activityType !== 'ride' && parsed.activityType !== 'run' && parsed.activityType !== 'hike') {
+    const storedType = parsed.activityType as string | undefined;
+    if (
+      storedType !== 'ride' &&
+      storedType !== 'cycling' &&
+      storedType !== 'run' &&
+      storedType !== 'walking' &&
+      storedType !== 'hike'
+    ) {
       return null;
     }
     return {
       version: 1,
-      activityType: parsed.activityType,
+      activityType: normalizeActivityType(storedType),
       status: parsed.status === 'recording' ? 'recording' : 'paused',
       activeMs: Number.isFinite(parsed.activeMs) ? Number(parsed.activeMs) : 0,
       startedAt: Number.isFinite(parsed.startedAt) ? Number(parsed.startedAt) : Date.now(),

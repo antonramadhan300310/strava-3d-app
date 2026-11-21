@@ -22,8 +22,9 @@ import { formatDistanceKm, formatDuration } from '@/lib/metrics';
 import type { ActivityType } from '@/lib/valhalla';
 
 const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
-  ride: <Bike size={20} />,
+  cycling: <Bike size={20} />,
   run: <Footprints size={20} />,
+  walking: <Footprints size={20} />,
   hike: <Mountain size={20} />,
 };
 

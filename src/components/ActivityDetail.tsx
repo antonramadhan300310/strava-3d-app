@@ -35,22 +35,32 @@ import {
 } from '@/lib/metrics';
 import { snapRouteToRoad, type ActivityType } from '@/lib/valhalla';
 import { updateActivityTrack } from '@/lib/supabase';
+import type { MapProvider } from '@/lib/mapProvider';
 
 const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
-  ride: <Bike size={18} />,
+  cycling: <Bike size={18} />,
   run: <Footprints size={18} />,
+  walking: <Footprints size={18} />,
   hike: <Mountain size={18} />,
 };
 
 type Props = {
   activity: ActivityRecord;
+  /** Same tile stack the main map uses, so the flyover matches. */
+  provider: MapProvider;
   onClose: () => void;
   onNotice: (message: string) => void;
   /** Replaces the open activity after its track is rewritten in Supabase. */
   onTrackUpdated: (activity: ActivityRecord) => void;
 };
 
-export default function ActivityDetail({ activity, onClose, onNotice, onTrackUpdated }: Props) {
+export default function ActivityDetail({
+  activity,
+  provider,
+  onClose,
+  onNotice,
+  onTrackUpdated,
+}: Props) {
   const mapRef = useRef<FlyoverMapHandle | null>(null);
   const [cleanMode, setCleanMode] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -163,7 +173,7 @@ export default function ActivityDetail({ activity, onClose, onNotice, onTrackUpd
 
   return (
     <section className="absolute inset-0 z-30 bg-slate-950">
-      <FlyoverMap ref={mapRef} path={path} />
+      <FlyoverMap ref={mapRef} path={path} provider={provider} />
 
       {/* In clean mode a tap anywhere on the map brings the controls back. */}
       {cleanMode && (
@@ -386,9 +396,7 @@ export default function ActivityDetail({ activity, onClose, onNotice, onTrackUpd
 }
 
 function formatActivityType(type: ActivityType): string {
-  if (type === 'run') return 'Run';
-  if (type === 'hike') return 'Hike';
-  return 'Ride';
+  return type.charAt(0).toUpperCase() + type.slice(1);
 }
 
 function TelemetryHud({
