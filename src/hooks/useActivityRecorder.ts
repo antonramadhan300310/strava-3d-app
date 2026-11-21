@@ -69,7 +69,7 @@ function formatSavedAt(epochMs: number): string {
 
 export function useActivityRecorder() {
   const [phase, setPhase] = useState<SessionPhase>('idle');
-  const [activityType, setActivityType] = useState<ActivityType>('ride');
+  const [activityType, setActivityType] = useState<ActivityType>('cycling');
   const [points, setPoints] = useState<AcceptedPoint[]>([]);
   const [livePosition, setLivePosition] = useState<LocationSample | null>(null);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
@@ -81,7 +81,7 @@ export function useActivityRecorder() {
   const watchRef = useRef<LocationWatch | null>(null);
   const pointsRef = useRef<AcceptedPoint[]>([]);
   const phaseRef = useRef<SessionPhase>('idle');
-  const activityRef = useRef<ActivityType>('ride');
+  const activityRef = useRef<ActivityType>('cycling');
   const lastFixTimeRef = useRef<number | null>(null);
   const startedAtRef = useRef<number>(0);
   const activeMsRef = useRef(0);

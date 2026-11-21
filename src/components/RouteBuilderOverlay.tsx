@@ -18,8 +18,9 @@ import type { RouteBuilderState } from '@/hooks/useRouteBuilder';
 import { PROFILES, type ActivityType } from '@/lib/valhalla';
 
 const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
-  ride: <Bike size={18} />,
+  cycling: <Bike size={18} />,
   run: <Footprints size={18} />,
+  walking: <Footprints size={18} />,
   hike: <Mountain size={18} />,
 };
 

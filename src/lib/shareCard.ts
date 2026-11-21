@@ -49,7 +49,7 @@ function font(size: number, weight: number | string = 600): string {
 
 export function buildShareCardData(activity: ActivityRecord): ShareCardData {
   const speed = averageSpeedKmh(activity.distanceMeters, activity.durationSeconds);
-  const usesPace = activity.activityType !== 'ride';
+  const usesPace = activity.activityType !== 'cycling';
 
   return {
     title: activity.title,

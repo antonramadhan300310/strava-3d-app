@@ -7,10 +7,12 @@ import RecordOverlay from '@/components/RecordOverlay';
 import RouteBuilderOverlay from '@/components/RouteBuilderOverlay';
 import ActivitiesPanel from '@/components/ActivitiesPanel';
 import ActivityDetail from '@/components/ActivityDetail';
+import MapProviderModal from '@/components/MapProviderModal';
 import { useActivityRecorder } from '@/hooks/useActivityRecorder';
 import { useActivities } from '@/hooks/useActivities';
 import { useRouteBuilder } from '@/hooks/useRouteBuilder';
 import type { ActivityRecord } from '@/lib/activity';
+import { readMapProvider, writeMapProvider, type MapProvider } from '@/lib/mapProvider';
 
 const NOTICE_MS = 3000;
 
@@ -18,6 +20,9 @@ export default function AppShell() {
   const [tab, setTab] = useState<TabKey>('routes');
   const [openActivity, setOpenActivity] = useState<ActivityRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [provider, setProvider] = useState<MapProvider | null>(null);
+  const [providerModalOpen, setProviderModalOpen] = useState(false);
+  const [providerChecked, setProviderChecked] = useState(false);
   const mapRef = useRef<MapViewHandle | null>(null);
   const builder = useRouteBuilder(mapRef);
   const recorder = useActivityRecorder();
@@ -25,6 +30,21 @@ export default function AppShell() {
   const isRoutes = tab === 'routes';
   const isRecord = tab === 'record';
   const isActivities = tab === 'activities';
+
+  // A stored choice means the app goes straight in; otherwise the full-screen
+  // picker is shown before the map is ever created.
+  useEffect(() => {
+    const saved = readMapProvider();
+    setProvider(saved);
+    setProviderModalOpen(saved === null);
+    setProviderChecked(true);
+  }, []);
+
+  const selectProvider = useCallback((next: MapProvider) => {
+    writeMapProvider(next);
+    setProvider(next);
+    setProviderModalOpen(false);
+  }, []);
 
   // Recording keeps the camera locked on the blue dot; pausing releases it.
   const followEnabled = isRecord && recorder.isRecording;
@@ -62,18 +82,22 @@ export default function AppShell() {
 
   return (
     <main className="relative h-dvh w-full overflow-hidden bg-slate-950">
-      <MapView
-        ref={mapRef}
-        active={!isActivities}
-        waypoints={isRoutes ? builder.waypoints : []}
-        route={isRoutes ? builder.coordinates : null}
-        onMapClick={isRoutes ? builder.addWaypoint : undefined}
-        livePosition={liveGps ? recorder.livePosition : null}
-        liveTrack={liveGps ? recorder.track : null}
-        gpsAccuracy={liveGps ? recorder.gpsAccuracy : null}
-        followEnabled={followEnabled}
-        showGpsStatus={liveGps}
-      />
+      {provider && (
+        <MapView
+          ref={mapRef}
+          provider={provider}
+          onProviderBadgeClick={() => setProviderModalOpen(true)}
+          active={!isActivities}
+          waypoints={isRoutes ? builder.waypoints : []}
+          route={isRoutes ? builder.coordinates : null}
+          onMapClick={isRoutes ? builder.addWaypoint : undefined}
+          livePosition={liveGps ? recorder.livePosition : null}
+          liveTrack={liveGps ? recorder.track : null}
+          gpsAccuracy={liveGps ? recorder.gpsAccuracy : null}
+          followEnabled={followEnabled}
+          showGpsStatus={liveGps}
+        />
+      )}
 
       {isRoutes && <RouteBuilderOverlay builder={builder} />}
       {isRecord && <RecordOverlay recorder={recorder} />}
@@ -82,9 +106,10 @@ export default function AppShell() {
         <ActivitiesPanel activities={activities} onOpen={setOpenActivity} onNotice={setNotice} />
       )}
 
-      {openActivity && (
+      {openActivity && provider && (
         <ActivityDetail
           activity={openActivity}
+          provider={provider}
           onClose={closeActivity}
           onNotice={setNotice}
           onTrackUpdated={replaceActivity}
@@ -101,6 +126,14 @@ export default function AppShell() {
       )}
 
       {!openActivity && <BottomNav active={tab} onChange={setTab} />}
+
+      {providerChecked && providerModalOpen && (
+        <MapProviderModal
+          current={provider}
+          onSelect={selectProvider}
+          onClose={provider ? () => setProviderModalOpen(false) : undefined}
+        />
+      )}
     </main>
   );
 }

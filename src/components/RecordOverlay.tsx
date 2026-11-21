@@ -18,20 +18,23 @@ import type { ActivityRecorderState } from '@/hooks/useActivityRecorder';
 import type { ActivityType } from '@/lib/valhalla';
 
 const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
-  ride: <Bike size={18} />,
+  cycling: <Bike size={18} />,
   run: <Footprints size={18} />,
+  walking: <Footprints size={18} />,
   hike: <Mountain size={18} />,
 };
 
 const ACTIVITY_LABELS: { key: ActivityType; label: string }[] = [
-  { key: 'ride', label: 'Ride' },
+  { key: 'cycling', label: 'Cycling' },
   { key: 'run', label: 'Run' },
+  { key: 'walking', label: 'Walking' },
   { key: 'hike', label: 'Hike' },
 ];
 
 const ACTIVITY_NAMES: Record<ActivityType, string> = {
-  ride: 'Bersepeda',
+  cycling: 'Bersepeda',
   run: 'Lari',
+  walking: 'Jalan',
   hike: 'Hiking',
 };
 

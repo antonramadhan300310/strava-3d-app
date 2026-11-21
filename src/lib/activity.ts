@@ -1,5 +1,5 @@
 import type { LngLatEle } from './polyline';
-import type { ActivityType } from './valhalla';
+import { normalizeActivityType, type ActivityType } from './valhalla';
 
 /** Row shape returned by the `activities` table (PostgREST snake_case). */
 export type ActivityRow = {
@@ -26,10 +26,8 @@ export type ActivityRecord = {
   createdAt: string;
 };
 
-const ACTIVITY_TYPES: ActivityType[] = ['ride', 'run', 'hike'];
-
 function toActivityType(value: string | null): ActivityType {
-  return ACTIVITY_TYPES.find((type) => type === value) ?? 'ride';
+  return normalizeActivityType(value);
 }
 
 /**

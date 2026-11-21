@@ -3,7 +3,10 @@ import { decodePolyline, type LngLat, type LngLatEle } from './polyline';
 
 const VALHALLA_BASE = 'https://valhalla1.openstreetmap.de';
 
-export type ActivityType = 'ride' | 'run' | 'hike';
+export type ActivityType = 'cycling' | 'run' | 'walking' | 'hike';
+
+/** Legacy rows stored `'ride'`; both spellings map to the Cycling profile. */
+export type StoredActivityType = ActivityType | 'ride';
 
 export type ProfileDefinition = {
   key: ActivityType;
@@ -13,8 +16,16 @@ export type ProfileDefinition = {
 };
 
 export const PROFILES: ProfileDefinition[] = [
-  { key: 'ride', label: 'Ride', costing: 'bicycle' },
+  { key: 'cycling', label: 'Cycling', costing: 'bicycle' },
   { key: 'run', label: 'Run', costing: 'pedestrian' },
+  {
+    key: 'walking',
+    label: 'Walking',
+    costing: 'pedestrian',
+    costingOptions: {
+      pedestrian: { walking_speed: 4.8, walkway_factor: 0.7 },
+    },
+  },
   {
     key: 'hike',
     label: 'Hike',
@@ -25,8 +36,17 @@ export const PROFILES: ProfileDefinition[] = [
   },
 ];
 
-export function getProfile(key: ActivityType): ProfileDefinition {
-  return PROFILES.find((profile) => profile.key === key) ?? PROFILES[0];
+export function normalizeActivityType(value: string | null | undefined): ActivityType {
+  if (value === 'ride' || value === 'cycling') return 'cycling';
+  if (value === 'run') return 'run';
+  if (value === 'walking') return 'walking';
+  if (value === 'hike') return 'hike';
+  return 'cycling';
+}
+
+export function getProfile(key: StoredActivityType): ProfileDefinition {
+  const normalized = normalizeActivityType(key);
+  return PROFILES.find((profile) => profile.key === normalized) ?? PROFILES[0];
 }
 
 export type RouteResult = {

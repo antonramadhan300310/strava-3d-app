@@ -10,7 +10,12 @@ import type { LngLat, LngLatEle } from '@/lib/polyline';
 import type { MapViewHandle } from '@/components/MapView';
 
 /** Rough speeds for imported GPX files, which carry no Valhalla timing. */
-const FALLBACK_SPEED_KMH: Record<ActivityType, number> = { ride: 16, run: 9, hike: 4 };
+const FALLBACK_SPEED_KMH: Record<ActivityType, number> = {
+  cycling: 16,
+  run: 9,
+  walking: 5,
+  hike: 4,
+};
 
 export type RouteMetrics = {
   distanceMeters: number;
@@ -25,7 +30,7 @@ type ImportedRoute = {
 
 export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
   const [waypoints, setWaypoints] = useState<LngLat[]>([]);
-  const [activityType, setActivityType] = useState<ActivityType>('ride');
+  const [activityType, setActivityType] = useState<ActivityType>('cycling');
   const [routed, setRouted] = useState<LngLatEle[] | null>(null);
   const [routedDuration, setRoutedDuration] = useState(0);
   const [imported, setImported] = useState<ImportedRoute | null>(null);

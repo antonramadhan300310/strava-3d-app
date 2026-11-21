@@ -2,9 +2,15 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
-import type { StyleSpecification } from 'maplibre-gl';
 import { CARD_SIZES, POSTER_ROUTE_BAND } from '@/lib/shareCard';
 import { applySky } from '@/lib/mapSky';
+import type { MapProvider } from '@/lib/mapProvider';
+import {
+  initialMapStyle,
+  installTerrain,
+  resolveMapStyle,
+  type BaseMapStyle,
+} from '@/lib/mapStyle';
 import {
   FLYOVER_PITCH,
   FLYOVER_ZOOM,
@@ -14,23 +20,7 @@ import {
 } from '@/lib/flyover';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? '';
-const HAS_KEY = MAPTILER_KEY.length > 0;
-
-export type FlyoverMapStyle = 'outdoor' | 'satellite';
-
-const STYLE_URLS: Record<FlyoverMapStyle, string> = {
-  outdoor: `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`,
-  satellite: `https://api.maptiler.com/maps/hybrid/style.json?key=${MAPTILER_KEY}`,
-};
-const TERRAIN_URL = `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${MAPTILER_KEY}`;
-const TERRAIN_EXAGGERATION = 1.5;
-
-const FALLBACK_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {},
-  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0b1220' } }],
-};
+export type FlyoverMapStyle = BaseMapStyle;
 
 const TERRAIN_SOURCE_ID = 'flyover-terrain';
 const HILLSHADE_LAYER_ID = 'flyover-hillshade';
@@ -93,11 +83,15 @@ export type FlyoverMapHandle = {
 
 type Props = {
   path: FlyoverPath;
+  provider: MapProvider;
 };
 
-const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ path }, ref) {
+const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ path, provider }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const providerRef = useRef(provider);
+  const baseStyleRef = useRef<FlyoverMapStyle>('outdoor');
+  const appliedStyleRef = useRef(`${provider}:outdoor`);
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const bearingRef = useRef<number | null>(null);
   /** Spring-followed camera centre, so the view trails the marker instead of locking to it. */
@@ -111,6 +105,7 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
   const pathRef = useRef(path);
 
   pathRef.current = path;
+  providerRef.current = provider;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -118,7 +113,7 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
     const start = pathRef.current.coordinates[0];
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: HAS_KEY ? STYLE_URLS.outdoor : FALLBACK_STYLE,
+      style: initialMapStyle(providerRef.current),
       center: [start[0], start[1]],
       zoom: FLYOVER_ZOOM,
       pitch: FLYOVER_PITCH,
@@ -145,7 +140,10 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
     // setStyle() (or a late style load) drops custom sources, so they are rebuilt.
     const onStyleLoad = () => {
       applySky(map);
-      enableTerrain(map);
+      installTerrain(map, providerRef.current, {
+        source: TERRAIN_SOURCE_ID,
+        hillshade: HILLSHADE_LAYER_ID,
+      });
       installLayers(map, pathRef.current);
       setRevealProgress(map, revealRef.current);
     };
@@ -359,14 +357,38 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
       },
       setMapStyle: (style) => {
         const map = mapRef.current;
-        if (!map || !HAS_KEY) return;
+        if (!map) return;
+        baseStyleRef.current = style;
+        appliedStyleRef.current = `${providerRef.current}:${style}`;
         // `diff: false` forces a full reload so the hillshade and route layers
         // are rebuilt from scratch on top of the new base style.
-        map.setStyle(STYLE_URLS[style], { diff: false });
+        void resolveMapStyle(providerRef.current, style).then((resolved) => {
+          if (mapRef.current !== map) return;
+          map.setStyle(resolved, { diff: false });
+        });
       },
     }),
     [],
   );
+
+  // A provider swap (from the map badge) must rebuild the current base style.
+  useEffect(() => {
+    const key = `${provider}:${baseStyleRef.current}`;
+    if (appliedStyleRef.current === key) return;
+    appliedStyleRef.current = key;
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    let cancelled = false;
+    void resolveMapStyle(provider, baseStyleRef.current).then((style) => {
+      if (cancelled || mapRef.current !== map) return;
+      map.setStyle(style, { diff: false });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
 
   // MapLibre's stylesheet forces `position: relative` on this element, so the
   // height has to come from a positioned parent instead of `absolute inset-0`.
@@ -376,32 +398,6 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
     </div>
   );
 });
-
-function enableTerrain(map: maplibregl.Map) {
-  if (!HAS_KEY) return;
-  try {
-    if (!map.getSource(TERRAIN_SOURCE_ID)) {
-      map.addSource(TERRAIN_SOURCE_ID, { type: 'raster-dem', url: TERRAIN_URL, tileSize: 256 });
-    }
-    map.setTerrain({ source: TERRAIN_SOURCE_ID, exaggeration: TERRAIN_EXAGGERATION });
-    // The DEM also feeds a hillshade so ridges stay readable in 3D flyover.
-    if (!map.getLayer(HILLSHADE_LAYER_ID)) {
-      map.addLayer({
-        id: HILLSHADE_LAYER_ID,
-        type: 'hillshade',
-        source: TERRAIN_SOURCE_ID,
-        paint: {
-          'hillshade-exaggeration': 0.45,
-          'hillshade-shadow-color': '#0f172a',
-          'hillshade-highlight-color': '#ffffff',
-          'hillshade-accent-color': '#94a3b8',
-        },
-      });
-    }
-  } catch {
-    // Terrain is an enhancement; the flyover still runs on a flat map.
-  }
-}
 
 type PaddingMode = 'none' | 'follow';
 
