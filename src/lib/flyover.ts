@@ -1,10 +1,14 @@
 import { along, bearing, length as turfLength } from '@turf/turf';
 import type { LngLat, LngLatEle } from './polyline';
 
-export const FLYOVER_PITCH = 70;
-export const FLYOVER_ZOOM = 15.5;
-/** Distance ahead of the marker used to derive the camera heading. */
-export const LOOK_AHEAD_METERS = 80;
+export const FLYOVER_PITCH = 60;
+export const FLYOVER_ZOOM = 14.2;
+/**
+ * Distance ahead of the marker used to derive the camera heading. A long
+ * look-ahead makes the camera follow the broad direction of travel instead of
+ * whipping around every short bend in the road.
+ */
+export const LOOK_AHEAD_METERS = 450;
 
 export type FlyoverPath = {
   /** Route as a turf line, ready for `along`/`bearing`. */
