@@ -1,10 +1,11 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Bike,
   Download,
   Footprints,
+  Info,
   Loader2,
   Mountain,
   Save,
@@ -13,8 +14,11 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { FloatingButton } from '@/components/MapView';
+import { FloatingButton, type MapViewHandle } from '@/components/MapView';
+import RouteSearchBar from '@/components/RouteSearchBar';
+import RouteTerrainSheet from '@/components/RouteTerrainSheet';
 import type { RouteBuilderState } from '@/hooks/useRouteBuilder';
+import type { LngLat } from '@/lib/polyline';
 import { PROFILES, type ActivityType } from '@/lib/valhalla';
 
 const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
@@ -26,16 +30,37 @@ const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
 
 type Props = {
   builder: RouteBuilderState;
+  mapRef: React.RefObject<MapViewHandle | null>;
 };
 
-export default function RouteBuilderOverlay({ builder }: Props) {
+export default function RouteBuilderOverlay({ builder, mapRef }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showSave, setShowSave] = useState(false);
+  const [showTerrain, setShowTerrain] = useState(false);
   const [title, setTitle] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const hasRoute = Boolean(builder.coordinates && builder.coordinates.length > 1);
+
+  // Losing the route (clear/undo) must also close the terrain sheet.
+  useEffect(() => {
+    if (!hasRoute) setShowTerrain(false);
+  }, [hasRoute]);
+
+  const getBiasCenter = useCallback((): LngLat | null => {
+    return mapRef.current?.getCenter() ?? null;
+  }, [mapRef]);
+
+  const handleSearchSelect = useCallback(
+    (coords: LngLat) => {
+      builder.addWaypoint(coords);
+      const map = mapRef.current;
+      if (map) map.flyTo(coords, Math.max(map.getZoom(), 15), 1000);
+    },
+    [builder.addWaypoint, mapRef],
+  );
+
   const status = builder.error
     ? builder.error
     : builder.info
@@ -84,15 +109,22 @@ export default function RouteBuilderOverlay({ builder }: Props) {
         }}
       />
 
-      {builder.metrics && (
-        <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] flex justify-center">
-          <MetricsCard
-            distanceMeters={builder.metrics.distanceMeters}
-            elevationGainMeters={builder.metrics.elevationGainMeters}
-            durationSeconds={builder.metrics.durationSeconds}
-          />
+      <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] flex flex-col items-center gap-2">
+        <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
+          <RouteSearchBar onSelect={handleSearchSelect} getBiasCenter={getBiasCenter} />
         </div>
-      )}
+
+        {builder.metrics && (
+          <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
+            <MetricsCard
+              distanceMeters={builder.metrics.distanceMeters}
+              elevationGainMeters={builder.metrics.elevationGainMeters}
+              durationSeconds={builder.metrics.durationSeconds}
+              onInfo={() => setShowTerrain(true)}
+            />
+          </div>
+        )}
+      </div>
 
       <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 px-3 pb-[calc(env(safe-area-inset-bottom)+5.5rem)]">
         {status && (
@@ -207,6 +239,14 @@ export default function RouteBuilderOverlay({ builder }: Props) {
           </div>
         </div>
       )}
+
+      {showTerrain && builder.coordinates && builder.coordinates.length > 1 && (
+        <RouteTerrainSheet
+          coordinates={builder.coordinates}
+          activityType={builder.activityType}
+          onClose={() => setShowTerrain(false)}
+        />
+      )}
     </>
   );
 }
@@ -215,19 +255,31 @@ function MetricsCard({
   distanceMeters,
   elevationGainMeters,
   durationSeconds,
+  onInfo,
 }: {
   distanceMeters: number;
   elevationGainMeters: number;
   durationSeconds: number;
+  onInfo: () => void;
 }) {
   const hours = Math.floor(durationSeconds / 3600);
   const minutes = Math.round((durationSeconds % 3600) / 60);
 
   return (
-    <div className="flex w-full max-w-md items-center justify-between rounded-2xl border border-white/10 bg-slate-900/90 px-4 py-2.5 text-slate-100 shadow-2xl backdrop-blur">
-      <Metric label="Jarak" value={`${(distanceMeters / 1000).toFixed(2)} km`} />
-      <Metric label="Elevasi" value={`${Math.round(elevationGainMeters)} m`} />
-      <Metric label="Estimasi" value={hours > 0 ? `${hours}j ${minutes}m` : `${minutes} mnt`} />
+    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/90 px-4 py-2.5 text-slate-100 shadow-2xl backdrop-blur">
+      <div className="flex items-center justify-between">
+        <Metric label="Jarak" value={`${(distanceMeters / 1000).toFixed(2)} km`} />
+        <Metric label="Elevasi" value={`${Math.round(elevationGainMeters)} m`} />
+        <Metric label="Estimasi" value={hours > 0 ? `${hours}j ${minutes}m` : `${minutes} mnt`} />
+      </div>
+      <button
+        type="button"
+        onClick={onInfo}
+        className="mt-1.5 flex items-center gap-1 rounded-full border border-white/10 bg-slate-800/80 px-2.5 py-1 text-[10px] font-semibold text-orange-300 transition active:scale-95"
+      >
+        <Info size={12} />
+        Info Medan
+      </button>
     </div>
   );
 }

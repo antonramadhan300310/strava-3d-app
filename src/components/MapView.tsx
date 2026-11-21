@@ -7,6 +7,8 @@ import type { LngLat, LngLatEle } from '@/lib/polyline';
 import { gpsBadgeText, gpsQuality, type GpsQuality } from '@/lib/metrics';
 import { applySky } from '@/lib/mapSky';
 import { MAP_PROVIDER_LABELS, type MapProvider } from '@/lib/mapProvider';
+import { createActivityMarkerElement } from '@/lib/activityMarker';
+import type { ActivityType } from '@/lib/valhalla';
 import {
   hasMaptilerKey,
   initialMapStyle,
@@ -39,11 +41,13 @@ function metersToPixels(meters: number, latitude: number, zoom: number): number 
 }
 
 export type MapViewHandle = {
-  flyTo: (center: LngLat, zoom?: number) => void;
+  flyTo: (center: LngLat, zoom?: number, duration?: number) => void;
   fitCoordinates: (coordinates: (LngLat | LngLatEle)[]) => void;
   toggleDimension: () => void;
   toggleStyle: () => void;
   locate: () => void;
+  getCenter: () => LngLat | null;
+  getZoom: () => number;
 };
 
 type Props = {
@@ -65,6 +69,8 @@ type Props = {
   followEnabled?: boolean;
   /** Shows the GPS signal badge; enabled on the Record tab. */
   showGpsStatus?: boolean;
+  /** Drives the live activity badge icon. */
+  activityType?: ActivityType;
 };
 
 const EMPTY_LINE: GeoJSON.Feature<GeoJSON.LineString> = {
@@ -98,6 +104,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     gpsAccuracy = null,
     followEnabled = false,
     showGpsStatus = false,
+    activityType = 'cycling',
   },
   ref,
 ) {
@@ -105,6 +112,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const userMarkerKeyRef = useRef<string | null>(null);
   const haloRef = useRef<HTMLDivElement | null>(null);
   const routeRef = useRef<LngLatEle[] | null>(route);
   const trackRef = useRef<LngLatEle[] | null>(liveTrack);
@@ -227,6 +235,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       markersRef.current = [];
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
+      userMarkerKeyRef.current = null;
       haloRef.current = null;
       map.remove();
       mapRef.current = null;
@@ -268,8 +277,8 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     halo.style.height = `${size}px`;
   }, []);
 
-  // The blue dot marker is created once and then only moved, so it never
-  // flickers between GPS fixes.
+  // The live marker is created once per mode/activity and then only moved, so
+  // it never flickers between GPS fixes. Switching sport swaps the badge icon.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -277,11 +286,16 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     if (!livePosition) {
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
+      userMarkerKeyRef.current = null;
       haloRef.current = null;
       return;
     }
 
-    if (!userMarkerRef.current) {
+    const key = showGpsStatus ? `badge:${activityType}` : 'dot';
+
+    if (!userMarkerRef.current || userMarkerKeyRef.current !== key) {
+      userMarkerRef.current?.remove();
+
       const element = document.createElement('div');
       element.className = 'pointer-events-none relative flex items-center justify-center';
 
@@ -292,23 +306,32 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       halo.style.left = '50%';
       halo.style.top = '50%';
       haloRef.current = halo;
-
-      const dot = document.createElement('div');
-      dot.className =
-        'relative h-4 w-4 rounded-full border-2 border-white bg-sky-500 shadow-[0_0_12px_rgba(56,189,248,0.9)]';
-
       element.appendChild(halo);
-      element.appendChild(dot);
 
-      userMarkerRef.current = new maplibregl.Marker({ element, anchor: 'center' })
+      if (showGpsStatus) {
+        element.appendChild(createActivityMarkerElement(activityType, { pulse: true }));
+      } else {
+        const dot = document.createElement('div');
+        dot.className =
+          'relative h-4 w-4 rounded-full border-2 border-white bg-sky-500 shadow-[0_0_12px_rgba(56,189,248,0.9)]';
+        element.appendChild(dot);
+      }
+
+      userMarkerRef.current = new maplibregl.Marker({
+        element,
+        anchor: 'center',
+        rotationAlignment: 'viewport',
+        pitchAlignment: 'viewport',
+      })
         .setLngLat([livePosition.lng, livePosition.lat])
         .addTo(map);
+      userMarkerKeyRef.current = key;
     } else {
       userMarkerRef.current.setLngLat([livePosition.lng, livePosition.lat]);
     }
 
     resizeHalo();
-  }, [livePosition, resizeHalo]);
+  }, [livePosition, showGpsStatus, activityType, resizeHalo]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -373,9 +396,18 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     setMapStyle((current) => (current === 'outdoor' ? 'satellite' : 'outdoor'));
   }, []);
 
-  const flyTo = useCallback((center: LngLat, zoom = 16) => {
-    mapRef.current?.flyTo({ center, zoom, duration: 1200 });
+  const flyTo = useCallback((center: LngLat, zoom = 16, duration = 1200) => {
+    mapRef.current?.flyTo({ center, zoom, duration });
   }, []);
+
+  const getCenter = useCallback((): LngLat | null => {
+    const map = mapRef.current;
+    if (!map) return null;
+    const center = map.getCenter();
+    return [center.lng, center.lat];
+  }, []);
+
+  const getZoom = useCallback((): number => mapRef.current?.getZoom() ?? DEFAULT_ZOOM, []);
 
   const fitCoordinates = useCallback((coordinates: (LngLat | LngLatEle)[]) => {
     const map = mapRef.current;
@@ -431,8 +463,8 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
 
   useImperativeHandle(
     ref,
-    () => ({ flyTo, fitCoordinates, toggleDimension, toggleStyle, locate }),
-    [flyTo, fitCoordinates, toggleDimension, toggleStyle, locate],
+    () => ({ flyTo, fitCoordinates, toggleDimension, toggleStyle, locate, getCenter, getZoom }),
+    [flyTo, fitCoordinates, toggleDimension, toggleStyle, locate, getCenter, getZoom],
   );
 
   useEffect(() => {

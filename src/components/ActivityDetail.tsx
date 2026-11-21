@@ -173,7 +173,7 @@ export default function ActivityDetail({
 
   return (
     <section className="absolute inset-0 z-30 bg-slate-950">
-      <FlyoverMap ref={mapRef} path={path} provider={provider} />
+      <FlyoverMap ref={mapRef} path={path} provider={provider} activityType={activity.activityType} />
 
       {/* In clean mode a tap anywhere on the map brings the controls back. */}
       {cleanMode && (

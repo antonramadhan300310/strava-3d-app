@@ -96,10 +96,11 @@ export default function AppShell() {
           gpsAccuracy={liveGps ? recorder.gpsAccuracy : null}
           followEnabled={followEnabled}
           showGpsStatus={liveGps}
+          activityType={recorder.activityType}
         />
       )}
 
-      {isRoutes && <RouteBuilderOverlay builder={builder} />}
+      {isRoutes && <RouteBuilderOverlay builder={builder} mapRef={mapRef} />}
       {isRecord && <RecordOverlay recorder={recorder} />}
 
       {isActivities && !openActivity && (
