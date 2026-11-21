@@ -17,10 +17,12 @@ import {
   Share2,
   Timer,
   TrendingUp,
+  Video,
   Wand2,
 } from 'lucide-react';
 import FlyoverMap, { type FlyoverMapHandle, type FlyoverMapStyle } from '@/components/FlyoverMap';
 import ElevationChart from '@/components/ElevationChart';
+import FlyoverExportSheet from '@/components/FlyoverExportSheet';
 import ShareCardModal from '@/components/ShareCardModal';
 import { useFlyoverPlayback } from '@/hooks/useFlyoverPlayback';
 import type { ActivityRecord } from '@/lib/activity';
@@ -67,6 +69,7 @@ export default function ActivityDetail({
   const [mapStyle, setMapStyle] = useState<FlyoverMapStyle>('outdoor');
   const [snapping, setSnapping] = useState(false);
   const [introPending, setIntroPending] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const path = useMemo(() => buildFlyoverPath(activity.coordinates), [activity.coordinates]);
 
@@ -82,6 +85,24 @@ export default function ActivityDetail({
   const captureFullRouteFrame = useCallback(async () => {
     playbackRef.current.pause();
     return (await mapRef.current?.captureFullRouteFrame()) ?? null;
+  }, []);
+
+  /** Drives the map to one export frame; the exporter owns the timing. */
+  const captureExportFrame = useCallback(
+    (progress: number) =>
+      mapRef.current?.captureProgressFrame(progress) ?? Promise.resolve(null),
+    [],
+  );
+
+  const openExport = useCallback(() => {
+    playbackRef.current.pause();
+    setExportOpen(true);
+  }, []);
+
+  /** The exporter leaves the camera on the last frame, so put the flyover back. */
+  const closeExport = useCallback(() => {
+    setExportOpen(false);
+    playbackRef.current.seek(playbackRef.current.progress);
   }, []);
 
   /**
@@ -209,7 +230,7 @@ export default function ActivityDetail({
 
       {/* Quick actions sit under the telemetry HUD so nothing overlaps it. */}
       <div
-        className={`absolute right-3 top-[calc(env(safe-area-inset-top)+9rem)] z-40 flex flex-col gap-2 transition-opacity duration-300 ${
+        className={`absolute right-3 top-[calc(env(safe-area-inset-top)+9rem)] z-40 flex flex-col items-end gap-2 transition-opacity duration-300 ${
           cleanMode ? 'pointer-events-none opacity-0' : 'opacity-100'
         }`}
       >
@@ -236,6 +257,17 @@ export default function ActivityDetail({
             {snapping ? <Loader2 size={18} className="animate-spin" /> : <Wand2 size={18} />}
           </button>
         )}
+        <button
+          type="button"
+          onClick={openExport}
+          aria-label="Export MP4 (Beta)"
+          title="Export MP4 (Beta)"
+          className="flex h-10 items-center gap-1.5 rounded-full border border-white/15 bg-slate-900/85 px-3 text-[11px] font-bold text-slate-100 shadow-xl backdrop-blur active:scale-95"
+        >
+          <Video size={16} className="text-orange-300" />
+          Export MP4
+          <span className="text-[9px] font-semibold text-orange-300">(Beta)</span>
+        </button>
       </div>
 
       <button
@@ -388,6 +420,15 @@ export default function ActivityDetail({
           activity={activity}
           captureFullRouteFrame={captureFullRouteFrame}
           onClose={() => setShareOpen(false)}
+          onNotice={onNotice}
+        />
+      )}
+
+      {exportOpen && (
+        <FlyoverExportSheet
+          activity={activity}
+          captureFrame={captureExportFrame}
+          onClose={closeExport}
           onNotice={onNotice}
         />
       )}
