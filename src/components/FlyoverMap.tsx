@@ -17,9 +17,14 @@ import {
   FLYOVER_PITCH,
   FLYOVER_ZOOM,
   bearingAt,
+  sampleAt,
   type FlyoverPath,
   type FlyoverSample,
 } from '@/lib/flyover';
+import {
+  EXPORT_FRAME_TIMEOUT_MS,
+  type FlyoverFrameCapture,
+} from '@/lib/flyoverExporter';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 export type FlyoverMapStyle = BaseMapStyle;
@@ -79,6 +84,11 @@ export type FlyoverMapHandle = {
    * start/finish markers, captures it, then restores the camera and reveal.
    */
   captureFullRouteFrame: () => Promise<HTMLCanvasElement | null>;
+  /**
+   * Snaps marker, reveal and camera to `progress`, waits for the map to paint
+   * and returns the frame plus the marker position for the MP4 exporter.
+   */
+  captureProgressFrame: (progress: number) => Promise<FlyoverFrameCapture | null>;
   /** Swaps the base map between Outdoor Terrain and Satellite Hybrid. */
   setMapStyle: (style: FlyoverMapStyle) => void;
 };
@@ -380,6 +390,47 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
           capturingRef.current = false;
         }
       },
+      captureProgressFrame: async (progress) => {
+        const map = mapRef.current;
+        if (!map || capturingRef.current) return null;
+
+        const path = pathRef.current;
+        const clamped = clamp(progress, 0, 1);
+        const sample = sampleAt(path, clamped * path.totalMeters);
+        const marker: [number, number] = [sample.lng, sample.lat];
+
+        markerRef.current?.setLngLat(marker);
+        revealRef.current = clamped;
+        setRevealProgress(map, clamped);
+        syncPadding(map, paddingRef, clamped > 0 ? 'follow' : 'none');
+
+        // The exporter drives progress deterministically, so the camera snaps
+        // instead of easing: a slow frame must not shift the next framing.
+        bearingRef.current = sample.bearing;
+        cameraCenterRef.current = marker;
+        lastFrameRef.current = null;
+        lastProgressRef.current = clamped;
+        map.jumpTo({
+          center: marker,
+          bearing: sample.bearing,
+          pitch: FLYOVER_PITCH,
+          zoom: FLYOVER_ZOOM,
+        });
+
+        map.triggerRepaint();
+        await waitForRender(map, EXPORT_FRAME_TIMEOUT_MS);
+
+        const image = copyCanvas(map, false);
+        if (!image) return null;
+
+        const point = map.project(marker);
+        const { width, height } = map.getCanvas().getBoundingClientRect();
+        return {
+          image,
+          markerX: width > 0 ? clamp(point.x / width, 0, 1) : 0.5,
+          markerY: height > 0 ? clamp(point.y / height, 0, 1) : 0.5,
+        };
+      },
       setMapStyle: (style) => {
         const map = mapRef.current;
         if (!map) return;
@@ -555,7 +606,10 @@ function isSamePadding(
 }
 
 /** Copies the WebGL frame into a detached 2D canvas, or null if unreadable. */
-function copyCanvas(map: maplibregl.Map | null): HTMLCanvasElement | null {
+function copyCanvas(
+  map: maplibregl.Map | null,
+  verifyReadable = true,
+): HTMLCanvasElement | null {
   if (!map) return null;
 
   const source = map.getCanvas();
@@ -569,6 +623,7 @@ function copyCanvas(map: maplibregl.Map | null): HTMLCanvasElement | null {
 
   try {
     context.drawImage(source, 0, 0);
+    if (!verifyReadable) return snapshot;
     // Tiles served without CORS headers taint the buffer; reading it back
     // throws here so the poster can fall back to the drawn route.
     snapshot.toDataURL('image/png');
@@ -576,6 +631,22 @@ function copyCanvas(map: maplibregl.Map | null): HTMLCanvasElement | null {
     return null;
   }
   return snapshot;
+}
+
+/** Resolves on the next `render`, or after `timeoutMs` if tiles never settle. */
+function waitForRender(map: maplibregl.Map, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      map.off('render', finish);
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, timeoutMs);
+    map.once('render', finish);
+  });
 }
 
 /** Resolves on the next `idle`, or after `timeoutMs` if tiles never settle. */
