@@ -4,6 +4,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import { CARD_SIZES, POSTER_ROUTE_BAND } from '@/lib/shareCard';
 import { applySky } from '@/lib/mapSky';
+import { createActivityMarkerElement } from '@/lib/activityMarker';
+import type { ActivityType } from '@/lib/valhalla';
 import type { MapProvider } from '@/lib/mapProvider';
 import {
   initialMapStyle,
@@ -84,12 +86,17 @@ export type FlyoverMapHandle = {
 type Props = {
   path: FlyoverPath;
   provider: MapProvider;
+  activityType: ActivityType;
 };
 
-const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ path, provider }, ref) {
+const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
+  { path, provider, activityType },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const providerRef = useRef(provider);
+  const activityTypeRef = useRef(activityType);
   const baseStyleRef = useRef<FlyoverMapStyle>('outdoor');
   const appliedStyleRef = useRef(`${provider}:outdoor`);
   const markerRef = useRef<maplibregl.Marker | null>(null);
@@ -106,6 +113,7 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
 
   pathRef.current = path;
   providerRef.current = provider;
+  activityTypeRef.current = activityType;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -128,12 +136,12 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
     mapRef.current = map;
     map.touchZoomRotate.enableRotation();
 
-    const element = document.createElement('div');
-    element.className = 'pointer-events-none flex h-6 w-6 items-center justify-center';
-    element.innerHTML =
-      '<span class="absolute h-6 w-6 animate-ping rounded-full bg-orange-400/40"></span>' +
-      '<span class="relative h-4 w-4 rounded-full border-2 border-white bg-orange-500 shadow-[0_0_14px_rgba(249,115,22,0.95)]"></span>';
-    markerRef.current = new maplibregl.Marker({ element, anchor: 'center' })
+    markerRef.current = new maplibregl.Marker({
+      element: createActivityMarkerElement(activityTypeRef.current, { pulse: false }),
+      anchor: 'center',
+      rotationAlignment: 'viewport',
+      pitchAlignment: 'viewport',
+    })
       .setLngLat([start[0], start[1]])
       .addTo(map);
 
@@ -201,6 +209,23 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap({ pat
       map.off('style.load', apply);
     };
   }, [path]);
+
+  // Swapping sport replaces the moving marker with the matching badge icon.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !markerRef.current) return;
+
+    const position = markerRef.current.getLngLat();
+    markerRef.current.remove();
+    markerRef.current = new maplibregl.Marker({
+      element: createActivityMarkerElement(activityType, { pulse: false }),
+      anchor: 'center',
+      rotationAlignment: 'viewport',
+      pitchAlignment: 'viewport',
+    })
+      .setLngLat(position)
+      .addTo(map);
+  }, [activityType]);
 
   useImperativeHandle(
     ref,
