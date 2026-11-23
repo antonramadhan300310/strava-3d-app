@@ -42,14 +42,38 @@ jobs:
           fi
           npx cap sync android
 
-      - name: Build Debug APK
+      - name: Decode Android Keystore
+        id: keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+            {
+              echo "ANDROID_KEYSTORE_PATH=release-keystore.jks"
+              echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'tracker3dkey' }}"
+              echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'tracker3d' }}"
+              echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'tracker3dkey' }}"
+            } >> "$GITHUB_ENV"
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+            echo "Keystore decoded, release APK will be signed."
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set - falling back to an unsigned debug APK."
+          fi
+
+      - name: Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          if [ "${{ steps.keystore.outputs.has_keystore }}" = "true" ]; then
+            ./gradlew assembleRelease
+          else
+            ./gradlew assembleDebug
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tracker-3d-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/**/*.apk

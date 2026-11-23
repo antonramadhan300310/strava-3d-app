@@ -23,3 +23,7 @@ android/.idea/
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# Android signing keys (never commit)
+*.jks
+*.keystore
