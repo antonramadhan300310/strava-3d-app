@@ -13,6 +13,7 @@ import RouteBuilderOverlay from '@/components/RouteBuilderOverlay';
 import ActivitiesPanel from '@/components/ActivitiesPanel';
 import ActivityDetail from '@/components/ActivityDetail';
 import MapProviderModal from '@/components/MapProviderModal';
+import OtaUpdateManager from '@/components/OtaUpdateManager';
 import { useActivityRecorder } from '@/hooks/useActivityRecorder';
 import { useActivities } from '@/hooks/useActivities';
 import { useHeatmap } from '@/hooks/useHeatmap';
@@ -25,6 +26,7 @@ const NOTICE_MS = 3000;
 export default function AppShell() {
   return (
     <AuthProvider>
+      <OtaUpdateManager />
       <AuthGate />
     </AuthProvider>
   );

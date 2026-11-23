@@ -320,13 +320,21 @@ function TelemetryCard({ recorder }: { recorder: ActivityRecorderState }) {
   return (
     <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/90 px-4 py-3 text-slate-100 shadow-2xl backdrop-blur">
       <div className="flex items-center justify-between">
-        <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              paused ? 'bg-amber-400' : 'animate-pulse bg-emerald-400'
-            }`}
-          />
-          {paused ? 'Dijeda' : 'Merekam'}
+        <span className="flex flex-col gap-1">
+          <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                paused ? 'bg-amber-400' : 'animate-pulse bg-emerald-400'
+              }`}
+            />
+            {paused ? 'Dijeda' : 'Merekam'}
+          </span>
+          {!paused && recorder.nativeTrackingActive && (
+            <span className="inline-flex w-fit items-center gap-1 rounded-full bg-[#1E2E16] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#B9F51E]">
+              <span className="h-1 w-1 rounded-full bg-[#B9F51E]" />
+              GPS Latar Belakang Aktif
+            </span>
+          )}
         </span>
         <span className="text-2xl font-bold tabular-nums">{formatted.duration}</span>
       </div>

@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -35,6 +37,8 @@ jobs:
           NEXT_PUBLIC_ORS_API_KEY: ${{ secrets.NEXT_PUBLIC_ORS_API_KEY }}
           NEXT_PUBLIC_OWNER_EMAIL: ${{ secrets.NEXT_PUBLIC_OWNER_EMAIL }}
           NEXT_PUBLIC_ADMIN_WHATSAPP: ${{ secrets.NEXT_PUBLIC_ADMIN_WHATSAPP }}
+          # The OTA client reads the release of the repository that built the APK.
+          NEXT_PUBLIC_GITHUB_REPO: ${{ github.repository }}
         run: npm run build
 
       - name: Setup Capacitor Android
@@ -72,6 +76,39 @@ jobs:
             ./gradlew assembleRelease
           else
             ./gradlew assembleDebug
+          fi
+
+      - name: Package OTA bundle and version manifest
+        run: |
+          cd out && zip -r ../allmova-ota-bundle.zip . && cd ..
+          cat > version.json <<EOF
+          {
+            "otaVersion": "${{ github.run_number }}-${{ github.sha }}",
+            "minNativeVersion": "1.1.0",
+            "bundleUrl": "https://github.com/${{ github.repository }}/releases/download/ota-latest/allmova-ota-bundle.zip",
+            "apkUrl": "https://github.com/${{ github.repository }}/releases/download/ota-latest/allmova-latest.apk",
+            "releaseNotes": "Pembaruan otomatis ALLMOVA (build ${{ github.run_number }})."
+          }
+          EOF
+          if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk allmova-latest.apk
+          else
+            cp "$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)" allmova-latest.apk
+          fi
+          ls -lh allmova-ota-bundle.zip allmova-latest.apk version.json
+
+      - name: Publish OTA release (ota-latest)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view ota-latest > /dev/null 2>&1; then
+            gh release upload ota-latest allmova-ota-bundle.zip version.json allmova-latest.apk --clobber
+          else
+            gh release create ota-latest allmova-ota-bundle.zip version.json allmova-latest.apk \
+              --title "ALLMOVA OTA" \
+              --notes "Paket live update ALLMOVA. Jangan hapus tag ini: aplikasi memeriksa aset version.json di sini." \
+              --latest=false
           fi
 
       - name: Upload APK Artifact

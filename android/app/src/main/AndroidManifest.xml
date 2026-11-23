@@ -45,6 +45,12 @@
             android:enabled="true"
             android:exported="true"
             android:foregroundServiceType="location" />
+
+        <!-- Keeps the GPS watcher alive while the screen is locked. -->
+        <service
+            android:name=".AllmovaTrackingService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
     </application>
 
     <!-- Permissions -->

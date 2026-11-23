@@ -21,6 +21,11 @@ android/app/build/
 android/local.properties
 android/.idea/
 
+# OTA artifacts produced by the release workflow
+/allmova-ota-bundle.zip
+/allmova-latest.apk
+/version.json
+
 # TypeScript incremental build info
 *.tsbuildinfo
 
