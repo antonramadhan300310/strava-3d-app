@@ -218,22 +218,61 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
             </span>
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold text-slate-100">Profil Atlet</h2>
-              <p className="truncate text-[10px] text-slate-400">
-                Profil atlet • estimasi daya &amp; kalibrasi FTP
-              </p>
+              {!isEditing && (
+                <p className="truncate text-[10px] text-slate-400">
+                  Profil atlet • estimasi daya &amp; kalibrasi FTP
+                </p>
+              )}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Tutup profil atlet"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 active:bg-[#1E2E16]"
-          >
-            <X size={18} />
-          </button>
+
+          <div className="flex shrink-0 items-center gap-1.5">
+            {isEditing ? (
+              <>
+                <button
+                  type="button"
+                  onClick={cancelEditing}
+                  disabled={saving}
+                  className="rounded-full border border-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-slate-200 transition active:scale-95 disabled:opacity-60"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSave()}
+                  disabled={saving}
+                  className="flex items-center gap-1 rounded-full bg-[#B9F51E] px-3 py-1.5 text-[11px] font-bold text-[#0D1112] transition hover:bg-[#A5E012] active:scale-95 disabled:opacity-60"
+                >
+                  {saving ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Save size={12} />
+                  )}
+                  {saving ? 'Menyimpan…' : 'Simpan'}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={startEditing}
+                className="flex items-center gap-1 rounded-full border border-[#B9F51E]/50 bg-[#B9F51E]/10 px-3 py-1.5 text-[11px] font-bold text-[#B9F51E] transition active:scale-95"
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Tutup profil atlet"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 active:bg-[#1E2E16]"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 pb-32">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 pb-28">
           {savedNotice && (
             <p
               role="status"
@@ -284,14 +323,6 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                     {savedProfile.displayName}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={startEditing}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-[#B9F51E]/40 bg-[#B9F51E]/10 px-2.5 py-1.5 text-[11px] font-bold text-[#B9F51E] active:scale-95"
-                >
-                  <Pencil size={12} />
-                  Edit Profil
-                </button>
               </div>
             )}
 
@@ -620,30 +651,6 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
             )}
           </section>
         </div>
-
-        {isEditing && (
-          <footer className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/10 bg-[#0D1112]/95 backdrop-blur-md">
-            <div className="mx-auto flex w-full max-w-md gap-2 px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-              <button
-                type="button"
-                onClick={cancelEditing}
-                disabled={saving}
-                className="flex flex-1 items-center justify-center rounded-xl border border-white/15 py-3 text-sm font-semibold text-slate-200 transition active:scale-[0.99] disabled:opacity-60"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSave()}
-                disabled={saving}
-                className="flex flex-[1.6] items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] transition active:scale-[0.99] disabled:opacity-60"
-              >
-                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                {saving ? 'Menyimpan…' : 'Simpan Perubahan'}
-              </button>
-            </div>
-          </footer>
-        )}
       </div>
 
       <ProPaywallSheet open={paywallOpen} onClose={() => setPaywallOpen(false)} />

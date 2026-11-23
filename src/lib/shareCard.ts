@@ -13,10 +13,38 @@ import { drawRouteEndpointBadge } from './routeEndpoints';
 import { normalizeActivityType, type ActivityType } from './valhalla';
 
 /**
- * `card` is the charcoal poster, `route` a transparent route sticker and
+ * `poster` is the framed 3D map poster, `route` a transparent route sticker and
  * `stats` a transparent sticker that only carries the numbers.
  */
-export type ShareCardMode = 'card' | 'route' | 'stats';
+export type ShareCardMode = 'poster' | 'route' | 'stats';
+
+/** Export ratio shared by the preview and the saved image. */
+export type ShareSizeKey = 'feed' | 'story';
+
+export const SHARE_SIZES: Record<ShareSizeKey, { width: number; height: number }> = {
+  feed: { width: 1080, height: 1350 },
+  story: { width: 1080, height: 1920 },
+};
+
+export const SHARE_SIZE_LABELS: Record<ShareSizeKey, string> = {
+  feed: 'Feed 4:5',
+  story: 'Story 9:16',
+};
+
+/** Where the stat block sits inside a sticker. */
+export type StatsPosition = 'bottom' | 'top';
+
+/**
+ * Gallery photo placed behind a sticker. `offsetX`/`offsetY` are fractions of
+ * the canvas size so the same numbers drive the DOM preview and the export.
+ */
+export type SharePhoto = {
+  image: HTMLImageElement | HTMLCanvasElement;
+  /** 1 = cover fit, up to 3 = zoomed in. */
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+};
 
 export type ShareStat = { label: string; value: string };
 
@@ -28,15 +56,8 @@ export type ShareCardData = {
   stats: ShareStat[];
 };
 
-export const CARD_SIZES: Record<ShareCardMode, { width: number; height: number }> = {
-  card: { width: 1080, height: 1350 },
-  route: { width: 1080, height: 1080 },
-  stats: { width: 1080, height: 1080 },
-};
-
 const ACCENT = '#B9F51E';
 const INK = '#0D1112';
-const SURFACE = '#151B1D';
 const SHADOW = 'rgba(13,17,18,0.85)';
 
 /** Watermark lockup height as a share of the canvas height. */
@@ -45,10 +66,7 @@ export const WATERMARK_HEIGHT_RATIO = 0.12;
 /** Card safe margins, shared by every block so the layout stays aligned. */
 const MARGIN = 72;
 
-/**
- * Poster area (in card pixels) the captured 3D frame must keep the route
- * inside. `FlyoverMap` reads this to frame the route for the share preview.
- */
+/** Poster area (in feed pixels) the captured 3D frame keeps the route inside. */
 export const POSTER_ROUTE_BAND = { top: 380, bottom: 800, left: 90, right: 990 };
 
 function font(size: number, weight: number | string = 600): string {
@@ -95,10 +113,18 @@ export type ShareCardInput = {
   mode: ShareCardMode;
   data: ShareCardData;
   coordinates: LngLatEle[];
+  size?: ShareSizeKey;
+  /** Gallery photo drawn behind a sticker. */
+  photo?: SharePhoto | null;
+  /** Readability gradient behind the stats; set whenever a photo is present. */
+  photoBackdrop?: boolean;
+  statsPosition?: StatsPosition;
+  /** Captured 3D map frame for the poster background. */
+  mapImage?: HTMLImageElement | HTMLCanvasElement | null;
 };
 
 export function renderShareCard(input: ShareCardInput): HTMLCanvasElement {
-  const { width, height } = CARD_SIZES[input.mode];
+  const { width, height } = SHARE_SIZES[input.size ?? 'feed'];
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -106,93 +132,374 @@ export function renderShareCard(input: ShareCardInput): HTMLCanvasElement {
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
 
-  // Both stickers must stay fully transparent, so only the card paints a
-  // background.
-  if (input.mode === 'card') {
-    drawCard(ctx, input, width, height);
-  } else {
-    ctx.clearRect(0, 0, width, height);
-    if (input.mode === 'route') drawRouteSticker(ctx, input, width, height);
-    else drawStatsSticker(ctx, input, width, height);
-  }
+  if (input.mode === 'poster') drawPoster(ctx, input, width, height);
+  else drawSticker(ctx, input, width, height);
 
   drawWatermark(ctx, width, height);
 
   return canvas;
 }
 
-function drawCard(
+/* ------------------------------------------------------------------ poster */
+
+function drawPoster(
   ctx: CanvasRenderingContext2D,
-  { data, coordinates }: ShareCardInput,
+  { data, coordinates, mapImage }: ShareCardInput,
   width: number,
   height: number,
 ) {
   ctx.fillStyle = INK;
   ctx.fillRect(0, 0, width, height);
 
-  const glow = ctx.createRadialGradient(width / 2, 520, 40, width / 2, 520, 760);
-  glow.addColorStop(0, 'rgba(185,245,30,0.16)');
-  glow.addColorStop(0.55, 'rgba(30,46,22,0.32)');
-  glow.addColorStop(1, 'rgba(13,17,18,0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, width, height);
+  if (mapImage) {
+    drawCover(ctx, mapImage, width, height);
+  } else {
+    // No WebGL frame (offline or tainted tiles): keep the poster recognisable
+    // with the charcoal backdrop and the flat route.
+    const glow = ctx.createRadialGradient(
+      width / 2,
+      height * 0.45,
+      40,
+      width / 2,
+      height * 0.45,
+      width,
+    );
+    glow.addColorStop(0, 'rgba(185,245,30,0.16)');
+    glow.addColorStop(0.55, 'rgba(30,46,22,0.32)');
+    glow.addColorStop(1, 'rgba(13,17,18,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, width, height);
+    drawRoute(
+      ctx,
+      coordinates,
+      { x: MARGIN, y: height * 0.26, width: width - MARGIN * 2, height: height * 0.4 },
+      { casing: INK, core: ACCENT, halo: 'rgba(185,245,30,0.28)' },
+    );
+  }
 
-  drawBadgeRow(ctx, data, width);
-  drawCardTitle(ctx, data, width);
-
-  drawRoute(
-    ctx,
-    coordinates,
-    { x: MARGIN, y: 420, width: width - MARGIN * 2, height: 400 },
-    { casing: INK, core: ACCENT, halo: 'rgba(185,245,30,0.28)' },
-  );
-
-  drawCardStats(ctx, data.stats, 860);
+  drawVignettes(ctx, width, height);
+  drawPosterHeader(ctx, data, width, height);
+  drawPosterStats(ctx, data, width, height);
+  drawElevationProfile(ctx, coordinates, width, height);
 }
 
-function drawRouteSticker(
+/** Covers the canvas with the frame, cropping the overflow evenly. */
+function drawCover(
   ctx: CanvasRenderingContext2D,
-  { data, coordinates }: ShareCardInput,
+  image: HTMLImageElement | HTMLCanvasElement,
   width: number,
   height: number,
 ) {
-  drawRoute(
-    ctx,
-    coordinates,
-    { x: 100, y: 90, width: width - 200, height: 610 },
-    { casing: SHADOW, core: ACCENT, halo: 'rgba(185,245,30,0.35)' },
-  );
+  const { width: iw, height: ih } = imageSize(image);
+  if (!iw || !ih) return;
+  const scale = Math.max(width / iw, height / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  ctx.drawImage(image, (width - dw) / 2, (height - dh) / 2, dw, dh);
+}
 
-  drawStickerStats(ctx, data.stats, width, height - 200);
+function drawVignettes(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  const top = ctx.createLinearGradient(0, 0, 0, height * 0.42);
+  top.addColorStop(0, 'rgba(13,17,18,0.94)');
+  top.addColorStop(0.55, 'rgba(13,17,18,0.5)');
+  top.addColorStop(1, 'rgba(13,17,18,0)');
+  ctx.fillStyle = top;
+  ctx.fillRect(0, 0, width, height * 0.42);
+
+  const bottom = ctx.createLinearGradient(0, height * 0.42, 0, height);
+  bottom.addColorStop(0, 'rgba(13,17,18,0)');
+  bottom.addColorStop(0.45, 'rgba(13,17,18,0.72)');
+  bottom.addColorStop(1, 'rgba(13,17,18,0.98)');
+  ctx.fillStyle = bottom;
+  ctx.fillRect(0, height * 0.42, width, height * 0.58);
+}
+
+function drawPosterHeader(
+  ctx: CanvasRenderingContext2D,
+  data: ShareCardData,
+  width: number,
+  height: number,
+) {
+  const pillHeight = 56;
+  const pillY = Math.round(height * 0.06);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(13,17,18,0.5)';
+  ctx.shadowBlur = 18;
+
+  ctx.font = font(28, 800);
+  const pillWidth = ctx.measureText(data.badge).width + 50;
+  roundedRect(ctx, MARGIN, pillY, pillWidth, pillHeight, pillHeight / 2);
+  ctx.fillStyle = ACCENT;
+  ctx.fill();
+
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = INK;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(data.badge, MARGIN + pillWidth / 2, pillY + pillHeight / 2 + 1);
+
+  ctx.font = font(28, 600);
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  ctx.textAlign = 'right';
+  ctx.fillText(data.date, width - MARGIN, pillY + pillHeight / 2 + 1);
+
+  ctx.font = font(62, 800);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.shadowColor = 'rgba(13,17,18,0.7)';
+  ctx.shadowBlur = 24;
+  const lines = wrapText(ctx, data.title, width - MARGIN * 2, 2);
+  lines.forEach((line, index) => {
+    ctx.fillText(line, MARGIN, pillY + 128 + index * 74);
+  });
+  ctx.restore();
+}
+
+/** Two-column stat grid above the elevation chart. */
+function drawPosterStats(
+  ctx: CanvasRenderingContext2D,
+  data: ShareCardData,
+  width: number,
+  height: number,
+) {
+  const columnWidth = (width - MARGIN * 2) / 2;
+  const chartTop = elevationChartBottom(height) - ELEVATION_CHART_HEIGHT;
+  const rowTwo = chartTop - 110;
+  const rowOne = rowTwo - 118;
+
+  ctx.save();
+  ctx.textAlign = 'left';
+  data.stats.forEach((stat, index) => {
+    const x = MARGIN + columnWidth * (index % 2);
+    const y = index < 2 ? rowOne : rowTwo;
+
+    ctx.font = font(24, 700);
+    ctx.fillStyle = ACCENT;
+    ctx.fillText(stat.label.toUpperCase(), x, y);
+
+    ctx.font = font(fitFontSize(ctx, stat.value, columnWidth - 40, 52, 800, 28), 800);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.shadowColor = 'rgba(13,17,18,0.65)';
+    ctx.shadowBlur = 16;
+    ctx.fillText(stat.value, x, y + 52);
+    ctx.shadowBlur = 0;
+  });
+  ctx.restore();
+}
+
+const ELEVATION_CHART_HEIGHT = 108;
+
+/** Stats sit above the elevation chart and the watermark, never on top. */
+function stickerStatsBaseline(height: number): number {
+  return (
+    height -
+    height * WATERMARK_HEIGHT_RATIO -
+    Math.round(height * 0.028) -
+    Math.round(height * 0.06)
+  );
+}
+
+function elevationChartBottom(height: number): number {
+  const watermarkTop = height - height * WATERMARK_HEIGHT_RATIO - Math.round(height * 0.028);
+  return watermarkTop - 26;
+}
+
+/** Lime area chart with the min/max labels pinned to the chart ends. */
+function drawElevationProfile(
+  ctx: CanvasRenderingContext2D,
+  coordinates: LngLatEle[],
+  width: number,
+  height: number,
+) {
+  const profile = elevationProfile(coordinates);
+  if (!profile) return;
+
+  const chartHeight = ELEVATION_CHART_HEIGHT;
+  const bottom = elevationChartBottom(height);
+  const top = bottom - chartHeight;
+  const left = MARGIN;
+  const chartWidth = width - MARGIN * 2;
+
+  const { values, min, max } = profile;
+  const span = Math.max(max - min, 1);
+  const stepX = chartWidth / Math.max(values.length - 1, 1);
+  const yFor = (value: number) => top + chartHeight - ((value - min) / span) * chartHeight;
+
+  ctx.save();
+  ctx.beginPath();
+  values.forEach((value, index) => {
+    const x = left + index * stepX;
+    if (index === 0) ctx.moveTo(x, yFor(value));
+    else ctx.lineTo(x, yFor(value));
+  });
+
+  ctx.strokeStyle = ACCENT;
+  ctx.lineWidth = 4;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(13,17,18,0.6)';
+  ctx.shadowBlur = 12;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.lineTo(left + chartWidth, top + chartHeight);
+  ctx.lineTo(left, top + chartHeight);
+  ctx.closePath();
+  const fill = ctx.createLinearGradient(0, top, 0, top + chartHeight);
+  fill.addColorStop(0, 'rgba(185,245,30,0.38)');
+  fill.addColorStop(1, 'rgba(185,245,30,0.02)');
+  ctx.fillStyle = fill;
+  ctx.fill();
+
+  ctx.font = font(22, 700);
+  ctx.fillStyle = ACCENT;
+  ctx.textAlign = 'left';
+  ctx.fillText(`MIN ${Math.round(min)} m`, left, top - 14);
+  ctx.textAlign = 'right';
+  ctx.fillText(`MAKS ${Math.round(max)} m`, left + chartWidth, top - 14);
+  ctx.restore();
+}
+
+/** Downsamples the track to a readable profile, or null without elevation. */
+function elevationProfile(
+  coordinates: LngLatEle[],
+): { values: number[]; min: number; max: number } | null {
+  if (coordinates.length < 4) return null;
+
+  const elevations = coordinates
+    .map((coordinate) => Number(coordinate[2]))
+    .filter((value) => Number.isFinite(value) && value > -500);
+  if (elevations.length < 4) return null;
+
+  const min = Math.min(...elevations);
+  const max = Math.max(...elevations);
+  if (max - min < 2) return null;
+
+  const samples = 72;
+  const values: number[] = [];
+  for (let index = 0; index < samples; index += 1) {
+    const at = Math.round((index / (samples - 1)) * (elevations.length - 1));
+    values.push(elevations[at]);
+  }
+  return { values, min, max };
+}
+
+/* ----------------------------------------------------------------- sticker */
+
+function drawSticker(
+  ctx: CanvasRenderingContext2D,
+  input: ShareCardInput,
+  width: number,
+  height: number,
+) {
+  const { data, coordinates, mode, photo } = input;
+  const position = input.statsPosition ?? 'bottom';
+
+  // Both stickers must stay fully transparent unless a gallery photo fills them.
+  ctx.clearRect(0, 0, width, height);
+  if (photo) drawPhotoLayer(ctx, photo, width, height);
+  if (input.photoBackdrop) drawStatsBackdrop(ctx, width, height, position);
+
+  if (mode === 'route') {
+    const box =
+      position === 'top'
+        ? { x: MARGIN, y: height * 0.3, width: width - MARGIN * 2, height: height * 0.5 }
+        : { x: 100, y: height * 0.07, width: width - 200, height: height * 0.52 };
+    drawRoute(ctx, coordinates, box, {
+      casing: SHADOW,
+      core: ACCENT,
+      halo: 'rgba(185,245,30,0.35)',
+    });
+    drawStickerStats(
+      ctx,
+      data.stats,
+      width,
+      position === 'top' ? height * 0.22 : stickerStatsBaseline(height),
+    );
+    return;
+  }
+
+  drawStatsSticker(ctx, data, width, height, position);
+}
+
+/** Photo at cover fit, then zoom and pan around its centre. */
+function drawPhotoLayer(
+  ctx: CanvasRenderingContext2D,
+  photo: SharePhoto,
+  width: number,
+  height: number,
+) {
+  const { width: iw, height: ih } = imageSize(photo.image);
+  if (!iw || !ih) return;
+
+  const zoom = Math.min(Math.max(photo.zoom, 1), 3);
+  const scale = Math.max(width / iw, height / ih) * zoom;
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const dx = (width - dw) / 2 + photo.offsetX * width;
+  const dy = (height - dh) / 2 + photo.offsetY * height;
+  ctx.drawImage(photo.image, dx, dy, dw, dh);
+}
+
+/** Soft charcoal gradient behind the numbers so white type survives a photo. */
+function drawStatsBackdrop(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  position: StatsPosition,
+) {
+  const gradient =
+    position === 'top'
+      ? ctx.createLinearGradient(0, 0, 0, height * 0.52)
+      : ctx.createLinearGradient(0, height * 0.52, 0, height);
+
+  gradient.addColorStop(position === 'top' ? 0 : 1, 'rgba(13,17,18,0.86)');
+  gradient.addColorStop(0.55, 'rgba(13,17,18,0.45)');
+  gradient.addColorStop(position === 'top' ? 1 : 0, 'rgba(13,17,18,0)');
+
+  ctx.fillStyle = gradient;
+  if (position === 'top') ctx.fillRect(0, 0, width, height * 0.52);
+  else ctx.fillRect(0, height * 0.52, width, height * 0.48);
 }
 
 function drawStatsSticker(
   ctx: CanvasRenderingContext2D,
-  { data }: ShareCardInput,
+  data: ShareCardData,
   width: number,
   height: number,
+  position: StatsPosition,
 ) {
+  // With the stats on top the title block owns the lower third, but it must stop
+  // above the watermark lockup instead of running underneath it.
+  const titleBottom =
+    position === 'top'
+      ? height - height * WATERMARK_HEIGHT_RATIO - Math.round(height * 0.075)
+      : height * 0.36;
+  const statsBaseline = position === 'top' ? height * 0.18 : stickerStatsBaseline(height);
+
   ctx.save();
   ctx.textAlign = 'center';
   ctx.shadowColor = SHADOW;
   ctx.shadowBlur = 26;
   ctx.shadowOffsetY = 4;
 
-  drawSportIcon(ctx, data.activityType, width / 2, 190, 74);
-
   ctx.font = font(64, 800);
-  ctx.fillStyle = '#FFFFFF';
   const titleLines = wrapText(ctx, data.title, width - 240, 2);
+  const titleFirstBaseline = titleBottom - 58 - (titleLines.length - 1) * 76;
   titleLines.forEach((line, index) => {
-    ctx.fillText(line, width / 2, 330 + index * 76);
+    ctx.fillText(line, width / 2, titleFirstBaseline + index * 76);
   });
+
+  drawSportIcon(ctx, data.activityType, width / 2, titleFirstBaseline - 116, 74);
 
   ctx.font = font(28, 600);
   ctx.fillStyle = 'rgba(255,255,255,0.82)';
-  ctx.fillText(data.date, width / 2, 330 + titleLines.length * 76 + 16);
+  ctx.fillText(data.date, width / 2, titleBottom);
   ctx.restore();
 
-  drawStickerStats(ctx, data.stats, width, height - 330);
+  drawStickerStats(ctx, data.stats, width, statsBaseline);
 }
 
 /** Neon route with a dark casing so it reads on any photo underneath. */
@@ -237,76 +544,6 @@ function drawRoute(
   const end = points[points.length - 1];
   drawRouteEndpointBadge(ctx, 'start', start.x, start.y, 17);
   drawRouteEndpointBadge(ctx, 'finish', end.x, end.y, 19);
-}
-
-function drawBadgeRow(ctx: CanvasRenderingContext2D, data: ShareCardData, width: number) {
-  const pillHeight = 56;
-  const pillY = 96;
-
-  ctx.font = font(28, 800);
-  const pillWidth = ctx.measureText(data.badge).width + 50;
-  roundedRect(ctx, MARGIN, pillY, pillWidth, pillHeight, pillHeight / 2);
-  ctx.fillStyle = ACCENT;
-  ctx.fill();
-
-  ctx.fillStyle = INK;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(data.badge, MARGIN + pillWidth / 2, pillY + pillHeight / 2 + 1);
-
-  ctx.font = font(28, 600);
-  ctx.fillStyle = 'rgba(255,255,255,0.78)';
-  ctx.textAlign = 'right';
-  ctx.fillText(data.date, width - MARGIN, pillY + pillHeight / 2 + 1);
-
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-}
-
-function drawCardTitle(ctx: CanvasRenderingContext2D, data: ShareCardData, width: number) {
-  ctx.font = font(62, 800);
-  ctx.fillStyle = '#FFFFFF';
-  ctx.shadowColor = 'rgba(0,0,0,0.45)';
-  ctx.shadowBlur = 24;
-  ctx.shadowOffsetY = 4;
-
-  wrapText(ctx, data.title, width - MARGIN * 2, 2).forEach((line, index) => {
-    ctx.fillText(line, MARGIN, 250 + index * 74);
-  });
-
-  ctx.shadowColor = 'transparent';
-  ctx.shadowBlur = 0;
-  ctx.shadowOffsetY = 0;
-}
-
-function drawCardStats(ctx: CanvasRenderingContext2D, stats: ShareStat[], top: number) {
-  const gap = 24;
-  const boxWidth = (CARD_SIZES.card.width - MARGIN * 2 - gap) / 2;
-  const boxHeight = 132;
-
-  stats.forEach((stat, index) => {
-    const column = index % 2;
-    const row = Math.floor(index / 2);
-    const x = MARGIN + column * (boxWidth + gap);
-    const y = top + row * (boxHeight + gap);
-
-    roundedRect(ctx, x, y, boxWidth, boxHeight, 26);
-    ctx.fillStyle = SURFACE;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(185,245,30,0.16)';
-    ctx.stroke();
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.font = font(22, 700);
-    ctx.fillStyle = 'rgba(148,163,184,0.95)';
-    ctx.fillText(stat.label.toUpperCase(), x + 30, y + 48);
-
-    ctx.font = font(42, 800);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(truncate(ctx, stat.value, boxWidth - 60), x + 30, y + 104);
-  });
 }
 
 /** Four stat columns with a heavy shadow so white type survives any photo. */
@@ -418,6 +655,18 @@ function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: num
   ctx.restore();
 }
 
+/* ------------------------------------------------------------------- utils */
+
+function imageSize(image: HTMLImageElement | HTMLCanvasElement): {
+  width: number;
+  height: number;
+} {
+  if (image instanceof HTMLCanvasElement) {
+    return { width: image.width, height: image.height };
+  }
+  return { width: image.naturalWidth, height: image.naturalHeight };
+}
+
 /** Largest font size at or below `size` that keeps `text` inside `maxWidth`. */
 function fitFontSize(
   ctx: CanvasRenderingContext2D,
@@ -515,18 +764,6 @@ function roundedRect(
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
-}
-
-function truncate(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  let low = 0;
-  let high = text.length;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (ctx.measureText(`${text.slice(0, mid)}…`).width <= maxWidth) low = mid;
-    else high = mid - 1;
-  }
-  return `${text.slice(0, low)}…`;
 }
 
 function wrapText(

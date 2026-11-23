@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
-import { CARD_SIZES, POSTER_ROUTE_BAND } from '@/lib/shareCard';
+import { POSTER_ROUTE_BAND, SHARE_SIZES } from '@/lib/shareCard';
 import { applySky } from '@/lib/mapSky';
 import { createActivityMarkerElement } from '@/lib/activityMarker';
 import type { ActivityType } from '@/lib/valhalla';
@@ -530,7 +530,7 @@ function bandRect(map: maplibregl.Map): { band: Rect; width: number; height: num
   const { width, height } = map.getCanvas().getBoundingClientRect();
   if (width === 0 || height === 0) return null;
 
-  const card = CARD_SIZES.card;
+  const card = SHARE_SIZES.feed;
   const scale = Math.max(card.width / width, card.height / height);
   const offsetX = (card.width - width * scale) / 2;
   const offsetY = (card.height - height * scale) / 2;
