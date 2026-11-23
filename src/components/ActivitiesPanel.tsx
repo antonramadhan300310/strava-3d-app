@@ -299,7 +299,9 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
                       ? onOpen(activity)
                       : requirePro('3D Flyover khusus Pro.')
                   }
-                  onExport={() => void exportActivity(activity)}
+                  onExport={() =>
+                    isPro ? void exportActivity(activity) : requirePro('Export GPX khusus Pro.')
+                  }
                   onDelete={() => setPendingDelete(activity)}
                 />
               ))}
