@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import type { ActivityRecord } from '@/lib/activity';
-import { findSuggestedFtpFromHistory } from '@/lib/powerAndEffort';
 import {
   BIKE_PHYSICS,
   BIKE_TYPES,
@@ -26,6 +25,7 @@ import {
   computePowerZoneRanges,
   loadRiderProfile,
   sanitizeRiderProfile,
+  sanitizeZonePercents,
   type BikeType,
   type RiderProfile,
 } from '@/lib/riderProfile';
@@ -41,6 +41,9 @@ type Props = {
 type SyncState = 'cloud' | 'local';
 
 const SAVED_NOTICE_MS = 2500;
+
+/** Safe starting FTP when the athlete has no power meter data yet. */
+const DEFAULT_ESTIMATED_FTP_WATTS = 150;
 
 function hasStoredProfile(value: unknown): boolean {
   return (
@@ -92,6 +95,9 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   const [bikeWeight, setBikeWeight] = useState(String(savedProfile.bikeWeightKg));
   const [bikeType, setBikeType] = useState<BikeType>(savedProfile.bikeType);
   const [ftp, setFtp] = useState(String(savedProfile.ftpWatts));
+  const [zoneInputs, setZoneInputs] = useState<string[]>(() =>
+    savedProfile.powerZonePercents.map(String),
+  );
 
   const resetForm = () => {
     setDisplayName(savedProfile.displayName);
@@ -99,6 +105,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     setBikeWeight(String(savedProfile.bikeWeightKg));
     setBikeType(savedProfile.bikeType);
     setFtp(String(savedProfile.ftpWatts));
+    setZoneInputs(savedProfile.powerZonePercents.map(String));
   };
 
   // Reopening the sheet always starts in read mode with the saved values.
@@ -134,20 +141,14 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   const ftpValue = Number(ftp);
   const effectiveFtp =
     Number.isFinite(ftpValue) && ftpValue > 0 ? ftpValue : DEFAULT_RIDER_PROFILE.ftpWatts;
-  const zoneRanges = useMemo(() => computePowerZoneRanges(effectiveFtp), [effectiveFtp]);
-
-  // FTP itself does not affect peak power, so typing in the FTP field must not
-  // rescan the whole history.
-  const suggestedFtp = useMemo(() => {
-    const profile = sanitizeRiderProfile({
-      displayName,
-      bodyWeightKg: Number(bodyWeight),
-      bikeWeightKg: Number(bikeWeight),
-      bikeType,
-      ftpWatts: DEFAULT_RIDER_PROFILE.ftpWatts,
-    });
-    return findSuggestedFtpFromHistory(activities, profile);
-  }, [activities, displayName, bodyWeight, bikeWeight, bikeType]);
+  const zonePercents = useMemo(
+    () => sanitizeZonePercents(zoneInputs.map(Number)),
+    [zoneInputs],
+  );
+  const zoneRanges = useMemo(
+    () => computePowerZoneRanges(effectiveFtp, zonePercents),
+    [effectiveFtp, zonePercents],
+  );
 
   if (!open) return null;
 
@@ -180,6 +181,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
           bikeWeightKg: Number(bikeWeight),
           bikeType,
           ftpWatts: Number(ftp),
+          powerZonePercents: zonePercents,
         },
       });
       setSyncState(result.synced ? 'cloud' : 'local');
@@ -231,7 +233,17 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 pb-32">
+          {savedNotice && (
+            <p
+              role="status"
+              className="mb-3 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#B9F51E]"
+            >
+              <Check size={13} />
+              {savedNotice}
+            </p>
+          )}
+
           <section className="rounded-xl border border-white/10 bg-[#151B1D]/70 p-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
@@ -396,8 +408,8 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                   className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
                 />
 
-                <p className="mb-1 mt-2 text-[11px] text-slate-400">Jenis sepeda</p>
-                <div className="grid grid-cols-3 gap-1" role="group" aria-label="Jenis sepeda">
+                <p className="mb-1 mt-2 text-[11px] text-slate-400">Tipe Sepeda</p>
+                <div className="grid grid-cols-2 gap-1" role="group" aria-label="Tipe sepeda">
                   {BIKE_TYPES.map((key) => {
                     const selected = bikeType === key;
                     return (
@@ -459,27 +471,75 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                 <label htmlFor="rider-ftp" className="mb-1 mt-2 block text-[11px] text-slate-400">
                   FTP (Watt)
                 </label>
-                <input
-                  id="rider-ftp"
-                  type="number"
-                  inputMode="numeric"
-                  min={40}
-                  max={700}
-                  step={1}
-                  value={ftp}
-                  onChange={(event) => setFtp(event.target.value)}
-                  className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
-                />
-
-                {suggestedFtp !== null && (
+                <div className="flex items-center gap-2">
+                  <input
+                    id="rider-ftp"
+                    type="number"
+                    inputMode="numeric"
+                    min={40}
+                    max={700}
+                    step={1}
+                    value={ftp}
+                    onChange={(event) => setFtp(event.target.value)}
+                    className="min-w-0 flex-1 rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
+                  />
                   <button
                     type="button"
-                    onClick={() => setFtp(String(suggestedFtp))}
-                    className="mt-2 flex w-full items-center justify-center gap-1 rounded-xl border border-sky-400/30 bg-sky-400/10 py-2 text-[11px] font-semibold text-sky-300 active:scale-[0.99]"
+                    onClick={() => setFtp(String(DEFAULT_ESTIMATED_FTP_WATTS))}
+                    className="shrink-0 rounded-xl border border-sky-400/30 bg-sky-400/10 px-2.5 py-2 text-[10px] font-semibold text-sky-300 active:scale-95"
                   >
-                    Gunakan 95% Peak 20m ({suggestedFtp} W)
+                    Estimasi Otomatis
                   </button>
-                )}
+                </div>
+
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Estimasi Otomatis memakai nilai aman {DEFAULT_ESTIMATED_FTP_WATTS} W.
+                </p>
+
+                <p className="mb-1 mt-3 text-[11px] text-slate-400">
+                  Batas Bawah Zona Daya (% FTP)
+                </p>
+                <ul className="flex flex-col gap-1">
+                  {zoneRanges.map((zone, index) => (
+                    <li
+                      key={zone.zone}
+                      className="flex items-center gap-2 rounded-lg bg-[#1E2E16]/60 px-2 py-1.5"
+                    >
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: zone.color }}
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1 text-[11px] font-semibold text-slate-200">
+                        {zone.zone}{' '}
+                        <span className="text-[10px] font-normal text-slate-400">
+                          {zone.name}
+                        </span>
+                      </span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={300}
+                        step={1}
+                        aria-label={`Batas bawah ${zone.zone} dalam persen FTP`}
+                        value={zoneInputs[index] ?? ''}
+                        onChange={(event) =>
+                          setZoneInputs((current) =>
+                            current.map((value, position) =>
+                              position === index ? event.target.value : value,
+                            ),
+                          )
+                        }
+                        className="w-16 shrink-0 rounded-lg border border-[#2A3538] bg-[#0D1112] px-2 py-1 text-right text-[11px] font-semibold tabular-nums text-slate-100 outline-none focus:border-[#B9F51E]"
+                      />
+                      <span className="w-5 shrink-0 text-[10px] text-slate-500">%</span>
+                      <span className="w-24 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-100">
+                        {zone.rangeLabel}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </>
             ) : (
               <div className="mt-2 flex items-baseline justify-between rounded-xl bg-[#1E2E16]/70 px-3 py-2">
@@ -490,26 +550,28 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               </div>
             )}
 
-            <ul className="mt-3 flex flex-col gap-1">
-              {zoneRanges.map((zone) => (
-                <li
-                  key={zone.zone}
-                  className="flex items-center gap-2 rounded-lg bg-[#1E2E16]/60 px-2 py-1.5"
-                >
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: zone.color }}
-                  />
-                  <span className="min-w-0 flex-1 text-[11px] font-semibold text-slate-200">
-                    {zone.zone}{' '}
-                    <span className="text-[10px] font-normal text-slate-400">{zone.name}</span>
-                  </span>
-                  <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-100">
-                    {zone.rangeLabel}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            {!isEditing && (
+              <ul className="mt-3 flex flex-col gap-1">
+                {zoneRanges.map((zone) => (
+                  <li
+                    key={zone.zone}
+                    className="flex items-center gap-2 rounded-lg bg-[#1E2E16]/60 px-2 py-1.5"
+                  >
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: zone.color }}
+                    />
+                    <span className="min-w-0 flex-1 text-[11px] font-semibold text-slate-200">
+                      {zone.zone}{' '}
+                      <span className="text-[10px] font-normal text-slate-400">{zone.name}</span>
+                    </span>
+                    <span className="shrink-0 text-[11px] font-semibold tabular-nums text-slate-100">
+                      {zone.rangeLabel}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="mt-3 rounded-xl border border-rose-500/25 bg-rose-500/5 p-3">
@@ -559,19 +621,9 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
           </section>
         </div>
 
-        <footer className="shrink-0 border-t border-white/10 bg-[#151B1D] px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-          {savedNotice && (
-            <p
-              role="status"
-              className="mb-2 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#B9F51E]"
-            >
-              <Check size={13} />
-              {savedNotice}
-            </p>
-          )}
-
-          {isEditing ? (
-            <div className="flex gap-2">
+        {isEditing && (
+          <footer className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/10 bg-[#0D1112]/95 backdrop-blur-md">
+            <div className="mx-auto flex w-full max-w-md gap-2 px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
               <button
                 type="button"
                 onClick={cancelEditing}
@@ -590,17 +642,8 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                 {saving ? 'Menyimpan…' : 'Simpan Perubahan'}
               </button>
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={startEditing}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] transition active:scale-[0.99]"
-            >
-              <Pencil size={16} />
-              Edit Profil
-            </button>
-          )}
-        </footer>
+          </footer>
+        )}
       </div>
 
       <ProPaywallSheet open={paywallOpen} onClose={() => setPaywallOpen(false)} />

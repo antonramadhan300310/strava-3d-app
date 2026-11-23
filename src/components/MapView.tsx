@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import maplibregl, { type LineLayerSpecification } from 'maplibre-gl';
+import maplibregl from 'maplibre-gl';
 import { Layers, LocateFixed, Mountain, Square } from 'lucide-react';
 import { toLngLatEle, type LngLat, type LngLatEle } from '@/lib/polyline';
 import { gpsBadgeText, gpsQuality, type GpsQuality } from '@/lib/metrics';
@@ -16,7 +16,15 @@ import {
   resolveMapStyle,
   type BaseMapStyle,
 } from '@/lib/mapStyle';
-import { HEATMAP_SCHEMES, type HeatmapScheme } from '@/lib/heatmapCache';
+import {
+  HEATMAP_CASING_LAYER_ID,
+  HEATMAP_CORE_LAYER_ID,
+  HEATMAP_GLOW_LAYER_ID,
+  HEATMAP_LINES_SOURCE_ID,
+  heatmapCasingPaint,
+  heatmapCorePaint,
+  heatmapGlowPaint,
+} from '@/lib/heatmapRenderer';
 import { applyCleanAllmovaMapStyle } from '@/lib/mapStyleSanitizer';
 import { updateRouteEndpointMarkers } from '@/lib/routeEndpoints';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -31,10 +39,6 @@ const TRACK_SOURCE_ID = 'live-track';
 const TRACK_CASING_LAYER_ID = 'live-track-casing';
 const TRACK_LAYER_ID = 'live-track-layer';
 const TRACK_COLOR = '#22d3ee';
-const HEATMAP_LINES_SOURCE_ID = 'personal-heatmap-lines';
-const HEATMAP_HALO_LAYER_ID = 'personal-heatmap-halo';
-const HEATMAP_GLOW_LAYER_ID = 'personal-heatmap-glow';
-const HEATMAP_CORE_LAYER_ID = 'personal-heatmap-core';
 const DEFAULT_CENTER: [number, number] = [107.6191, -6.9175];
 const DEFAULT_ZOOM = 13;
 const PITCH_3D = 60;
@@ -84,7 +88,6 @@ type Props = {
 
 export type HeatmapLayers = {
   visible: boolean;
-  scheme: HeatmapScheme;
   lines: GeoJSON.FeatureCollection<GeoJSON.LineString> | null;
 };
 
@@ -629,13 +632,14 @@ function applyTrack(map: maplibregl.Map, track: LngLatEle[] | null) {
 }
 
 /**
- * Three stacked vector passes (halo → glow → core) sit directly under the route
- * casing, so the active planning line, live track and HTML waypoint markers
- * always stay readable on top.
+ * Three stacked vector passes (charcoal casing → neon glow → neon core) sit
+ * directly under the route casing, so the active planning line, live track and
+ * HTML waypoint markers always stay readable on top.
  *
  * All three render the same `LineString` source at the native screen resolution
  * of the current zoom, which removes the blocky point grid the old raster
- * heatmap showed when zoomed out.
+ * heatmap showed when zoomed out. Colours are data-driven from the segment
+ * `weight`, so the busiest streets burn laser red over the cyan once-ridden ones.
  */
 function ensureHeatmapLayers(map: maplibregl.Map) {
   const before = map.getLayer(ROUTE_CASING_LAYER_ID) ? ROUTE_CASING_LAYER_ID : undefined;
@@ -644,71 +648,25 @@ function ensureHeatmapLayers(map: maplibregl.Map) {
     map.addSource(HEATMAP_LINES_SOURCE_ID, { type: 'geojson', data: EMPTY_HEATMAP_LINES });
   }
 
-  if (!map.getLayer(HEATMAP_HALO_LAYER_ID)) {
+  const layers = [
+    { id: HEATMAP_CASING_LAYER_ID, paint: heatmapCasingPaint() },
+    { id: HEATMAP_GLOW_LAYER_ID, paint: heatmapGlowPaint() },
+    { id: HEATMAP_CORE_LAYER_ID, paint: heatmapCorePaint() },
+  ];
+
+  for (const layer of layers) {
+    if (map.getLayer(layer.id)) continue;
     map.addLayer(
       {
-        id: HEATMAP_HALO_LAYER_ID,
+        id: layer.id,
         type: 'line',
         source: HEATMAP_LINES_SOURCE_ID,
         layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
-        paint: heatmapHaloPaint('fire'),
+        paint: layer.paint,
       },
       before,
     );
   }
-
-  if (!map.getLayer(HEATMAP_GLOW_LAYER_ID)) {
-    map.addLayer(
-      {
-        id: HEATMAP_GLOW_LAYER_ID,
-        type: 'line',
-        source: HEATMAP_LINES_SOURCE_ID,
-        layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
-        paint: heatmapGlowPaint('fire'),
-      },
-      before,
-    );
-  }
-
-  if (!map.getLayer(HEATMAP_CORE_LAYER_ID)) {
-    map.addLayer(
-      {
-        id: HEATMAP_CORE_LAYER_ID,
-        type: 'line',
-        source: HEATMAP_LINES_SOURCE_ID,
-        layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
-        paint: heatmapCorePaint('fire'),
-      },
-      before,
-    );
-  }
-}
-
-function heatmapHaloPaint(scheme: HeatmapScheme): NonNullable<LineLayerSpecification['paint']> {
-  return {
-    'line-color': HEATMAP_SCHEMES[scheme].halo,
-    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 12, 12, 16, 16, 20],
-    'line-blur': ['interpolate', ['linear'], ['zoom'], 8, 9, 14, 13],
-    'line-opacity': 0.15,
-  };
-}
-
-function heatmapGlowPaint(scheme: HeatmapScheme): NonNullable<LineLayerSpecification['paint']> {
-  return {
-    'line-color': HEATMAP_SCHEMES[scheme].glow,
-    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 4.5, 12, 6.5, 16, 9],
-    'line-blur': ['interpolate', ['linear'], ['zoom'], 8, 3.5, 14, 5],
-    'line-opacity': 0.3,
-  };
-}
-
-function heatmapCorePaint(scheme: HeatmapScheme): NonNullable<LineLayerSpecification['paint']> {
-  return {
-    'line-color': HEATMAP_SCHEMES[scheme].core,
-    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.4, 12, 2.2, 16, 3.4],
-    'line-blur': 0.4,
-    'line-opacity': 0.48,
-  };
 }
 
 function applyHeatmap(
@@ -727,21 +685,10 @@ function applyHeatmap(
   }
 
   const visibility = heatmap?.visible ? 'visible' : 'none';
-  const palette = HEATMAP_SCHEMES[heatmap?.scheme ?? 'fire'];
 
-  for (const layerId of [HEATMAP_HALO_LAYER_ID, HEATMAP_GLOW_LAYER_ID, HEATMAP_CORE_LAYER_ID]) {
+  for (const layerId of [HEATMAP_CASING_LAYER_ID, HEATMAP_GLOW_LAYER_ID, HEATMAP_CORE_LAYER_ID]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', visibility);
-  }
-
-  if (map.getLayer(HEATMAP_HALO_LAYER_ID)) {
-    map.setPaintProperty(HEATMAP_HALO_LAYER_ID, 'line-color', palette.halo);
-  }
-  if (map.getLayer(HEATMAP_GLOW_LAYER_ID)) {
-    map.setPaintProperty(HEATMAP_GLOW_LAYER_ID, 'line-color', palette.glow);
-  }
-  if (map.getLayer(HEATMAP_CORE_LAYER_ID)) {
-    map.setPaintProperty(HEATMAP_CORE_LAYER_ID, 'line-color', palette.core);
   }
 }
 

@@ -176,26 +176,26 @@ function peakAveragePower(series: number[], windowSeconds: number): number | nul
   return best / windowSeconds;
 }
 
-function zoneIndexFor(powerWatts: number, ftpWatts: number): number {
-  const ratio = powerWatts / ftpWatts;
-  if (ratio < 0.55) return 0;
-  if (ratio <= 0.75) return 1;
-  if (ratio <= 0.9) return 2;
-  if (ratio <= 1.05) return 3;
-  if (ratio <= 1.2) return 4;
-  return 5;
+function zoneIndexFor(powerWatts: number, ftpWatts: number, percents: number[]): number {
+  const percent = (powerWatts / ftpWatts) * 100;
+  let index = 0;
+  for (let zone = 1; zone < percents.length; zone += 1) {
+    if (percent >= percents[zone]) index = zone;
+  }
+  return index;
 }
 
 function buildZoneDistribution(
   samples: PowerSample[],
   ftpWatts: number,
   totalSeconds: number,
+  percents: number[],
 ): PowerZoneDistribution[] {
-  const ranges = computePowerZoneRanges(ftpWatts);
+  const ranges = computePowerZoneRanges(ftpWatts, percents);
   const zoneSeconds = [0, 0, 0, 0, 0, 0];
 
   for (const sample of samples) {
-    zoneSeconds[zoneIndexFor(sample.watts, ftpWatts)] += sample.seconds;
+    zoneSeconds[zoneIndexFor(sample.watts, ftpWatts, percents)] += sample.seconds;
   }
 
   return POWER_ZONE_DEFINITIONS.map((definition, index) => {
@@ -246,7 +246,12 @@ export function computeCyclingPowerAnalysis(
     tss: Math.round(
       ((durationSeconds * normalizedPowerWatts * intensityFactor) / (ftp * 3600)) * 100,
     ),
-    zones: buildZoneDistribution(built.samples, ftp, built.seconds),
+    zones: buildZoneDistribution(
+      built.samples,
+      ftp,
+      built.seconds,
+      profile.powerZonePercents,
+    ),
   };
 }
 

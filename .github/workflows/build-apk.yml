@@ -84,7 +84,7 @@ jobs:
           cat > version.json <<EOF
           {
             "otaVersion": "${{ github.run_number }}-${{ github.sha }}",
-            "minNativeVersion": "1.1.0",
+            "minNativeVersion": "1.2.0",
             "bundleUrl": "https://github.com/${{ github.repository }}/releases/download/ota-latest/allmova-ota-bundle.zip",
             "apkUrl": "https://github.com/${{ github.repository }}/releases/download/ota-latest/allmova-latest.apk",
             "releaseNotes": "Pembaruan otomatis ALLMOVA (build ${{ github.run_number }})."

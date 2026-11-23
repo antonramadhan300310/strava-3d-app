@@ -1,9 +1,17 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
+export type SavedMedia = {
+  /** `content://media/...` URI of the new gallery row. */
+  uri: string;
+  /** Human-readable location, e.g. `Pictures/ALLMOVA/card.png`. */
+  path: string;
+};
+
 type AllmovaTrackingPlugin = {
   startTrackingService(): Promise<void>;
   stopTrackingService(): Promise<void>;
   openExternalUrl(options: { url: string }): Promise<void>;
+  saveMediaToGallery(options: { filePath: string; mimeType: string }): Promise<SavedMedia>;
 };
 
 /**
@@ -33,6 +41,25 @@ export async function stopNativeTrackingService(): Promise<void> {
     await AllmovaTracking.stopTrackingService();
   } catch {
     // The OS may have already torn the service down.
+  }
+}
+
+/**
+ * Copies a cached image/video into the Android gallery (Pictures/ALLMOVA or
+ * Movies/ALLMOVA) through the native MediaStore bridge.
+ *
+ * Returns `null` on the web or when the native call fails, so callers can fall
+ * back to the share sheet instead of losing the export.
+ */
+export async function saveMediaToGallery(options: {
+  filePath: string;
+  mimeType: string;
+}): Promise<SavedMedia | null> {
+  if (!isNativeAndroid()) return null;
+  try {
+    return await AllmovaTracking.saveMediaToGallery(options);
+  } catch {
+    return null;
   }
 }
 

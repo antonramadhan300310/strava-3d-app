@@ -26,7 +26,6 @@ import {
 import FlyoverMap, { type FlyoverMapHandle, type FlyoverMapStyle } from '@/components/FlyoverMap';
 import ElevationChart from '@/components/ElevationChart';
 import FlyoverExportSheet from '@/components/FlyoverExportSheet';
-import ShareCardModal from '@/components/ShareCardModal';
 import ShareActivitySheet from '@/components/ShareActivitySheet';
 import ActivityWeatherCard from '@/components/ActivityWeatherCard';
 import ActivityRpeCard from '@/components/ActivityRpeCard';
@@ -110,7 +109,6 @@ export default function ActivityDetail({
   const { isPro } = useAuth();
   const mapRef = useRef<FlyoverMapHandle | null>(null);
   const [cleanMode, setCleanMode] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
   const [shareActivityOpen, setShareActivityOpen] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallReason, setPaywallReason] = useState<string | undefined>(undefined);
@@ -206,14 +204,9 @@ export default function ActivityDetail({
   }, []);
 
   const playback = useFlyoverPlayback(path, handleFrame);
-  // The share modal holds on to these callbacks, so they must stay stable.
+  // The export sheet holds on to these callbacks, so they must stay stable.
   const playbackRef = useRef(playback);
   playbackRef.current = playback;
-
-  const captureFullRouteFrame = useCallback(async () => {
-    playbackRef.current.pause();
-    return (await mapRef.current?.captureFullRouteFrame()) ?? null;
-  }, []);
 
   /** Drives the map to one export frame; the exporter owns the timing. */
   const captureExportFrame = useCallback(
@@ -686,16 +679,6 @@ export default function ActivityDetail({
                   </span>
                 )}
               </button>
-
-              <button
-                type="button"
-                onClick={() => setShareOpen(true)}
-                aria-label="Bagikan atau unduh kartu aktivitas"
-                className="flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#151B1D]/92 px-4 text-sm font-bold text-slate-100 shadow-2xl backdrop-blur transition active:scale-[0.98]"
-              >
-                <Share2 size={18} />
-                Share
-              </button>
             </div>
 
             <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-[#151B1D]/92 px-2.5 py-2 shadow-2xl backdrop-blur">
@@ -758,15 +741,6 @@ export default function ActivityDetail({
         )}
       </div>
 
-      {shareOpen && (
-        <ShareCardModal
-          activity={activity}
-          captureFullRouteFrame={captureFullRouteFrame}
-          onClose={() => setShareOpen(false)}
-          onNotice={onNotice}
-        />
-      )}
-
       {shareActivityOpen && (
         <ShareActivitySheet
           activity={activity}
@@ -778,7 +752,6 @@ export default function ActivityDetail({
       {exportOpen && (
         <FlyoverExportSheet
           activity={activity}
-          isPro={isPro}
           captureFrame={captureExportFrame}
           onClose={closeExport}
           onNotice={onNotice}

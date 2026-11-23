@@ -1,12 +1,16 @@
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { saveMediaToGallery } from './nativeTrackingService';
 
 export type ShareImageOutcome = 'shared' | 'cancelled';
 
 export type SaveImageOutcome = {
-  /** `documents` means the file landed in the public Documents folder. */
-  location: 'documents' | 'share-sheet' | 'download';
+  /**
+   * `gallery` is the Android MediaStore path (Pictures/ALLMOVA), `documents`
+   * the public Documents fallback, `share-sheet` a hand-off to the system UI.
+   */
+  location: 'gallery' | 'documents' | 'share-sheet' | 'download';
   path: string;
 };
 
@@ -67,12 +71,12 @@ export async function shareCardImage(
 }
 
 /**
- * Saves the PNG to the public Documents folder on Android, or downloads it on
+ * Saves the PNG into the Android gallery through MediaStore, or downloads it on
  * the web.
  *
- * Android 11+ blocks direct writes to `Documents` (scoped storage), so a failed
- * write falls back to the system share sheet, where "Save to Files" reaches the
- * same folder through the platform's own UI.
+ * The canvas is written to the app cache first because the native bridge copies
+ * a real file into `Pictures/ALLMOVA`. Older devices without the MediaStore
+ * bridge fall back to a Documents write and finally to the system share sheet.
  */
 export async function saveCardImage(
   canvas: HTMLCanvasElement,
@@ -80,14 +84,23 @@ export async function saveCardImage(
   title: string,
 ): Promise<SaveImageOutcome> {
   if (Capacitor.isNativePlatform()) {
+    const { uri } = await Filesystem.writeFile({
+      path: fileName,
+      data: toBase64(canvas),
+      directory: Directory.Cache,
+    });
+
+    const saved = await saveMediaToGallery({ filePath: uri, mimeType: 'image/png' });
+    if (saved) return { location: 'gallery', path: saved.path };
+
     try {
-      const { uri } = await Filesystem.writeFile({
+      const documents = await Filesystem.writeFile({
         path: fileName,
         data: toBase64(canvas),
         directory: Directory.Documents,
         recursive: true,
       });
-      return { location: 'documents', path: uri };
+      return { location: 'documents', path: documents.uri };
     } catch (cause) {
       console.warn('Direct Documents write failed, falling back to the share sheet', cause);
       await shareCardImage(canvas, fileName, title);

@@ -1,6 +1,5 @@
-import { allmovaFontStack } from '@/components/AllmovaLogo';
+import { allmovaFontStack, drawAllmovaLogoOnCanvas } from '@/components/AllmovaLogo';
 import { formatActivityDate, type ActivityRecord } from './activity';
-import { elevationProfile } from './flyover';
 import {
   averageSpeedKmh,
   formatDistanceKm,
@@ -11,8 +10,13 @@ import {
 } from './metrics';
 import type { LngLatEle } from './polyline';
 import { drawRouteEndpointBadge } from './routeEndpoints';
+import { normalizeActivityType, type ActivityType } from './valhalla';
 
-export type ShareCardStyle = 'poster' | 'sticker';
+/**
+ * `card` is the charcoal poster, `route` a transparent route sticker and
+ * `stats` a transparent sticker that only carries the numbers.
+ */
+export type ShareCardMode = 'card' | 'route' | 'stats';
 
 export type ShareStat = { label: string; value: string };
 
@@ -20,28 +24,30 @@ export type ShareCardData = {
   title: string;
   date: string;
   badge: string;
+  activityType: ActivityType;
   stats: ShareStat[];
 };
 
-export const CARD_SIZES: Record<ShareCardStyle, { width: number; height: number }> = {
-  poster: { width: 1080, height: 1350 },
-  sticker: { width: 1080, height: 1080 },
+export const CARD_SIZES: Record<ShareCardMode, { width: number; height: number }> = {
+  card: { width: 1080, height: 1350 },
+  route: { width: 1080, height: 1080 },
+  stats: { width: 1080, height: 1080 },
 };
 
 const ACCENT = '#B9F51E';
-const ACCENT_SOFT = '#A5E012';
-const ACCENT_LIGHT = '#B9F51E';
 const INK = '#0D1112';
+const SURFACE = '#151B1D';
+const SHADOW = 'rgba(13,17,18,0.85)';
 
+/** Watermark lockup height as a share of the canvas height. */
+export const WATERMARK_HEIGHT_RATIO = 0.12;
 
-/** Poster safe margins, shared by every block so the layout stays aligned. */
+/** Card safe margins, shared by every block so the layout stays aligned. */
 const MARGIN = 72;
-const GRID_GAP = 32;
 
 /**
  * Poster area (in card pixels) the captured 3D frame must keep the route
- * inside: below the title block and above the stats grid. `FlyoverMap` reads
- * this to frame the route, since the frame is drawn as a cropped cover image.
+ * inside. `FlyoverMap` reads this to frame the route for the share preview.
  */
 export const POSTER_ROUTE_BAND = { top: 380, bottom: 800, left: 90, right: 990 };
 
@@ -57,6 +63,7 @@ export function buildShareCardData(activity: ActivityRecord): ShareCardData {
     title: activity.title,
     date: formatShareDate(activity.createdAt),
     badge: activity.activityType.toUpperCase(),
+    activityType: normalizeActivityType(activity.activityType),
     stats: [
       { label: 'Jarak', value: `${formatDistanceKm(activity.distanceMeters)} km` },
       { label: 'Elevasi', value: `${Math.round(activity.elevationGain)} m` },
@@ -74,26 +81,24 @@ function formatShareDate(iso: string): string {
   return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export function shareCardFileName(style: ShareCardStyle, title: string): string {
+export function shareCardFileName(mode: ShareCardMode, title: string): string {
   const slug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 40);
   const stamp = Date.now().toString(36);
-  return `allmova-${style}-${slug || 'aktivitas'}-${stamp}.png`;
+  return `allmova-${mode}-${slug || 'aktivitas'}-${stamp}.png`;
 }
 
 export type ShareCardInput = {
-  style: ShareCardStyle;
+  mode: ShareCardMode;
   data: ShareCardData;
   coordinates: LngLatEle[];
-  /** Live 3D map frame; the poster falls back to a drawn route when absent. */
-  mapFrame: HTMLCanvasElement | null;
 };
 
 export function renderShareCard(input: ShareCardInput): HTMLCanvasElement {
-  const { width, height } = CARD_SIZES[input.style];
+  const { width, height } = CARD_SIZES[input.mode];
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -101,83 +106,145 @@ export function renderShareCard(input: ShareCardInput): HTMLCanvasElement {
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
 
-  // The sticker must stay fully transparent, so nothing paints the background.
-  if (input.style === 'poster') drawPoster(ctx, input, width, height);
-  else drawSticker(ctx, input, width, height);
+  // Both stickers must stay fully transparent, so only the card paints a
+  // background.
+  if (input.mode === 'card') {
+    drawCard(ctx, input, width, height);
+  } else {
+    ctx.clearRect(0, 0, width, height);
+    if (input.mode === 'route') drawRouteSticker(ctx, input, width, height);
+    else drawStatsSticker(ctx, input, width, height);
+  }
+
+  drawWatermark(ctx, width, height);
 
   return canvas;
 }
 
-function drawPoster(
+function drawCard(
   ctx: CanvasRenderingContext2D,
-  { data, coordinates, mapFrame }: ShareCardInput,
+  { data, coordinates }: ShareCardInput,
   width: number,
   height: number,
 ) {
   ctx.fillStyle = INK;
   ctx.fillRect(0, 0, width, height);
 
-  if (mapFrame) {
-    drawCover(ctx, mapFrame, width, height);
-  } else {
-    drawFallbackBackdrop(ctx, coordinates, width, height);
-  }
-
-  // Two soft scrims keep white type readable over bright satellite imagery.
-  const top = ctx.createLinearGradient(0, 0, 0, 620);
-  top.addColorStop(0, 'rgba(2,6,23,0.94)');
-  top.addColorStop(0.55, 'rgba(2,6,23,0.55)');
-  top.addColorStop(1, 'rgba(2,6,23,0)');
-  ctx.fillStyle = top;
-  ctx.fillRect(0, 0, width, 620);
-
-  const bottom = ctx.createLinearGradient(0, height * 0.34, 0, height);
-  bottom.addColorStop(0, 'rgba(2,6,23,0)');
-  bottom.addColorStop(0.45, 'rgba(2,6,23,0.82)');
-  bottom.addColorStop(1, 'rgba(2,6,23,0.97)');
-  ctx.fillStyle = bottom;
-  ctx.fillRect(0, height * 0.34, width, height * 0.66);
+  const glow = ctx.createRadialGradient(width / 2, 520, 40, width / 2, 520, 760);
+  glow.addColorStop(0, 'rgba(185,245,30,0.16)');
+  glow.addColorStop(0.55, 'rgba(30,46,22,0.32)');
+  glow.addColorStop(1, 'rgba(13,17,18,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, width, height);
 
   drawBadgeRow(ctx, data, width);
-  drawPosterTitle(ctx, data.title, width);
+  drawCardTitle(ctx, data, width);
 
-  const cellWidth = (width - MARGIN * 2 - GRID_GAP) / 2;
-  drawStatGrid(ctx, data.stats, MARGIN, 836, cellWidth, 118);
+  drawRoute(
+    ctx,
+    coordinates,
+    { x: MARGIN, y: 420, width: width - MARGIN * 2, height: 400 },
+    { casing: INK, core: ACCENT, halo: 'rgba(185,245,30,0.28)' },
+  );
 
-  drawElevation(ctx, coordinates, {
-    x: MARGIN,
-    y: 1104,
-    width: width - MARGIN * 2,
-    height: 148,
-  });
+  drawCardStats(ctx, data.stats, 860);
 }
 
-function drawSticker(
+function drawRouteSticker(
   ctx: CanvasRenderingContext2D,
   { data, coordinates }: ShareCardInput,
   width: number,
   height: number,
 ) {
-  // Upper band of the sticker: 120 → 740 leaves room for the stats row below.
-  const routeBox = {
-    x: 120,
-    y: 120,
-    width: width - 240,
-    height: 620,
-  };
-  drawRouteGlow(ctx, coordinates, routeBox);
+  drawRoute(
+    ctx,
+    coordinates,
+    { x: 100, y: 90, width: width - 200, height: 610 },
+    { casing: SHADOW, core: ACCENT, halo: 'rgba(185,245,30,0.35)' },
+  );
 
-  drawStickerStats(ctx, data.stats, width, height);
+  drawStickerStats(ctx, data.stats, width, height - 200);
+}
+
+function drawStatsSticker(
+  ctx: CanvasRenderingContext2D,
+  { data }: ShareCardInput,
+  width: number,
+  height: number,
+) {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.shadowColor = SHADOW;
+  ctx.shadowBlur = 26;
+  ctx.shadowOffsetY = 4;
+
+  drawSportIcon(ctx, data.activityType, width / 2, 190, 74);
+
+  ctx.font = font(64, 800);
+  ctx.fillStyle = '#FFFFFF';
+  const titleLines = wrapText(ctx, data.title, width - 240, 2);
+  titleLines.forEach((line, index) => {
+    ctx.fillText(line, width / 2, 330 + index * 76);
+  });
+
+  ctx.font = font(28, 600);
+  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  ctx.fillText(data.date, width / 2, 330 + titleLines.length * 76 + 16);
+  ctx.restore();
+
+  drawStickerStats(ctx, data.stats, width, height - 330);
+}
+
+/** Neon route with a dark casing so it reads on any photo underneath. */
+function drawRoute(
+  ctx: CanvasRenderingContext2D,
+  coordinates: LngLatEle[],
+  box: { x: number; y: number; width: number; height: number },
+  colors: { casing: string; core: string; halo: string },
+) {
+  const points = projectCoordinates(coordinates, box);
+  if (points.length < 2) return;
+
+  const trace = () => {
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+  };
+
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  trace();
+  ctx.strokeStyle = colors.halo;
+  ctx.lineWidth = 34;
+  ctx.stroke();
+
+  trace();
+  ctx.strokeStyle = colors.casing;
+  ctx.lineWidth = 24;
+  ctx.stroke();
+
+  trace();
+  ctx.strokeStyle = colors.core;
+  ctx.lineWidth = 13;
+  ctx.stroke();
+  ctx.restore();
+
+  const start = points[0];
+  const end = points[points.length - 1];
+  drawRouteEndpointBadge(ctx, 'start', start.x, start.y, 17);
+  drawRouteEndpointBadge(ctx, 'finish', end.x, end.y, 19);
 }
 
 function drawBadgeRow(ctx: CanvasRenderingContext2D, data: ShareCardData, width: number) {
-  const pillFont = font(30, 800);
-  ctx.font = pillFont;
-  const textWidth = ctx.measureText(data.badge).width;
-  const pillWidth = textWidth + 52;
-  const pillHeight = 58;
-  const pillY = 112;
+  const pillHeight = 56;
+  const pillY = 96;
 
+  ctx.font = font(28, 800);
+  const pillWidth = ctx.measureText(data.badge).width + 50;
   roundedRect(ctx, MARGIN, pillY, pillWidth, pillHeight, pillHeight / 2);
   ctx.fillStyle = ACCENT;
   ctx.fill();
@@ -187,8 +254,8 @@ function drawBadgeRow(ctx: CanvasRenderingContext2D, data: ShareCardData, width:
   ctx.textBaseline = 'middle';
   ctx.fillText(data.badge, MARGIN + pillWidth / 2, pillY + pillHeight / 2 + 1);
 
-  ctx.font = font(30, 600);
-  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  ctx.font = font(28, 600);
+  ctx.fillStyle = 'rgba(255,255,255,0.78)';
   ctx.textAlign = 'right';
   ctx.fillText(data.date, width - MARGIN, pillY + pillHeight / 2 + 1);
 
@@ -196,17 +263,15 @@ function drawBadgeRow(ctx: CanvasRenderingContext2D, data: ShareCardData, width:
   ctx.textBaseline = 'alphabetic';
 }
 
-function drawPosterTitle(ctx: CanvasRenderingContext2D, title: string, width: number) {
-  const maxWidth = width - MARGIN * 2;
-  ctx.font = font(72, 800);
-  ctx.fillStyle = '#ffffff';
+function drawCardTitle(ctx: CanvasRenderingContext2D, data: ShareCardData, width: number) {
+  ctx.font = font(62, 800);
+  ctx.fillStyle = '#FFFFFF';
   ctx.shadowColor = 'rgba(0,0,0,0.45)';
   ctx.shadowBlur = 24;
   ctx.shadowOffsetY = 4;
 
-  const lines = wrapText(ctx, title, maxWidth, 2);
-  lines.forEach((line, index) => {
-    ctx.fillText(line, MARGIN, 258 + index * 86);
+  wrapText(ctx, data.title, width - MARGIN * 2, 2).forEach((line, index) => {
+    ctx.fillText(line, MARGIN, 250 + index * 74);
   });
 
   ctx.shadowColor = 'transparent';
@@ -214,69 +279,143 @@ function drawPosterTitle(ctx: CanvasRenderingContext2D, title: string, width: nu
   ctx.shadowOffsetY = 0;
 }
 
-function drawStatGrid(
-  ctx: CanvasRenderingContext2D,
-  stats: ShareStat[],
-  x: number,
-  y: number,
-  cellWidth: number,
-  cellHeight: number,
-) {
+function drawCardStats(ctx: CanvasRenderingContext2D, stats: ShareStat[], top: number) {
+  const gap = 24;
+  const boxWidth = (CARD_SIZES.card.width - MARGIN * 2 - gap) / 2;
+  const boxHeight = 132;
+
   stats.forEach((stat, index) => {
     const column = index % 2;
     const row = Math.floor(index / 2);
-    const cellX = x + column * (cellWidth + GRID_GAP);
-    const cellY = y + row * cellHeight;
+    const x = MARGIN + column * (boxWidth + gap);
+    const y = top + row * (boxHeight + gap);
+
+    roundedRect(ctx, x, y, boxWidth, boxHeight, 26);
+    ctx.fillStyle = SURFACE;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(185,245,30,0.16)';
+    ctx.stroke();
 
     ctx.textAlign = 'left';
-    ctx.font = font(26, 700);
-    ctx.fillStyle = ACCENT;
-    ctx.fillText(stat.label.toUpperCase(), cellX, cellY);
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = font(22, 700);
+    ctx.fillStyle = 'rgba(148,163,184,0.95)';
+    ctx.fillText(stat.label.toUpperCase(), x + 30, y + 48);
 
-    ctx.font = font(58, 800);
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = 'rgba(0,0,0,0.45)';
-    ctx.shadowBlur = 16;
-    ctx.shadowOffsetY = 3;
-    ctx.fillText(stat.value, cellX, cellY + 66);
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
+    ctx.font = font(42, 800);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(truncate(ctx, stat.value, boxWidth - 60), x + 30, y + 104);
   });
 }
 
+/** Four stat columns with a heavy shadow so white type survives any photo. */
 function drawStickerStats(
   ctx: CanvasRenderingContext2D,
   stats: ShareStat[],
   width: number,
-  height: number,
+  valueBaseline: number,
 ) {
-  const columnWidth = (width - 192) / stats.length;
-  const labelY = height - 206;
-  const valueY = height - 128;
+  const columnWidth = (width - 160) / stats.length;
+  const labelBaseline = valueBaseline - 68;
 
   stats.forEach((stat, index) => {
-    const centerX = 96 + columnWidth * (index + 0.5);
+    const centerX = 80 + columnWidth * (index + 0.5);
 
+    ctx.save();
     ctx.textAlign = 'center';
-    ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur = 18;
-    ctx.shadowOffsetY = 3;
+    ctx.shadowColor = SHADOW;
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 4;
 
-    ctx.font = font(fitFontSize(ctx, stat.label.toUpperCase(), columnWidth - 20, 24, 700, 15), 700);
-    ctx.fillStyle = 'rgba(255,255,255,0.82)';
-    ctx.fillText(stat.label.toUpperCase(), centerX, labelY);
+    ctx.font = font(fitFontSize(ctx, stat.label.toUpperCase(), columnWidth - 24, 24, 700, 15), 700);
+    ctx.fillStyle = 'rgba(255,255,255,0.86)';
+    ctx.fillText(stat.label.toUpperCase(), centerX, labelBaseline);
 
-    ctx.font = font(fitFontSize(ctx, stat.value, columnWidth - 14, 48, 800, 26), 800);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(stat.value, centerX, valueY);
-
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
+    ctx.font = font(fitFontSize(ctx, stat.value, columnWidth - 18, 48, 800, 26), 800);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(stat.value, centerX, valueBaseline);
+    ctx.restore();
   });
+}
 
-  ctx.textAlign = 'left';
+/** Sport glyph for the stats-only sticker, drawn with the lime accent. */
+function drawSportIcon(
+  ctx: CanvasRenderingContext2D,
+  activityType: ActivityType,
+  centerX: number,
+  centerY: number,
+  size: number,
+) {
+  ctx.save();
+  ctx.translate(centerX - size / 2, centerY - size / 2);
+  ctx.scale(size / 64, size / 64);
+  ctx.strokeStyle = ACCENT;
+  ctx.fillStyle = ACCENT;
+  ctx.lineWidth = 4.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = SHADOW;
+  ctx.shadowBlur = 18;
+
+  if (activityType === 'cycling') {
+    ctx.beginPath();
+    ctx.arc(14, 46, 11, 0, Math.PI * 2);
+    ctx.arc(50, 46, 11, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(14, 46);
+    ctx.lineTo(28, 24);
+    ctx.lineTo(42, 24);
+    ctx.lineTo(50, 46);
+    ctx.moveTo(28, 24);
+    ctx.lineTo(38, 46);
+    ctx.lineTo(50, 46);
+    ctx.stroke();
+  } else {
+    // Walking/running figure: head, torso and a two-leg stride.
+    ctx.beginPath();
+    ctx.arc(34, 13, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(32, 22);
+    ctx.lineTo(28, 38);
+    ctx.lineTo(14, 54);
+    ctx.moveTo(28, 38);
+    ctx.lineTo(44, 46);
+    ctx.lineTo(50, 60);
+    ctx.moveTo(32, 28);
+    ctx.lineTo(48, 32);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Proportional ALLMOVA lockup in the bottom-right corner.
+ *
+ * Every tier gets it, so a Free and a Pro export stay visually consistent and
+ * the brand rides along on every share. The height tracks the canvas so a
+ * 1080 px sticker and a 1350 px card carry the same relative weight.
+ */
+function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  const logoHeight = height * WATERMARK_HEIGHT_RATIO;
+  const scale = logoHeight / 64;
+  const logoWidth = 280 * scale;
+  const margin = Math.round(width * 0.035);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(13,17,18,0.55)';
+  ctx.shadowBlur = 18;
+  drawAllmovaLogoOnCanvas(
+    ctx,
+    width - logoWidth - margin,
+    height - logoHeight - margin,
+    scale,
+    { variant: 'compact', opacity: 0.94 },
+  );
+  ctx.restore();
 }
 
 /** Largest font size at or below `size` that keeps `text` inside `maxWidth`. */
@@ -295,139 +434,6 @@ function fitFontSize(
     ctx.font = font(current, weight);
   }
   return current;
-}
-
-function drawElevation(
-  ctx: CanvasRenderingContext2D,
-  coordinates: LngLatEle[],
-  box: { x: number; y: number; width: number; height: number },
-) {
-  const profile = elevationProfile(coordinates, 180);
-  if (profile.points.length < 2) return;
-
-  const span = profile.max - profile.min || 1;
-  const step = box.width / (profile.points.length - 1);
-  const toY = (value: number) =>
-    box.y + box.height - ((value - profile.min) / span) * box.height * 0.9 - box.height * 0.05;
-
-  const trace = () => {
-    ctx.beginPath();
-    profile.points.forEach((value, index) => {
-      const x = box.x + index * step;
-      const y = toY(value);
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-  };
-
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-
-  const fill = ctx.createLinearGradient(0, box.y, 0, box.y + box.height);
-  fill.addColorStop(0, 'rgba(185,245,30,0.55)');
-  fill.addColorStop(1, 'rgba(185,245,30,0.03)');
-  trace();
-  ctx.lineTo(box.x + box.width, box.y + box.height);
-  ctx.lineTo(box.x, box.y + box.height);
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.fill();
-
-  trace();
-  ctx.strokeStyle = ACCENT_SOFT;
-  ctx.lineWidth = 5;
-  ctx.stroke();
-
-  ctx.font = font(24, 600);
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.textAlign = 'left';
-  ctx.fillText(`${Math.round(profile.max)} m`, box.x, box.y - 18);
-  ctx.textAlign = 'right';
-  ctx.fillText(`${Math.round(profile.min)} m`, box.x + box.width, box.y - 18);
-  ctx.textAlign = 'left';
-}
-
-/** Cover-crops the map frame so the poster never letterboxes. */
-function drawCover(
-  ctx: CanvasRenderingContext2D,
-  image: HTMLCanvasElement,
-  width: number,
-  height: number,
-) {
-  const scale = Math.max(width / image.width, height / image.height);
-  const drawWidth = image.width * scale;
-  const drawHeight = image.height * scale;
-  ctx.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
-}
-
-/** Poster backdrop used when the WebGL frame cannot be captured (no map key). */
-function drawFallbackBackdrop(
-  ctx: CanvasRenderingContext2D,
-  coordinates: LngLatEle[],
-  width: number,
-  height: number,
-) {
-  const sky = ctx.createLinearGradient(0, 0, 0, height);
-  sky.addColorStop(0, '#1e293b');
-  sky.addColorStop(0.5, '#0D1112');
-  sky.addColorStop(1, '#0D1112');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, width, height);
-
-  drawRouteGlow(ctx, coordinates, {
-    x: 140,
-    y: 320,
-    width: width - 280,
-    height: height * 0.32,
-  });
-}
-
-function drawRouteGlow(
-  ctx: CanvasRenderingContext2D,
-  coordinates: LngLatEle[],
-  box: { x: number; y: number; width: number; height: number },
-) {
-  const points = projectCoordinates(coordinates, box);
-  if (points.length < 2) return;
-
-  const trace = () => {
-    ctx.beginPath();
-    points.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-    });
-  };
-
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-
-  ctx.save();
-  ctx.shadowColor = 'rgba(185,245,30,0.85)';
-  ctx.shadowBlur = 42;
-  trace();
-  ctx.strokeStyle = 'rgba(185,245,30,0.5)';
-  ctx.lineWidth = 30;
-  ctx.stroke();
-  ctx.restore();
-
-  ctx.save();
-  ctx.shadowColor = 'rgba(185,245,30,0.95)';
-  ctx.shadowBlur = 26;
-  trace();
-  ctx.strokeStyle = ACCENT;
-  ctx.lineWidth = 14;
-  ctx.stroke();
-  ctx.restore();
-
-  trace();
-  ctx.strokeStyle = ACCENT_LIGHT;
-  ctx.lineWidth = 6;
-  ctx.stroke();
-
-  const start = points[0];
-  const end = points[points.length - 1];
-  drawRouteEndpointBadge(ctx, 'start', start.x, start.y, 15);
-  drawRouteEndpointBadge(ctx, 'finish', end.x, end.y, 17);
 }
 
 const MERCATOR_LAT_LIMIT = 85.05112878;
@@ -509,6 +515,18 @@ function roundedRect(
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
+}
+
+function truncate(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (ctx.measureText(`${text.slice(0, mid)}…`).width <= maxWidth) low = mid;
+    else high = mid - 1;
+  }
+  return `${text.slice(0, low)}…`;
 }
 
 function wrapText(
