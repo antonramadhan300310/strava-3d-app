@@ -12,7 +12,7 @@ export default function VirtualPowerCard({ analysis, onOpenProfile }: Props) {
   const peak = analysis.peak20MinWatts;
 
   return (
-    <section className="mt-2.5 rounded-xl border border-sky-400/25 bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 p-2.5">
+    <section className="mt-2.5 rounded-xl border border-sky-400/25 bg-gradient-to-br from-[#151B1D] via-[#151B1D] to-sky-950/40 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">
           <Zap size={11} className="text-sky-300" />
@@ -53,7 +53,7 @@ export default function VirtualPowerCard({ analysis, onOpenProfile }: Props) {
             <span className="w-[4.6rem] shrink-0 truncate text-[9px] font-semibold" style={{ color: zone.color }}>
               {zone.zone} {zone.name}
             </span>
-            <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
+            <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-[#1E2E16]">
               <div
                 className="h-full rounded-full"
                 style={{
@@ -77,7 +77,7 @@ export default function VirtualPowerCard({ analysis, onOpenProfile }: Props) {
 
 function PowerMetric({ label, value, unit }: { label: string; value: string; unit: string }) {
   return (
-    <div className="flex flex-col items-center rounded-lg bg-slate-800/70 px-1 py-1.5">
+    <div className="flex flex-col items-center rounded-lg bg-[#1E2E16]/70 px-1 py-1.5">
       <dt className="text-[8px] uppercase tracking-wide text-slate-400">{label}</dt>
       <dd className="text-[11px] font-bold tabular-nums text-slate-100">
         {value}

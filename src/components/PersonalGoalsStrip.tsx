@@ -29,7 +29,7 @@ const SPORT_ICONS: Record<GoalSport, React.ReactNode> = {
 };
 
 const PERIOD_BADGE: Record<GoalPeriod, string> = {
-  weekly: 'border-orange-400/40 bg-orange-500/15 text-orange-300',
+  weekly: 'border-[#B9F51E]/40 bg-[#B9F51E]/15 text-[#B9F51E]',
   monthly: 'border-sky-400/40 bg-sky-500/15 text-sky-300',
   yearly: 'border-violet-400/40 bg-violet-500/15 text-violet-300',
 };
@@ -122,9 +122,9 @@ export default function PersonalGoalsStrip({ goals, activities, onSave, onDelete
           <button
             type="button"
             onClick={openCreate}
-            className="flex w-[92px] shrink-0 snap-start flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-white/20 bg-slate-900/50 py-3 text-slate-400 transition active:scale-[0.98] active:bg-slate-800/60"
+            className="flex w-[92px] shrink-0 snap-start flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-white/20 bg-[#151B1D]/50 py-3 text-slate-400 transition active:scale-[0.98] active:bg-[#1E2E16]/60"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-500/15 text-orange-400">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#B9F51E]/15 text-[#B9F51E]">
               <Plus size={16} />
             </span>
             <span className="text-[11px] font-semibold">+ Target</span>
@@ -134,14 +134,14 @@ export default function PersonalGoalsStrip({ goals, activities, onSave, onDelete
 
       {editorOpen &&
         createPortal(
-          <div className="fixed inset-0 z-[60] flex flex-col justify-end bg-slate-950/75 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[60] flex flex-col justify-end bg-[#0D1112]/75 backdrop-blur-sm">
             <button
               type="button"
               aria-label="Tutup editor target"
               onClick={() => setEditorOpen(false)}
               className="absolute inset-0"
             />
-            <div className="relative z-[60] flex max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl border-t border-white/10 bg-[#111827] shadow-2xl">
+            <div className="relative z-[60] flex max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl border-t border-white/10 bg-[#151B1D] shadow-2xl">
               <div className="shrink-0 px-4 pt-3">
                 <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/15" />
                 <div className="mb-3 flex items-center justify-between">
@@ -152,7 +152,7 @@ export default function PersonalGoalsStrip({ goals, activities, onSave, onDelete
                     type="button"
                     onClick={() => setEditorOpen(false)}
                     aria-label="Tutup"
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-300 active:scale-95"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1E2E16] text-slate-300 active:scale-95"
                   >
                     <X size={16} />
                   </button>
@@ -206,7 +206,7 @@ export default function PersonalGoalsStrip({ goals, activities, onSave, onDelete
                 </Field>
 
                 <Field label="Angka Target">
-                  <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-slate-950 px-3 py-2 focus-within:border-orange-500">
+                  <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-[#0D1112] px-3 py-2 focus-within:border-[#B9F51E]">
                     <input
                       type="number"
                       inputMode="decimal"
@@ -229,8 +229,8 @@ export default function PersonalGoalsStrip({ goals, activities, onSave, onDelete
                         onClick={() => setTarget(String(preset))}
                         className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold tabular-nums transition active:scale-95 ${
                           parsedTarget === preset
-                            ? 'border-orange-500/60 bg-orange-500/20 text-orange-300'
-                            : 'border-white/10 bg-slate-800/70 text-slate-300'
+                            ? 'border-[#B9F51E]/60 bg-[#B9F51E]/20 text-[#B9F51E]'
+                            : 'border-white/10 bg-[#1E2E16]/70 text-slate-300'
                         }`}
                       >
                         {formatGoalValue(preset, metric, { withUnit: false })}
@@ -240,7 +240,7 @@ export default function PersonalGoalsStrip({ goals, activities, onSave, onDelete
                 </Field>
               </div>
 
-              <div className="shrink-0 border-t border-white/10 bg-[#111827] px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <div className="shrink-0 border-t border-white/10 bg-[#151B1D] px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
                 <div className="flex gap-2">
                   {editingGoal && (
                     <button
@@ -256,7 +256,7 @@ export default function PersonalGoalsStrip({ goals, activities, onSave, onDelete
                     type="button"
                     onClick={handleSave}
                     disabled={!canSave}
-                    className="w-full flex-1 rounded-xl bg-orange-500 py-2.5 text-sm font-semibold text-white shadow-lg transition active:scale-[0.98] disabled:opacity-40"
+                    className="w-full flex-1 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-2.5 text-sm font-semibold text-[#0D1112] shadow-lg transition active:scale-[0.98] disabled:opacity-40"
                   >
                     Simpan Target
                   </button>
@@ -284,7 +284,7 @@ function GoalCard({
   const barClass =
     progress.paceTone === 'green'
       ? 'bg-gradient-to-r from-emerald-500 to-emerald-400'
-      : 'bg-gradient-to-r from-amber-500 to-orange-400';
+      : 'bg-gradient-to-r from-amber-500 to-[#B9F51E]';
   const pillClass =
     progress.paceTone === 'green'
       ? 'bg-emerald-500/15 text-emerald-300'
@@ -295,7 +295,7 @@ function GoalCard({
       type="button"
       onClick={onPress}
       aria-label={`Edit target ${goalSportLabel(goal.sportType)}`}
-      className="w-[204px] shrink-0 snap-start rounded-2xl border border-white/10 bg-slate-900/80 p-2.5 text-left shadow-lg transition active:scale-[0.98]"
+      className="w-[204px] shrink-0 snap-start rounded-2xl border border-white/10 bg-[#151B1D]/80 p-2.5 text-left shadow-lg transition active:scale-[0.98]"
     >
       <div className="flex items-center justify-between gap-1.5">
         <span
@@ -304,7 +304,7 @@ function GoalCard({
           {goalPeriodLabel(goal.period)}
         </span>
         <span className="flex items-center gap-1 text-[10px] font-semibold text-slate-300">
-          <span className="text-orange-400">{SPORT_ICONS[goal.sportType]}</span>
+          <span className="text-[#B9F51E]">{SPORT_ICONS[goal.sportType]}</span>
           {goalSportLabel(goal.sportType)}
         </span>
       </div>
@@ -315,7 +315,7 @@ function GoalCard({
         {formatGoalValue(progress.targetValue, goal.metric)}
       </p>
 
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800">
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[#1E2E16]">
         <div className={`h-full rounded-full ${barClass}`} style={{ width: `${width}%` }} />
       </div>
 
@@ -367,8 +367,8 @@ function Chip({
         grow ? 'flex-1' : ''
       } ${
         selected
-          ? 'border-orange-500/60 bg-orange-500/20 text-orange-200'
-          : 'border-white/10 bg-slate-800/70 text-slate-300'
+          ? 'border-[#B9F51E]/60 bg-[#B9F51E]/20 text-[#B9F51E]'
+          : 'border-white/10 bg-[#1E2E16]/70 text-slate-300'
       }`}
     >
       {icon}

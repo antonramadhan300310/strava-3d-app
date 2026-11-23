@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bike, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import AllmovaLogo from '@/components/AllmovaLogo';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import AuthScreen from '@/components/AuthScreen';
 import ProPaywallSheet from '@/components/ProPaywallSheet';
@@ -39,11 +40,9 @@ function AuthGate() {
 
 function SplashScreen() {
   return (
-    <main className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-[#0b0f19] text-slate-100">
-      <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-orange-500/30 bg-orange-500/15 text-orange-400">
-        <Bike size={28} />
-      </span>
-      <Loader2 size={18} className="animate-spin text-orange-400" />
+    <main className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-[#0D1112] text-slate-100">
+      <AllmovaLogo variant="full" className="h-24 w-auto" />
+      <Loader2 size={18} className="animate-spin text-[#B9F51E]" />
       <p className="text-[11px] text-slate-400">Memuat sesi…</p>
     </main>
   );
@@ -196,7 +195,7 @@ function TrackerApp() {
   );
 
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-slate-950">
+    <main className="relative h-dvh w-full overflow-hidden bg-[#0D1112]">
       {provider && (
         <MapView
           ref={mapRef}
@@ -248,7 +247,7 @@ function TrackerApp() {
 
       {notice && (
         <p
-          className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] mx-auto max-w-md rounded-xl bg-slate-900/95 px-3 py-2 text-center text-xs font-medium text-slate-100 shadow-lg backdrop-blur"
+          className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] mx-auto max-w-md rounded-xl bg-[#151B1D]/95 px-3 py-2 text-center text-xs font-medium text-slate-100 shadow-lg backdrop-blur"
           role="status"
         >
           {notice}

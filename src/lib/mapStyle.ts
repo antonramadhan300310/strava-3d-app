@@ -25,7 +25,7 @@ export const TERRAIN_EXAGGERATION = 1.5;
 export const FALLBACK_STYLE: StyleSpecification = {
   version: 8,
   sources: {},
-  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0b1220' } }],
+  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0D1112' } }],
 };
 
 /**
@@ -111,7 +111,7 @@ async function fetchOpenDataHybridStyle(): Promise<StyleSpecification | null> {
         {
           id: 'satellite-background',
           type: 'background',
-          paint: { 'background-color': '#0b1220' },
+          paint: { 'background-color': '#0D1112' },
         },
         {
           id: 'satellite-imagery',
@@ -167,7 +167,7 @@ export function installTerrain(
           source: ids.source,
           paint: {
             'hillshade-exaggeration': 0.45,
-            'hillshade-shadow-color': '#0f172a',
+            'hillshade-shadow-color': '#0D1112',
             'hillshade-highlight-color': '#ffffff',
             'hillshade-accent-color': '#94a3b8',
           },

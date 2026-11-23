@@ -127,7 +127,7 @@ export const PRO_PLANS: ProPlan[] = [
 export function buildProWhatsAppUrl(email: string | null, plan: ProPlan): string {
   const account = email && email.trim().length > 0 ? email.trim() : 'email belum tersedia';
   const message = [
-    'Halo Admin Tracker 3D, saya ingin mengaktifkan Tracker 3D Pro.',
+    'Halo Admin ALLMOVA, saya ingin mengaktifkan ALLMOVA PRO.',
     '',
     `Email akun: ${account}`,
     `Paket: ${plan.name} (${plan.price}${plan.period})`,

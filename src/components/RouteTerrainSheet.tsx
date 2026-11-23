@@ -22,7 +22,7 @@ const GRADIENT_COLORS: Record<GradientBucket['key'], string> = {
 const SURFACE_COLORS: Record<SurfaceBucket['key'], string> = {
   paved: 'bg-emerald-400',
   rough: 'bg-amber-400',
-  unpaved: 'bg-orange-500',
+  unpaved: 'bg-[#B9F51E] hover:bg-[#A5E012]',
   unknown: 'bg-slate-500',
 };
 
@@ -69,14 +69,14 @@ export default function RouteTerrainSheet({ coordinates, activityType, onClose }
 
   return (
     <div
-      className="absolute inset-0 z-50 flex items-end justify-center bg-slate-950/70 px-3 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] backdrop-blur-sm sm:items-center sm:pb-4"
+      className="absolute inset-0 z-50 flex items-end justify-center bg-[#0D1112]/70 px-3 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] backdrop-blur-sm sm:items-center sm:pb-4"
       role="dialog"
       aria-modal="true"
       aria-label="Info Medan"
       onClick={onClose}
     >
       <div
-        className="max-h-[82dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl"
+        className="max-h-[82dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-[#151B1D] p-4 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -85,7 +85,7 @@ export default function RouteTerrainSheet({ coordinates, activityType, onClose }
             type="button"
             onClick={onClose}
             aria-label="Tutup Info Medan"
-            className="rounded-full p-1 text-slate-400 active:bg-slate-800"
+            className="rounded-full p-1 text-slate-400 active:bg-[#1E2E16]"
           >
             <X size={18} />
           </button>
@@ -104,7 +104,7 @@ export default function RouteTerrainSheet({ coordinates, activityType, onClose }
             />
           </div>
 
-          <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-slate-800">
+          <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-[#1E2E16]">
             {analysis.buckets.map((bucket) => (
               <span
                 key={bucket.key}
@@ -150,7 +150,7 @@ export default function RouteTerrainSheet({ coordinates, activityType, onClose }
           </h3>
           {loadingConditions ? (
             <p className="flex items-center gap-2 text-[11px] text-slate-400">
-              <Loader2 size={14} className="animate-spin text-orange-400" />
+              <Loader2 size={14} className="animate-spin text-[#B9F51E]" />
               Membaca data permukaan jalan…
             </p>
           ) : conditions?.available ? (
@@ -176,7 +176,7 @@ function GradientStat({
   accent: string;
 }) {
   return (
-    <div className="rounded-xl bg-slate-800/70 px-3 py-2">
+    <div className="rounded-xl bg-[#1E2E16]/70 px-3 py-2">
       <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
       <p className={`text-xl font-bold ${accent}`}>{value}</p>
     </div>
@@ -186,7 +186,7 @@ function GradientStat({
 function SurfaceSummary({ conditions }: { conditions: RoadConditions }) {
   return (
     <>
-      <div className="flex h-2.5 overflow-hidden rounded-full bg-slate-800">
+      <div className="flex h-2.5 overflow-hidden rounded-full bg-[#1E2E16]">
         {conditions.buckets.map((bucket) => (
           <span
             key={bucket.key}
@@ -261,7 +261,7 @@ function TerrainProfileChart({
 
   if (!geometry) {
     return (
-      <div className="flex h-24 items-center justify-center rounded-xl bg-slate-800/60 text-[11px] text-slate-500">
+      <div className="flex h-24 items-center justify-center rounded-xl bg-[#1E2E16]/60 text-[11px] text-slate-500">
         Profil elevasi tidak tersedia
       </div>
     );
@@ -275,7 +275,7 @@ function TerrainProfileChart({
   return (
     <div
       ref={surfaceRef}
-      className="relative touch-none select-none overflow-hidden rounded-xl bg-slate-800/60"
+      className="relative touch-none select-none overflow-hidden rounded-xl bg-[#1E2E16]/60"
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         pick(event.clientX);
@@ -293,8 +293,8 @@ function TerrainProfileChart({
       >
         <defs>
           <linearGradient id="terrain-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#f97316" stopOpacity="0.55" />
-            <stop offset="100%" stopColor="#f97316" stopOpacity="0.03" />
+            <stop offset="0%" stopColor="#B9F51E" stopOpacity="0.55" />
+            <stop offset="100%" stopColor="#B9F51E" stopOpacity="0.03" />
           </linearGradient>
         </defs>
 
@@ -302,7 +302,7 @@ function TerrainProfileChart({
         <polyline
           points={geometry.line}
           fill="none"
-          stroke="#fb923c"
+          stroke="#A5E012"
           strokeWidth="1.6"
           strokeLinejoin="round"
           strokeLinecap="round"
@@ -321,7 +321,7 @@ function TerrainProfileChart({
               strokeDasharray="3 3"
               vectorEffect="non-scaling-stroke"
             />
-            <circle cx={activeX} cy={activeY} r="3.2" fill="#fde047" stroke="#0f172a" strokeWidth="1.2" />
+            <circle cx={activeX} cy={activeY} r="3.2" fill="#fde047" stroke="#0D1112" strokeWidth="1.2" />
           </>
         )}
       </svg>
@@ -335,10 +335,10 @@ function TerrainProfileChart({
 
       {activeSample && (
         <div
-          className="pointer-events-none absolute top-1 -translate-x-1/2 rounded-lg border border-white/10 bg-slate-950/90 px-2 py-1 text-[10px] leading-tight text-slate-200 shadow-lg"
+          className="pointer-events-none absolute top-1 -translate-x-1/2 rounded-lg border border-white/10 bg-[#0D1112]/90 px-2 py-1 text-[10px] leading-tight text-slate-200 shadow-lg"
           style={{ left: `${tooltipLeft}%` }}
         >
-          <p className="font-semibold text-orange-300">
+          <p className="font-semibold text-[#B9F51E]">
             {(activeSample.distanceMeters / 1000).toFixed(2)} km
           </p>
           <p>{Math.round(activeSample.elevationMeters)} mdpl</p>

@@ -44,7 +44,7 @@ export default function MapProviderModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-slate-950 px-5 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] pt-[calc(env(safe-area-inset-top)+1.5rem)]">
+    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[#0D1112] px-5 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] pt-[calc(env(safe-area-inset-top)+1.5rem)]">
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
         <header className="flex items-start gap-3">
           {onClose && (
@@ -52,14 +52,14 @@ export default function MapProviderModal({
               type="button"
               onClick={onClose}
               aria-label="Tutup pilihan mesin peta"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 active:scale-95"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#151B1D]/85 text-slate-100 active:scale-95"
             >
               <ArrowLeft size={18} />
             </button>
           )}
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-orange-400">
-              Tracker 3D
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#B9F51E]">
+              ALLMOVA
             </p>
             <h1 className="mt-1 text-xl font-bold text-slate-100">Pilih Mesin Peta</h1>
             <p className="mt-1 text-xs leading-relaxed text-slate-400">
@@ -71,7 +71,7 @@ export default function MapProviderModal({
               type="button"
               onClick={onClose}
               aria-label="Tutup"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 active:bg-slate-800"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 active:bg-[#1E2E16]"
             >
               <X size={18} />
             </button>
@@ -100,14 +100,14 @@ export default function MapProviderModal({
           </div>
         ) : (
           <form
-            className="mt-5 rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl"
+            className="mt-5 rounded-2xl border border-white/10 bg-[#151B1D] p-4 shadow-2xl"
             onSubmit={(event) => {
               event.preventDefault();
               submitPin();
             }}
           >
             <div className="flex items-center gap-2">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/15 text-orange-400">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B9F51E]/15 text-[#B9F51E]">
                 <KeyRound size={20} />
               </span>
               <div>
@@ -131,7 +131,7 @@ export default function MapProviderModal({
               autoComplete="off"
               autoFocus
               placeholder="••••••"
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-center text-lg tracking-[0.4em] text-slate-100 outline-none focus:border-orange-500"
+              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2.5 text-center text-lg tracking-[0.4em] text-slate-100 outline-none focus:border-[#B9F51E]"
             />
 
             {error && (
@@ -142,7 +142,7 @@ export default function MapProviderModal({
 
             <button
               type="submit"
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-semibold text-white transition active:scale-[0.98]"
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-semibold text-[#0D1112] transition active:scale-[0.98]"
             >
               <ShieldCheck size={16} />
               Masuk
@@ -194,24 +194,24 @@ function ProviderCard({
       aria-pressed={selected}
       className={`flex w-full items-start gap-3 rounded-2xl border p-4 text-left shadow-lg transition active:scale-[0.99] ${
         selected
-          ? 'border-orange-500/60 bg-orange-500/10'
-          : 'border-white/10 bg-slate-900/80 active:bg-slate-800/80'
+          ? 'border-[#B9F51E]/60 bg-[#B9F51E]/10'
+          : 'border-white/10 bg-[#151B1D]/80 active:bg-[#1E2E16]/80'
       }`}
     >
-      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500/15 text-orange-400">
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#B9F51E]/15 text-[#B9F51E]">
         {icon}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="text-sm font-semibold text-slate-100">{title}</span>
-          {selected && <Check size={14} className="text-orange-400" />}
+          {selected && <Check size={14} className="text-[#B9F51E]" />}
           {badge && (
-            <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+            <span className="rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-1.5 py-0.5 text-[9px] font-bold text-[#0D1112]">
               {badge}
             </span>
           )}
         </span>
-        <span className="mt-0.5 block text-[11px] font-semibold uppercase tracking-wide text-orange-400">
+        <span className="mt-0.5 block text-[11px] font-semibold uppercase tracking-wide text-[#B9F51E]">
           {subtitle}
         </span>
         <span className="mt-1.5 block text-[11px] leading-relaxed text-slate-400">

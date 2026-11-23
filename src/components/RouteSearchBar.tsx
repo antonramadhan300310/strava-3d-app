@@ -97,7 +97,7 @@ export default function RouteSearchBar({ onSelect, getBiasCenter }: Props) {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
       }}
     >
-      <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-900/95 px-3 py-2 shadow-2xl backdrop-blur">
+      <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#151B1D]/95 px-3 py-2 shadow-2xl backdrop-blur">
         <Search size={16} className="shrink-0 text-slate-400" aria-hidden="true" />
         <input
           type="search"
@@ -110,13 +110,13 @@ export default function RouteSearchBar({ onSelect, getBiasCenter }: Props) {
           aria-label="Cari alamat atau titik rute"
           className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
         />
-        {loading && <Loader2 size={15} className="shrink-0 animate-spin text-orange-400" />}
+        {loading && <Loader2 size={15} className="shrink-0 animate-spin text-[#B9F51E]" />}
         {query.length > 0 && !loading && (
           <button
             type="button"
             onClick={clear}
             aria-label="Hapus pencarian"
-            className="shrink-0 rounded-full p-0.5 text-slate-400 active:bg-slate-800"
+            className="shrink-0 rounded-full p-0.5 text-slate-400 active:bg-[#1E2E16]"
           >
             <X size={15} />
           </button>
@@ -124,7 +124,7 @@ export default function RouteSearchBar({ onSelect, getBiasCenter }: Props) {
       </div>
 
       {showDropdown && (
-        <div className="absolute inset-x-0 top-full mt-1.5 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-900/95 shadow-2xl backdrop-blur">
+        <div className="absolute inset-x-0 top-full mt-1.5 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-[#151B1D]/95 shadow-2xl backdrop-blur">
           {loading && results.length === 0 && (
             <p className="px-3 py-2.5 text-xs text-slate-400">Mencari lokasi…</p>
           )}
@@ -138,9 +138,9 @@ export default function RouteSearchBar({ onSelect, getBiasCenter }: Props) {
               key={place.id}
               type="button"
               onClick={() => select(place)}
-              className="flex w-full items-start gap-2 border-b border-white/5 px-3 py-2 text-left last:border-b-0 active:bg-slate-800"
+              className="flex w-full items-start gap-2 border-b border-white/5 px-3 py-2 text-left last:border-b-0 active:bg-[#1E2E16]"
             >
-              <MapPin size={15} className="mt-0.5 shrink-0 text-orange-400" aria-hidden="true" />
+              <MapPin size={15} className="mt-0.5 shrink-0 text-[#B9F51E]" aria-hidden="true" />
               <span className="min-w-0">
                 <span className="block truncate text-sm font-semibold text-slate-100">
                   {place.name}

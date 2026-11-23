@@ -116,11 +116,11 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/75 backdrop-blur-sm">
-      <div className="flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#111827] shadow-2xl sm:rounded-2xl">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-[#0D1112]/75 backdrop-blur-sm">
+      <div className="flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#151B1D] shadow-2xl sm:rounded-2xl">
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-4 pb-2.5 pt-[calc(env(safe-area-inset-top)+0.75rem)] sm:pt-3">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-orange-400">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#B9F51E]/15 text-[#B9F51E]">
               <UserRound size={18} />
             </span>
             <div className="min-w-0">
@@ -134,14 +134,14 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
             type="button"
             onClick={onClose}
             aria-label="Tutup profil atlet"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 active:bg-slate-800"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 active:bg-[#1E2E16]"
           >
             <X size={18} />
           </button>
         </header>
 
         <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3">
-          <section className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
+          <section className="rounded-xl border border-white/10 bg-[#151B1D]/70 p-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Identitas
@@ -149,8 +149,8 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               <span
                 className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${
                   isPro
-                    ? 'border-amber-300/40 bg-amber-400/15 text-amber-300'
-                    : 'border-slate-600 bg-slate-800 text-slate-300'
+                    ? 'border-[#B9F51E]/40 bg-[#B9F51E] text-[#0D1112]'
+                    : 'border-slate-600 bg-[#1E2E16] text-slate-300'
                 }`}
               >
                 {isPro ? '👑 AKUN PRO' : 'AKUN FREE'}
@@ -168,7 +168,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
               placeholder={DEFAULT_RIDER_PROFILE.displayName}
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-orange-500"
+              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
             />
 
             <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
@@ -191,7 +191,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               <button
                 type="button"
                 onClick={() => setPaywallOpen(true)}
-                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-orange-500 py-2 text-[11px] font-bold text-white shadow transition active:scale-[0.99]"
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-2 text-[11px] font-bold text-[#0D1112] shadow transition active:scale-[0.99]"
               >
                 <Crown size={14} />
                 Upgrade ke Pro
@@ -215,7 +215,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
                 Simulasi Tampilan untuk menguji fitur terkunci maupun terbuka.
               </p>
-              <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-slate-800/70 p-1">
+              <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-[#1E2E16]/70 p-1">
                 {(['pro', 'free'] as const).map((tier) => {
                   const selected = ownerSimulatedTier === tier;
                   return (
@@ -226,8 +226,8 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                       onClick={() => setOwnerSimulatedTier(tier)}
                       className={`rounded-lg py-2 text-[11px] font-bold transition active:scale-95 ${
                         selected
-                          ? 'bg-orange-500 text-white'
-                          : 'text-slate-300 active:bg-slate-800'
+                          ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+                          : 'text-slate-300 active:bg-[#1E2E16]'
                       }`}
                     >
                       {tier === 'pro' ? '👑 Pro' : 'Free'}
@@ -241,7 +241,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
             </section>
           )}
 
-          <section className="mt-3 rounded-xl border border-white/10 bg-slate-900/70 p-3">
+          <section className="mt-3 rounded-xl border border-white/10 bg-[#151B1D]/70 p-3">
             <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
               <Bike size={11} />
               Data Fisik &amp; Profil Sepeda
@@ -259,7 +259,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               step={0.1}
               value={bodyWeight}
               onChange={(event) => setBodyWeight(event.target.value)}
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-orange-500"
+              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
             />
 
             <p className="mb-1 mt-2 text-[11px] text-slate-400">Jenis sepeda</p>
@@ -273,7 +273,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                     aria-pressed={selected}
                     onClick={() => selectBikeType(key)}
                     className={`rounded-xl py-2 text-[11px] font-semibold transition active:scale-95 ${
-                      selected ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-300'
+                      selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'bg-[#1E2E16] text-slate-300'
                     }`}
                   >
                     {BIKE_PHYSICS[key].label}
@@ -294,11 +294,11 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               step={0.1}
               value={bikeWeight}
               onChange={(event) => setBikeWeight(event.target.value)}
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-orange-500"
+              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
             />
           </section>
 
-          <section className="mt-3 rounded-xl border border-white/10 bg-slate-900/70 p-3">
+          <section className="mt-3 rounded-xl border border-white/10 bg-[#151B1D]/70 p-3">
             <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
               <Gauge size={11} />
               Kalibrasi FTP &amp; Zona Daya
@@ -316,7 +316,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               step={1}
               value={ftp}
               onChange={(event) => setFtp(event.target.value)}
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-orange-500"
+              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
             />
 
             {suggestedFtp !== null && (
@@ -333,7 +333,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               {zoneRanges.map((zone) => (
                 <li
                   key={zone.zone}
-                  className="flex items-center gap-2 rounded-lg bg-slate-800/60 px-2 py-1.5"
+                  className="flex items-center gap-2 rounded-lg bg-[#1E2E16]/60 px-2 py-1.5"
                 >
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -398,11 +398,11 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
           </section>
         </div>
 
-        <footer className="shrink-0 border-t border-white/10 bg-[#111827] px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <footer className="shrink-0 border-t border-white/10 bg-[#151B1D] px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <button
             type="button"
             onClick={handleSave}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-bold text-white transition active:scale-[0.99]"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] transition active:scale-[0.99]"
           >
             <Save size={16} />
             Simpan Profil
@@ -417,7 +417,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
 
 function StatBox({ label, value, unit }: { label: string; value: string; unit: string }) {
   return (
-    <div className="flex flex-col items-center rounded-lg bg-slate-800/70 px-1 py-1.5">
+    <div className="flex flex-col items-center rounded-lg bg-[#1E2E16]/70 px-1 py-1.5">
       <dt className="text-[8px] uppercase leading-tight tracking-wide text-slate-400">{label}</dt>
       <dd className="text-[12px] font-bold leading-tight tabular-nums text-slate-100">{value}</dd>
       <span className="text-[8px] text-slate-500">{unit}</span>

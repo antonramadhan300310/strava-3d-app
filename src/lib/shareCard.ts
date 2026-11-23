@@ -1,3 +1,4 @@
+import { allmovaFontStack } from '@/components/AllmovaLogo';
 import { formatActivityDate, type ActivityRecord } from './activity';
 import { elevationProfile } from './flyover';
 import {
@@ -26,11 +27,11 @@ export const CARD_SIZES: Record<ShareCardStyle, { width: number; height: number 
   sticker: { width: 1080, height: 1080 },
 };
 
-const ACCENT = '#f97316';
-const ACCENT_SOFT = '#fb923c';
-const ACCENT_LIGHT = '#fdba74';
-const INK = '#0f172a';
-const FONT_STACK = '"Inter","Segoe UI",Roboto,system-ui,-apple-system,sans-serif';
+const ACCENT = '#B9F51E';
+const ACCENT_SOFT = '#A5E012';
+const ACCENT_LIGHT = '#B9F51E';
+const INK = '#0D1112';
+
 
 /** Poster safe margins, shared by every block so the layout stays aligned. */
 const MARGIN = 72;
@@ -44,7 +45,7 @@ const GRID_GAP = 32;
 export const POSTER_ROUTE_BAND = { top: 380, bottom: 800, left: 90, right: 990 };
 
 function font(size: number, weight: number | string = 600): string {
-  return `${weight} ${size}px ${FONT_STACK}`;
+  return `${weight} ${size}px ${allmovaFontStack()}`;
 }
 
 export function buildShareCardData(activity: ActivityRecord): ShareCardData {
@@ -79,7 +80,7 @@ export function shareCardFileName(style: ShareCardStyle, title: string): string 
     .replace(/^-+|-+$/g, '')
     .slice(0, 40);
   const stamp = Date.now().toString(36);
-  return `tracker3d-${style}-${slug || 'aktivitas'}-${stamp}.png`;
+  return `allmova-${style}-${slug || 'aktivitas'}-${stamp}.png`;
 }
 
 export type ShareCardInput = {
@@ -180,7 +181,7 @@ function drawBadgeRow(ctx: CanvasRenderingContext2D, data: ShareCardData, width:
   ctx.fillStyle = ACCENT;
   ctx.fill();
 
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = INK;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(data.badge, MARGIN + pillWidth / 2, pillY + pillHeight / 2 + 1);
@@ -322,8 +323,8 @@ function drawElevation(
   ctx.lineCap = 'round';
 
   const fill = ctx.createLinearGradient(0, box.y, 0, box.y + box.height);
-  fill.addColorStop(0, 'rgba(249,115,22,0.55)');
-  fill.addColorStop(1, 'rgba(249,115,22,0.03)');
+  fill.addColorStop(0, 'rgba(185,245,30,0.55)');
+  fill.addColorStop(1, 'rgba(185,245,30,0.03)');
   trace();
   ctx.lineTo(box.x + box.width, box.y + box.height);
   ctx.lineTo(box.x, box.y + box.height);
@@ -367,8 +368,8 @@ function drawFallbackBackdrop(
 ) {
   const sky = ctx.createLinearGradient(0, 0, 0, height);
   sky.addColorStop(0, '#1e293b');
-  sky.addColorStop(0.5, '#0f172a');
-  sky.addColorStop(1, '#020617');
+  sky.addColorStop(0.5, '#0D1112');
+  sky.addColorStop(1, '#0D1112');
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, width, height);
 
@@ -400,16 +401,16 @@ function drawRouteGlow(
   ctx.lineCap = 'round';
 
   ctx.save();
-  ctx.shadowColor = 'rgba(249,115,22,0.85)';
+  ctx.shadowColor = 'rgba(185,245,30,0.85)';
   ctx.shadowBlur = 42;
   trace();
-  ctx.strokeStyle = 'rgba(249,115,22,0.5)';
+  ctx.strokeStyle = 'rgba(185,245,30,0.5)';
   ctx.lineWidth = 30;
   ctx.stroke();
   ctx.restore();
 
   ctx.save();
-  ctx.shadowColor = 'rgba(249,115,22,0.95)';
+  ctx.shadowColor = 'rgba(185,245,30,0.95)';
   ctx.shadowBlur = 26;
   trace();
   ctx.strokeStyle = ACCENT;

@@ -1,4 +1,5 @@
 import { Muxer, StreamTarget } from 'mp4-muxer';
+import { allmovaFontStack, drawAllmovaLogoOnCanvas } from '@/components/AllmovaLogo';
 import { formatActivityDate, type ActivityRecord } from './activity';
 import {
   averageSpeedKmh,
@@ -152,6 +153,8 @@ export type ExportFlyoverVideoOptions = {
   /** Auto duration from `calculateFlyoverDuration`; drives frames and bitrate. */
   durationSeconds: number;
   hud: FlyoverExportHud;
+  /** Draws the ALLMOVA mark on every frame; Pro exports only. */
+  watermark?: boolean;
   /** Drives the map to `progress` and returns the rendered frame. */
   captureFrame: (progress: number) => Promise<FlyoverFrameCapture | null>;
   signal?: AbortSignal;
@@ -253,6 +256,7 @@ export async function exportFlyoverVideo({
   fps,
   durationSeconds,
   hud,
+  watermark = false,
   captureFrame,
   signal,
   onProgress,
@@ -321,10 +325,11 @@ export async function exportFlyoverVideo({
       const frame = await captureFrame(progress);
       throwIfAborted(signal);
 
-      context.fillStyle = '#0f172a';
+      context.fillStyle = '#0D1112';
       context.fillRect(0, 0, quality.width, quality.height);
       if (frame) drawCapturedFrame(context, frame, quality.width, quality.height);
       drawHud(context, hud, progress, quality.width, quality.height);
+      if (watermark) drawVideoWatermark(context, quality.width, quality.height);
 
       let videoFrame: VideoFrame | null = null;
       try {
@@ -487,11 +492,11 @@ function drawCapturedFrame(
   context.save();
   context.beginPath();
   context.arc(markerX, markerY, 22 * markerScale, 0, Math.PI * 2);
-  context.fillStyle = 'rgba(249,115,22,0.28)';
+  context.fillStyle = 'rgba(185,245,30,0.28)';
   context.fill();
   context.beginPath();
   context.arc(markerX, markerY, 12 * markerScale, 0, Math.PI * 2);
-  context.fillStyle = '#f97316';
+  context.fillStyle = '#B9F51E';
   context.fill();
   context.lineWidth = 4 * markerScale;
   context.strokeStyle = '#ffffff';
@@ -499,10 +504,8 @@ function drawCapturedFrame(
   context.restore();
 }
 
-const FONT_STACK = '"Inter","Segoe UI",Roboto,system-ui,-apple-system,sans-serif';
-
 function font(size: number, weight: number | string = 600): string {
-  return `${weight} ${size}px ${FONT_STACK}`;
+  return `${weight} ${size}px ${allmovaFontStack()}`;
 }
 
 function roundedRect(
@@ -566,8 +569,8 @@ function drawHud(
   const designHeight = FLYOVER_EXPORT_HEIGHT;
 
   const scrim = context.createLinearGradient(0, 0, 0, 340);
-  scrim.addColorStop(0, 'rgba(2,6,23,0.88)');
-  scrim.addColorStop(1, 'rgba(2,6,23,0)');
+  scrim.addColorStop(0, 'rgba(13,17,18,0.88)');
+  scrim.addColorStop(1, 'rgba(13,17,18,0)');
   context.fillStyle = scrim;
   context.fillRect(0, 0, designWidth, 340);
 
@@ -577,9 +580,9 @@ function drawHud(
   context.font = font(24, 800);
   const badgeWidth = context.measureText(hud.badge).width + 44;
   roundedRect(context, HUD_MARGIN, 56, badgeWidth, 46, 23);
-  context.fillStyle = '#f97316';
+  context.fillStyle = '#B9F51E';
   context.fill();
-  context.fillStyle = '#ffffff';
+  context.fillStyle = '#0D1112';
   context.fillText(hud.badge, HUD_MARGIN + 22, 80);
 
   context.font = font(42, 700);
@@ -599,7 +602,7 @@ function drawHud(
   const cardWidth = designWidth - cardX * 2;
 
   roundedRect(context, cardX, cardY, cardWidth, CARD_HEIGHT, 28);
-  context.fillStyle = 'rgba(15,23,42,0.78)';
+  context.fillStyle = 'rgba(21,27,29,0.82)';
   context.fill();
   context.lineWidth = 2;
   context.strokeStyle = 'rgba(255,255,255,0.14)';
@@ -639,7 +642,7 @@ function drawHud(
 
   const fillWidth = Math.max(barHeight, barWidth * clamped);
   roundedRect(context, barX, barY, fillWidth, barHeight, barHeight / 2);
-  context.fillStyle = '#f97316';
+  context.fillStyle = '#B9F51E';
   context.fill();
 
   context.textAlign = 'right';
@@ -648,4 +651,24 @@ function drawHud(
   context.fillText(`${Math.round(clamped * 100)}%`, barX + barWidth, barY - 20);
   context.textAlign = 'left';
   context.restore();
+}
+
+/** Bottom-right ALLMOVA mark at 78% opacity, sized against the 720 px frame. */
+function drawVideoWatermark(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+) {
+  const scale = (width / FLYOVER_EXPORT_WIDTH) * 0.42;
+  const logoWidth = 280 * scale;
+  const logoHeight = 64 * scale;
+  const marginX = 12 * (width / FLYOVER_EXPORT_WIDTH);
+  const marginY = 10 * (width / FLYOVER_EXPORT_WIDTH);
+  drawAllmovaLogoOnCanvas(
+    context,
+    width - logoWidth - marginX,
+    height - logoHeight - marginY,
+    scale,
+    { variant: 'compact', opacity: 0.78 },
+  );
 }

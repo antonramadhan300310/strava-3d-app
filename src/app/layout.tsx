@@ -1,9 +1,18 @@
 import type { Metadata, Viewport } from "next";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-plus-jakarta",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Personal 3D Activity Tracker",
-  description: "3D Activity Tracker & Route Builder",
+  title: "ALLMOVA — Every Move Matters",
+  description: "Pelacak aktivitas 3D, rute, dan rekor latihan ALLMOVA.",
+  applicationName: "ALLMOVA",
 };
 
 export const viewport: Viewport = {
@@ -12,7 +21,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#020617",
+  themeColor: "#0D1112",
 };
 
 export default function RootLayout({
@@ -22,7 +31,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="id">
-      <body className="antialiased select-none">{children}</body>
+      <body className={`${jakarta.variable} ${jakarta.className} antialiased select-none`}>
+        {children}
+      </body>
     </html>
   );
 }

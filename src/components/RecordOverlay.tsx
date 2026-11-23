@@ -125,7 +125,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
           <button
             type="button"
             onClick={recorder.dismissNotice}
-            className="mx-auto max-w-md rounded-xl bg-slate-900/90 px-3 py-2 text-center text-xs font-medium text-slate-100 shadow-lg"
+            className="mx-auto max-w-md rounded-xl bg-[#151B1D]/90 px-3 py-2 text-center text-xs font-medium text-slate-100 shadow-lg"
             role="status"
           >
             {recorder.notice}
@@ -133,7 +133,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
         )}
 
         {idle && (
-          <div className="mx-auto w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/90 p-2 shadow-2xl backdrop-blur">
+          <div className="mx-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/90 p-2 shadow-2xl backdrop-blur">
             <p className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-wide text-slate-400">
               Jenis aktivitas
             </p>
@@ -147,7 +147,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
                     onClick={() => recorder.changeActivityType(key)}
                     aria-pressed={selected}
                     className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[11px] font-semibold transition active:scale-95 ${
-                      selected ? 'bg-orange-500 text-white' : 'text-slate-300 active:bg-slate-800'
+                      selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'text-slate-300 active:bg-[#1E2E16]'
                     }`}
                   >
                     {PROFILE_ICONS[key]}
@@ -217,7 +217,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
             <button
               type="button"
               disabled
-              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-800 py-4 text-base font-bold text-slate-300 shadow-2xl"
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#1E2E16] py-4 text-base font-bold text-slate-300 shadow-2xl"
             >
               <Loader2 size={22} className="animate-spin" />
               Menempelkan ke jalan…
@@ -227,8 +227,8 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
       </div>
 
       {showSave && finished && recorder.finishResult && (
-        <div className="absolute inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-950/70 px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] backdrop-blur-sm sm:items-center sm:pb-4">
-          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl">
+        <div className="absolute inset-0 z-50 flex items-end justify-center overflow-y-auto bg-[#0D1112]/70 px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] backdrop-blur-sm sm:items-center sm:pb-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#151B1D] p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-100">Simpan Aktivitas</h2>
               <button
@@ -238,13 +238,13 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
                   recorder.discardFinish();
                 }}
                 aria-label="Tutup"
-                className="rounded-full p-1 text-slate-400 active:bg-slate-800"
+                className="rounded-full p-1 text-slate-400 active:bg-[#1E2E16]"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <dl className="mb-3 grid grid-cols-3 gap-2 rounded-xl bg-slate-800/70 px-3 py-2 text-center">
+            <dl className="mb-3 grid grid-cols-3 gap-2 rounded-xl bg-[#1E2E16]/70 px-3 py-2 text-center">
               <SummaryItem label="Jarak" value={`${(recorder.finishResult.distanceMeters / 1000).toFixed(2)} km`} />
               <SummaryItem label="Durasi" value={recorder.formatted.duration} />
               <SummaryItem
@@ -261,7 +261,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               autoFocus
-              className="mb-3 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-orange-500"
+              className="mb-3 w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
               placeholder="Lari pagi"
             />
 
@@ -284,8 +284,8 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
                       onClick={() => setRpe(selected ? null : entry.value)}
                       className={`rounded-lg py-1.5 text-xs font-bold transition active:scale-95 ${
                         selected
-                          ? 'bg-orange-500 text-white'
-                          : 'bg-slate-800 text-slate-300 active:bg-slate-700'
+                          ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+                          : 'bg-[#1E2E16] text-slate-300 active:bg-[#2A3538]'
                       }`}
                     >
                       {entry.value}
@@ -301,7 +301,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
               type="button"
               onClick={() => void confirmSave()}
               disabled={saving}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-semibold text-[#0D1112] transition active:scale-[0.98] disabled:opacity-60"
             >
               {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
               {saving ? 'Menyimpan…' : 'Simpan ke Supabase'}
@@ -318,7 +318,7 @@ function TelemetryCard({ recorder }: { recorder: ActivityRecorderState }) {
   const paused = recorder.isPaused;
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/90 px-4 py-3 text-slate-100 shadow-2xl backdrop-blur">
+    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/90 px-4 py-3 text-slate-100 shadow-2xl backdrop-blur">
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
           <span
@@ -375,8 +375,8 @@ function RestorePrompt({ recorder }: { recorder: ActivityRecorderState }) {
   });
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/70 px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] backdrop-blur-sm">
-      <div className="my-auto w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl">
+    <div className="absolute inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[#0D1112]/70 px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] backdrop-blur-sm">
+      <div className="my-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#151B1D] p-4 shadow-2xl">
         <h2 className="mb-1 text-sm font-semibold text-slate-100">Pulihkan sesi rekaman?</h2>
         <p className="mb-4 text-xs text-slate-400">
           Ditemukan rekaman {ACTIVITY_NAMES[saved.activityType]} dengan {saved.points.length} titik
@@ -386,7 +386,7 @@ function RestorePrompt({ recorder }: { recorder: ActivityRecorderState }) {
           <button
             type="button"
             onClick={() => void recorder.restoreSession()}
-            className="flex items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-semibold text-white transition active:scale-[0.98]"
+            className="flex items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-semibold text-[#0D1112] transition active:scale-[0.98]"
           >
             <RotateCcw size={16} />
             Pulihkan Sesi

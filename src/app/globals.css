@@ -2,12 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body {
+:root {
+  --allmova-charcoal: #0d1112;
+  --allmova-surface: #151b1d;
+  --allmova-olive: #1e2e16;
+  --allmova-lime: #b9f51e;
+  --allmova-lime-hover: #a5e012;
+}
+
+html,
+body {
   margin: 0;
   padding: 0;
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background-color: #0f172a;
+  background-color: var(--allmova-charcoal);
   color: #f8fafc;
+  font-family: var(--font-plus-jakarta), "Plus Jakarta Sans", "Segoe UI", Roboto,
+    system-ui, -apple-system, sans-serif;
+}
+
+/* Active Lime surfaces always carry Charcoal Black content for sun contrast. */
+.allmova-on-lime {
+  color: var(--allmova-charcoal);
+}
+
+::selection {
+  background-color: var(--allmova-lime);
+  color: var(--allmova-charcoal);
 }

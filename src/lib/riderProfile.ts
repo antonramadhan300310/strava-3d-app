@@ -13,7 +13,7 @@ export type RiderProfile = {
 export const RIDER_PROFILE_KEY = 'tracker3d_rider_profile_v1';
 
 export const DEFAULT_RIDER_PROFILE: RiderProfile = {
-  displayName: 'Atlet Tracker 3D',
+  displayName: 'Atlet ALLMOVA',
   bodyWeightKg: 68,
   bikeWeightKg: 9.5,
   bikeType: 'road',
@@ -52,7 +52,7 @@ export const POWER_ZONE_DEFINITIONS: PowerZoneDefinition[] = [
   { zone: 'Z1', name: 'Pemulihan', color: '#64748b', lowerFraction: 0, upperFraction: 0.55 },
   { zone: 'Z2', name: 'Endurance', color: '#22c55e', lowerFraction: 0.55, upperFraction: 0.75 },
   { zone: 'Z3', name: 'Tempo', color: '#eab308', lowerFraction: 0.75, upperFraction: 0.9 },
-  { zone: 'Z4', name: 'Threshold', color: '#f97316', lowerFraction: 0.9, upperFraction: 1.05 },
+  { zone: 'Z4', name: 'Threshold', color: '#B9F51E', lowerFraction: 0.9, upperFraction: 1.05 },
   { zone: 'Z5', name: 'VO2 Max', color: '#ef4444', lowerFraction: 1.05, upperFraction: 1.2 },
   { zone: 'Z6', name: 'Anaerobik', color: '#a855f7', lowerFraction: 1.2, upperFraction: null },
 ];

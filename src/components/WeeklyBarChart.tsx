@@ -44,7 +44,7 @@ export default function WeeklyBarChart({ activities, goals }: Props) {
   const totalSessions = weeks.reduce((total, week) => total + week.sessionCount, 0);
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-slate-900/80 p-3 shadow-lg">
+    <section className="rounded-2xl border border-white/10 bg-[#151B1D]/80 p-3 shadow-lg">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-slate-200">Perbandingan 12 Minggu</p>
         <span className="text-[10px] text-slate-500">Jarak (km)</span>
@@ -59,8 +59,8 @@ export default function WeeklyBarChart({ activities, goals }: Props) {
             onClick={() => setSport(option.key)}
             className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold transition active:scale-95 ${
               sport === option.key
-                ? 'bg-orange-500 text-white'
-                : 'bg-slate-800/80 text-slate-300'
+                ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+                : 'bg-[#1E2E16]/80 text-slate-300'
             }`}
           >
             {option.label}
@@ -105,9 +105,9 @@ export default function WeeklyBarChart({ activities, goals }: Props) {
                     <span
                       className={`w-full rounded-t-[3px] transition-all ${
                         week.isCurrentWeek
-                          ? 'bg-orange-500'
+                          ? 'bg-[#B9F51E] hover:bg-[#A5E012]'
                           : isSelected
-                            ? 'bg-orange-400/70'
+                            ? 'bg-[#A5E012]/70'
                             : 'bg-slate-600/80'
                       } ${isSelected ? 'ring-1 ring-white/70' : ''}`}
                       style={{ height: `${height}%` }}
@@ -124,7 +124,7 @@ export default function WeeklyBarChart({ activities, goals }: Props) {
                 key={`${week.weekKey}-label`}
                 className={`flex-1 text-center text-[7px] font-semibold tabular-nums ${
                   index === selectedIndex
-                    ? 'text-orange-300'
+                    ? 'text-[#B9F51E]'
                     : week.isCurrentWeek
                       ? 'text-slate-300'
                       : 'text-slate-500'
@@ -136,7 +136,7 @@ export default function WeeklyBarChart({ activities, goals }: Props) {
           </div>
 
           {selectedWeek && (
-            <div className="mt-2 rounded-xl bg-slate-800/60 px-2.5 py-2">
+            <div className="mt-2 rounded-xl bg-[#1E2E16]/60 px-2.5 py-2">
               <p className="text-[10px] font-semibold text-slate-200">
                 Minggu {selectedWeek.rangeText}:
               </p>

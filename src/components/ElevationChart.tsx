@@ -38,7 +38,7 @@ export default function ElevationChart({ coordinates, progress = 0 }: Props) {
 
   if (!geometry) {
     return (
-      <div className="flex h-16 items-center justify-center rounded-xl bg-slate-800/60 text-[11px] text-slate-500">
+      <div className="flex h-16 items-center justify-center rounded-xl bg-[#1E2E16]/60 text-[11px] text-slate-500">
         Profil elevasi tidak tersedia
       </div>
     );
@@ -47,7 +47,7 @@ export default function ElevationChart({ coordinates, progress = 0 }: Props) {
   const clamped = Math.min(Math.max(progress, 0), 1);
 
   return (
-    <div className="relative overflow-hidden rounded-xl bg-slate-800/60">
+    <div className="relative overflow-hidden rounded-xl bg-[#1E2E16]/60">
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         preserveAspectRatio="none"
@@ -57,8 +57,8 @@ export default function ElevationChart({ coordinates, progress = 0 }: Props) {
       >
         <defs>
           <linearGradient id="elevation-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#f97316" stopOpacity="0.5" />
-            <stop offset="100%" stopColor="#f97316" stopOpacity="0.02" />
+            <stop offset="0%" stopColor="#B9F51E" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#B9F51E" stopOpacity="0.02" />
           </linearGradient>
           <linearGradient id="elevation-fill-done" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#fde047" stopOpacity="0.65" />
@@ -73,7 +73,7 @@ export default function ElevationChart({ coordinates, progress = 0 }: Props) {
         <polyline
           points={geometry.line}
           fill="none"
-          stroke="#fb923c"
+          stroke="#A5E012"
           strokeWidth="1.5"
           strokeLinejoin="round"
           strokeLinecap="round"

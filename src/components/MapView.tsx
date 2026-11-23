@@ -24,7 +24,7 @@ const HILLSHADE_LAYER_ID = 'map-hillshade';
 const ROUTE_SOURCE_ID = 'route-line';
 const ROUTE_CASING_LAYER_ID = 'route-line-casing';
 const ROUTE_LAYER_ID = 'route-line-layer';
-const ROUTE_COLOR = '#f97316';
+const ROUTE_COLOR = '#B9F51E';
 const TRACK_SOURCE_ID = 'live-track';
 const TRACK_CASING_LAYER_ID = 'live-track-casing';
 const TRACK_LAYER_ID = 'live-track-layer';
@@ -106,7 +106,7 @@ const EMPTY_HEATMAP_LINES: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
 const GPS_BADGE_STYLES: Record<GpsQuality, string> = {
   good: 'bg-emerald-500/95 text-white',
   fair: 'bg-amber-400/95 text-slate-900',
-  poor: 'bg-slate-900/90 text-slate-100',
+  poor: 'bg-[#151B1D]/90 text-slate-100',
 };
 
 const MapView = forwardRef<MapViewHandle, Props>(function MapView(
@@ -197,7 +197,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
           type: 'line',
           source: ROUTE_SOURCE_ID,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': '#0f172a', 'line-width': 9, 'line-opacity': 0.5 },
+          paint: { 'line-color': '#0D1112', 'line-width': 9, 'line-opacity': 0.5 },
         });
       }
       if (!map.getLayer(ROUTE_LAYER_ID)) {
@@ -222,7 +222,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
           type: 'line',
           source: TRACK_SOURCE_ID,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': '#0f172a', 'line-width': 10, 'line-opacity': 0.45 },
+          paint: { 'line-color': '#0D1112', 'line-width': 10, 'line-opacity': 0.45 },
         });
       }
       if (!map.getLayer(TRACK_LAYER_ID)) {
@@ -408,7 +408,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     markersRef.current = waypoints.map((position, index) => {
       const element = document.createElement('div');
       element.className =
-        'flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-orange-500 text-[11px] font-bold text-white shadow-lg';
+        'flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#B9F51E] hover:bg-[#A5E012] text-[11px] font-bold text-[#0D1112] shadow-lg';
       element.textContent = String(index + 1);
       // Markers live inside the canvas container, so an un-stopped tap would
       // also register as a map click and add a duplicate waypoint.
@@ -538,7 +538,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
           </p>
         )}
         {notice && (
-          <p className="rounded-full bg-slate-900/90 px-4 py-1.5 text-center text-xs font-medium text-slate-100 shadow-lg">
+          <p className="rounded-full bg-[#151B1D]/90 px-4 py-1.5 text-center text-xs font-medium text-slate-100 shadow-lg">
             {notice}
           </p>
         )}
@@ -550,7 +550,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
           onClick={onProviderBadgeClick}
           aria-label="Ganti mesin peta"
           title="Ganti mesin peta"
-          className="rounded-full border border-white/15 bg-slate-900/85 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-100 shadow-lg backdrop-blur transition active:scale-95"
+          className="rounded-full border border-white/15 bg-[#151B1D]/85 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-100 shadow-lg backdrop-blur transition active:scale-95"
         >
           {MAP_PROVIDER_LABELS[provider]}
         </button>
@@ -734,7 +734,7 @@ export function FloatingButton({
       aria-label={label}
       aria-busy={busy}
       disabled={busy || disabled}
-      className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-xl backdrop-blur transition active:scale-95 active:bg-slate-800 disabled:opacity-40"
+      className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-[#151B1D]/85 text-slate-100 shadow-xl backdrop-blur transition active:scale-95 active:bg-[#1E2E16] disabled:opacity-40"
     >
       {busy ? (
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-500 border-t-slate-100" />

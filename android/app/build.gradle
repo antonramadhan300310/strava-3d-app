@@ -5,10 +5,10 @@ def keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 def hasReleaseKeystore = keystorePath != null && !keystorePath.trim().isEmpty()
 
 android {
-    namespace "com.personal.tracker3d"
+    namespace "com.allmova.app"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.personal.tracker3d"
+        applicationId "com.allmova.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 100 + runNumber

@@ -146,7 +146,7 @@ export default function ShareCardModal({
   }, [activity.title, busy, onNotice, style]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/95 backdrop-blur">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#0D1112]/95 backdrop-blur">
       <header className="flex items-center gap-2 px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold text-slate-100">Bagikan Aktivitas</h2>
@@ -156,14 +156,14 @@ export default function ShareCardModal({
           type="button"
           onClick={onClose}
           aria-label="Tutup pratinjau"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 active:scale-95"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#151B1D]/85 text-slate-100 active:scale-95"
         >
           <X size={20} />
         </button>
       </header>
 
       <div className="px-3">
-        <div className="mx-auto flex w-full max-w-md gap-1 rounded-2xl border border-white/10 bg-slate-900/90 p-1">
+        <div className="mx-auto flex w-full max-w-md gap-1 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-1">
           {STYLES.map((option) => {
             const active = option.key === style;
             return (
@@ -174,8 +174,8 @@ export default function ShareCardModal({
                 aria-pressed={active}
                 className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] font-semibold transition ${
                   active
-                    ? 'bg-orange-500 text-white shadow-lg'
-                    : 'text-slate-300 active:bg-slate-800'
+                    ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112] shadow-lg'
+                    : 'text-slate-300 active:bg-[#1E2E16]'
                 }`}
               >
                 {option.icon}
@@ -201,8 +201,8 @@ export default function ShareCardModal({
               />
             ) : null}
             {rendering && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60">
-                <Loader2 size={24} className="animate-spin text-orange-400" />
+              <div className="absolute inset-0 flex items-center justify-center bg-[#0D1112]/60">
+                <Loader2 size={24} className="animate-spin text-[#B9F51E]" />
               </div>
             )}
           </div>
@@ -227,7 +227,7 @@ export default function ShareCardModal({
             type="button"
             onClick={handleShare}
             disabled={!preview || busy !== null}
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-orange-500 py-3.5 text-sm font-bold text-white shadow-2xl transition active:scale-[0.98] disabled:opacity-50"
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#B9F51E] hover:bg-[#A5E012] py-3.5 text-sm font-bold text-[#0D1112] shadow-2xl transition active:scale-[0.98] disabled:opacity-50"
           >
             {busy === 'share' ? (
               <Loader2 size={18} className="animate-spin" />
@@ -240,7 +240,7 @@ export default function ShareCardModal({
             type="button"
             onClick={handleSave}
             disabled={!preview || busy !== null}
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-slate-900/90 py-3.5 text-sm font-bold text-slate-100 shadow-2xl transition active:scale-[0.98] disabled:opacity-50"
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#151B1D]/90 py-3.5 text-sm font-bold text-slate-100 shadow-2xl transition active:scale-[0.98] disabled:opacity-50"
           >
             {busy === 'save' ? (
               <Loader2 size={18} className="animate-spin" />

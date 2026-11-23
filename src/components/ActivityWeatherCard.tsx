@@ -49,7 +49,7 @@ export default function ActivityWeatherCard({ weather, loading = false }: Props)
   const tone = ICON_TONES[weather.iconType] ?? ICON_TONES.cloudy;
 
   return (
-    <div className="mt-2.5 rounded-xl border border-white/10 bg-slate-800/60 p-2.5">
+    <div className="mt-2.5 rounded-xl border border-white/10 bg-[#1E2E16]/60 p-2.5">
       <p className="mb-2 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">
         <CloudSun size={11} />
         Cuaca Saat Aktivitas
@@ -114,22 +114,22 @@ function WeatherStat({
 function WeatherSkeleton() {
   return (
     <div
-      className="mt-2.5 animate-pulse rounded-xl border border-white/10 bg-slate-800/60 p-2.5"
+      className="mt-2.5 animate-pulse rounded-xl border border-white/10 bg-[#1E2E16]/60 p-2.5"
       aria-hidden="true"
     >
-      <div className="mb-2 h-2.5 w-28 rounded bg-slate-700/60" />
+      <div className="mb-2 h-2.5 w-28 rounded bg-[#2A3538]/60" />
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
-          <span className="h-11 w-11 rounded-full bg-slate-700/70" />
+          <span className="h-11 w-11 rounded-full bg-[#2A3538]/70" />
           <div className="space-y-1.5">
-            <div className="h-5 w-14 rounded bg-slate-700/70" />
-            <div className="h-2.5 w-20 rounded bg-slate-700/60" />
-            <div className="h-2 w-16 rounded bg-slate-700/50" />
+            <div className="h-5 w-14 rounded bg-[#2A3538]/70" />
+            <div className="h-2.5 w-20 rounded bg-[#2A3538]/60" />
+            <div className="h-2 w-16 rounded bg-[#2A3538]/50" />
           </div>
         </div>
         <div className="space-y-2">
-          <div className="h-2.5 w-24 rounded bg-slate-700/60" />
-          <div className="h-2.5 w-20 rounded bg-slate-700/50" />
+          <div className="h-2.5 w-24 rounded bg-[#2A3538]/60" />
+          <div className="h-2.5 w-20 rounded bg-[#2A3538]/50" />
         </div>
       </div>
     </div>
