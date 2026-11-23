@@ -13,6 +13,8 @@ import {
   resolveMapStyle,
   type BaseMapStyle,
 } from '@/lib/mapStyle';
+import { applyCleanAllmovaMapStyle } from '@/lib/mapStyleSanitizer';
+import { drawRouteEndpointBadge, updateRouteEndpointMarkers } from '@/lib/routeEndpoints';
 import {
   FLYOVER_PITCH,
   FLYOVER_ZOOM,
@@ -37,10 +39,8 @@ const BASE_CASING_LAYER_ID = 'flyover-base-casing';
 const BASE_LAYER_ID = 'flyover-base-line';
 const REVEAL_GLOW_LAYER_ID = 'flyover-reveal-glow';
 const REVEAL_LAYER_ID = 'flyover-reveal-line';
-const ENDPOINTS_SOURCE_ID = 'flyover-endpoints';
-const ENDPOINTS_LAYER_ID = 'flyover-endpoints-layer';
 const BASE_COLOR = '#B9F51E';
-const REVEAL_COLOR = '#fde047';
+const REVEAL_COLOR = '#B9F51E';
 
 /** Keeps the marker in the lower third so the 3D panorama ahead stays visible. */
 const FOLLOW_PADDING = { top: 200, bottom: 40, left: 0, right: 0 };
@@ -110,6 +110,7 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
   const baseStyleRef = useRef<FlyoverMapStyle>('outdoor');
   const appliedStyleRef = useRef(`${provider}:outdoor`);
   const markerRef = useRef<maplibregl.Marker | null>(null);
+  const endpointMarkersRef = useRef<maplibregl.Marker[]>([]);
   const bearingRef = useRef<number | null>(null);
   /** Spring-followed camera centre, so the view trails the marker instead of locking to it. */
   const cameraCenterRef = useRef<[number, number] | null>(null);
@@ -160,11 +161,19 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
     // setStyle() (or a late style load) drops custom sources, so they are rebuilt.
     const onStyleLoad = () => {
       applySky(map);
+      applyCleanAllmovaMapStyle(map, {
+        isSatellite: baseStyleRef.current === 'satellite',
+      });
       installTerrain(map, providerRef.current, {
         source: TERRAIN_SOURCE_ID,
         hillshade: HILLSHADE_LAYER_ID,
       });
       installLayers(map, pathRef.current);
+      endpointMarkersRef.current = updateRouteEndpointMarkers(
+        map,
+        pathRef.current.coordinates,
+        endpointMarkersRef.current,
+      );
       setRevealProgress(map, revealRef.current);
     };
     map.on('style.load', onStyleLoad);
@@ -177,7 +186,8 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
       map.off('style.load', onStyleLoad);
       markerRef.current?.remove();
       markerRef.current = null;
-      removeEndpoints(map);
+      for (const marker of endpointMarkersRef.current) marker.remove();
+      endpointMarkersRef.current = [];
       map.remove();
       mapRef.current = null;
     };
@@ -187,6 +197,12 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+
+    endpointMarkersRef.current = updateRouteEndpointMarkers(
+      map,
+      path.coordinates,
+      endpointMarkersRef.current,
+    );
 
     const start = path.coordinates[0];
     bearingRef.current = null;
@@ -361,7 +377,6 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
           ]);
           // The poster needs the whole line lit, in the same Active Lime as the map.
           setRevealProgress(map, 1, BASE_COLOR);
-          showEndpoints(map, pathRef.current);
 
           frameRouteInBand(
             map,
@@ -370,10 +385,10 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
           paddingRef.current = 'none';
 
           await waitForIdle(map, CAPTURE_IDLE_TIMEOUT_MS);
-          return copyCanvas(map);
+          const snapshot = copyCanvas(map);
+          if (snapshot) drawEndpointsOnCapture(snapshot, map, pathRef.current);
+          return snapshot;
         } finally {
-          removeEndpoints(map);
-
           setRevealProgress(map, previousProgress);
           if (previousMarker) markerRef.current?.setLngLat(previousMarker);
 
@@ -670,61 +685,31 @@ function waitForIdle(map: maplibregl.Map, timeoutMs: number): Promise<void> {
 }
 
 /**
- * Draws start/finish dots as map layers, not DOM markers: only WebGL content
- * lands in the captured canvas, so HTML markers would be missing from the poster.
+ * HTML markers never reach the WebGL buffer, so the captured poster gets its
+ * start/finish badges painted onto the snapshot at the projected endpoints.
  */
-function showEndpoints(map: maplibregl.Map, path: FlyoverPath) {
-  removeEndpoints(map);
+function drawEndpointsOnCapture(
+  canvas: HTMLCanvasElement,
+  map: maplibregl.Map,
+  path: FlyoverPath,
+) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
 
+  const { width, height } = map.getCanvas().getBoundingClientRect();
+  if (width <= 0 || height <= 0) return;
+
+  const scaleX = canvas.width / width;
+  const scaleY = canvas.height / height;
+  const radius = 14 * Math.max(scaleX, scaleY);
   const first = path.coordinates[0];
   const last = path.coordinates[path.coordinates.length - 1];
 
-  map.addSource(ENDPOINTS_SOURCE_ID, {
-    type: 'geojson',
-    data: {
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          properties: { role: 'start' },
-          geometry: { type: 'Point', coordinates: [first[0], first[1]] },
-        },
-        {
-          type: 'Feature',
-          properties: { role: 'finish' },
-          geometry: { type: 'Point', coordinates: [last[0], last[1]] },
-        },
-      ],
-    },
-  });
+  const start = map.project([first[0], first[1]]);
+  drawRouteEndpointBadge(ctx, 'start', start.x * scaleX, start.y * scaleY, radius);
 
-  map.addLayer({
-    id: ENDPOINTS_LAYER_ID,
-    type: 'circle',
-    source: ENDPOINTS_SOURCE_ID,
-    paint: {
-      'circle-radius': 11,
-      'circle-color': [
-        'match',
-        ['get', 'role'],
-        'start',
-        '#ffffff',
-        BASE_COLOR,
-      ],
-      'circle-stroke-width': 4,
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-opacity': 0.95,
-    },
-  });
-}
-
-function removeEndpoints(map: maplibregl.Map) {
-  try {
-    if (map.getLayer(ENDPOINTS_LAYER_ID)) map.removeLayer(ENDPOINTS_LAYER_ID);
-    if (map.getSource(ENDPOINTS_SOURCE_ID)) map.removeSource(ENDPOINTS_SOURCE_ID);
-  } catch {
-    // A style swap may already have dropped them.
-  }
+  const finish = map.project([last[0], last[1]]);
+  drawRouteEndpointBadge(ctx, 'finish', finish.x * scaleX, finish.y * scaleY, radius);
 }
 
 function installLayers(map: maplibregl.Map, path: FlyoverPath) {
@@ -737,7 +722,11 @@ function installLayers(map: maplibregl.Map, path: FlyoverPath) {
       type: 'line',
       source: BASE_SOURCE_ID,
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#0D1112', 'line-width': 8, 'line-opacity': 0.5 },
+      paint: {
+        'line-color': '#0D1112',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 7.5, 14, 10, 18, 12.5],
+        'line-opacity': 0.94,
+      },
     });
   }
   if (!map.getLayer(BASE_LAYER_ID)) {
@@ -746,7 +735,11 @@ function installLayers(map: maplibregl.Map, path: FlyoverPath) {
       type: 'line',
       source: BASE_SOURCE_ID,
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': BASE_COLOR, 'line-width': 4, 'line-opacity': 0.35 },
+      paint: {
+        'line-color': BASE_COLOR,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4.8, 14, 6.8, 18, 8.5],
+        'line-opacity': 0.4,
+      },
     });
   }
 
@@ -761,9 +754,9 @@ function installLayers(map: maplibregl.Map, path: FlyoverPath) {
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: {
         'line-color': REVEAL_COLOR,
-        'line-width': 14,
-        'line-opacity': 0.28,
-        'line-blur': 6,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 15, 18, 18],
+        'line-opacity': 0.22,
+        'line-blur': 5,
         'line-gradient': gradient(0),
       },
     });
@@ -774,7 +767,12 @@ function installLayers(map: maplibregl.Map, path: FlyoverPath) {
       type: 'line',
       source: REVEAL_SOURCE_ID,
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': REVEAL_COLOR, 'line-width': 6, 'line-gradient': gradient(0) },
+      paint: {
+        'line-color': REVEAL_COLOR,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4.8, 14, 6.8, 18, 8.5],
+        'line-opacity': 1,
+        'line-gradient': gradient(0),
+      },
     });
   }
 }

@@ -21,6 +21,7 @@ import {
   paceSecondsPerKm,
 } from '@/lib/metrics';
 import { saveCardImage, shareCardImage } from '@/lib/shareImage';
+import { drawRouteEndpointBadge } from '@/lib/routeEndpoints';
 
 type Props = {
   activity: ActivityRecord;
@@ -145,10 +146,7 @@ function drawBackground(ctx: CanvasRenderingContext2D) {
   ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
 }
 
-function drawRoute(
-  ctx: CanvasRenderingContext2D,
-  points: ProjectedPoint[],
-) {
+function drawRoute(ctx: CanvasRenderingContext2D, points: ProjectedPoint[]) {
   if (points.length < 2) return;
 
   ctx.save();
@@ -156,51 +154,24 @@ function drawRoute(
   ctx.lineCap = 'round';
 
   traceRoute(ctx, points);
-  ctx.strokeStyle = 'rgba(185,245,30,0.14)';
-  ctx.lineWidth = 34;
+  ctx.strokeStyle = 'rgba(185,245,30,0.22)';
+  ctx.lineWidth = 16;
   ctx.stroke();
 
   traceRoute(ctx, points);
-  ctx.strokeStyle = 'rgba(185,245,30,0.32)';
-  ctx.lineWidth = 17;
+  ctx.strokeStyle = ALLMOVA_CHARCOAL;
+  ctx.lineWidth = 11;
   ctx.stroke();
 
   traceRoute(ctx, points);
-  ctx.shadowColor = 'rgba(185,245,30,0.85)';
-  ctx.shadowBlur = 28;
   ctx.strokeStyle = ALLMOVA_LIME;
-  ctx.lineWidth = 7;
+  ctx.lineWidth = 6.5;
   ctx.stroke();
   ctx.restore();
 
-  const start = points[0];
+  drawRouteEndpointBadge(ctx, 'start', points[0].x, points[0].y, 16);
   const finish = points[points.length - 1];
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(start.x, start.y, 18, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(34,197,94,0.28)';
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(start.x, start.y, 10, 0, Math.PI * 2);
-  ctx.fillStyle = '#22C55E';
-  ctx.fill();
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = '#FFFFFF';
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(finish.x, finish.y, 18, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(185,245,30,0.25)';
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(finish.x, finish.y, 10, 0, Math.PI * 2);
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fill();
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = ALLMOVA_LIME;
-  ctx.stroke();
-  ctx.restore();
+  drawRouteEndpointBadge(ctx, 'finish', finish.x, finish.y, 16);
 }
 
 function drawStats(

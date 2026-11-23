@@ -10,6 +10,7 @@ import {
   paceSecondsPerKm,
 } from './metrics';
 import type { LngLatEle } from './polyline';
+import { drawRouteEndpointBadge } from './routeEndpoints';
 
 export type ShareCardStyle = 'poster' | 'sticker';
 
@@ -425,22 +426,8 @@ function drawRouteGlow(
 
   const start = points[0];
   const end = points[points.length - 1];
-  drawEndpoint(ctx, start.x, start.y, '#ffffff', 13);
-  drawEndpoint(ctx, end.x, end.y, ACCENT, 15);
-}
-
-function drawEndpoint(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, radius: number) {
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.55)';
-  ctx.shadowBlur = 16;
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.lineWidth = 5;
-  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-  ctx.stroke();
-  ctx.restore();
+  drawRouteEndpointBadge(ctx, 'start', start.x, start.y, 15);
+  drawRouteEndpointBadge(ctx, 'finish', end.x, end.y, 17);
 }
 
 const MERCATOR_LAT_LIMIT = 85.05112878;
