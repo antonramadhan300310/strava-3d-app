@@ -1,5 +1,5 @@
-import { length as turfLength } from '@turf/turf';
-import { decodePolyline, type LngLat, type LngLatEle } from './polyline';
+import { length as turfLength, distance as turfDistance } from '@turf/turf';
+import { decodePolyline, timestampOf, type LngLat, type LngLatEle } from './polyline';
 
 const VALHALLA_BASE = 'https://valhalla1.openstreetmap.de';
 
@@ -256,6 +256,51 @@ function altitudeLookup(altitudes: number[], pointCount: number): (index: number
   };
 }
 
+function cumulativeDistances(coordinates: LngLatEle[]): number[] {
+  const cumulative: number[] = [0];
+  for (let i = 1; i < coordinates.length; i += 1) {
+    cumulative.push(
+      cumulative[i - 1] +
+        turfDistance(
+          [coordinates[i - 1][0], coordinates[i - 1][1]],
+          [coordinates[i][0], coordinates[i][1]],
+          { units: 'meters' },
+        ),
+    );
+  }
+  return cumulative;
+}
+
+/**
+ * Carries the per-fix timestamps from the raw GPS track onto the re-sampled
+ * matched shape, keyed by relative distance along the route.
+ */
+function attachTimestamps(snapped: LngLatEle[], source: LngLatEle[]): LngLatEle[] {
+  const sourceTimes = source.map((coordinate) => timestampOf(coordinate));
+  if (sourceTimes.length < 2 || sourceTimes.some((time) => time === null)) return snapped;
+
+  const sourceCumulative = cumulativeDistances(source);
+  const snappedCumulative = cumulativeDistances(snapped);
+  const sourceTotal = sourceCumulative[sourceCumulative.length - 1];
+  const snappedTotal = snappedCumulative[snappedCumulative.length - 1];
+  if (!(sourceTotal > 0) || !(snappedTotal > 0)) return snapped;
+
+  const timeAtDistance = (distance: number): number => {
+    let index = 1;
+    while (index < sourceCumulative.length - 1 && sourceCumulative[index] < distance) index += 1;
+    const span = sourceCumulative[index] - sourceCumulative[index - 1];
+    const ratio = span > 0 ? (distance - sourceCumulative[index - 1]) / span : 0;
+    const from = sourceTimes[index - 1] as number;
+    const to = sourceTimes[index] as number;
+    return from + (to - from) * Math.min(Math.max(ratio, 0), 1);
+  };
+
+  return snapped.map((point, index) => {
+    const distance = (snappedCumulative[index] / snappedTotal) * sourceTotal;
+    return [point[0], point[1], point[2], timeAtDistance(distance)];
+  });
+}
+
 /**
  * Snaps a recorded GPS track onto the road/path network with Valhalla's free
  * FOSSGIS map-matching endpoint (`trace_route` with `shape_match: map_snap`).
@@ -269,11 +314,12 @@ export async function snapRouteToRoad(
   coordinates: (LngLat | LngLatEle)[],
   activityType: ActivityType,
 ): Promise<SnapRouteResult> {
-  const original: LngLatEle[] = coordinates.map(([lng, lat, ele]) => [
-    lng,
-    lat,
-    Number.isFinite(ele) ? (ele as number) : 0,
-  ]);
+  const original: LngLatEle[] = coordinates.map((coordinate) => {
+    const point = coordinate as LngLatEle;
+    const ele = Number.isFinite(point[2]) ? point[2] : 0;
+    const time = timestampOf(coordinate);
+    return time === null ? [point[0], point[1], ele] : [point[0], point[1], ele, time];
+  });
 
   const fallback: SnapRouteResult = {
     coordinates: original,
@@ -331,11 +377,12 @@ export async function snapRouteToRoad(
       points,
       points.map((_, index) => fallbackAltitude(index)),
     );
+    const withTimestamps = attachTimestamps(snapped, original);
 
     return {
-      coordinates: snapped,
-      distanceMeters: lengthMeters(snapped),
-      elevationGainMeters: calculateElevationGain(snapped),
+      coordinates: withTimestamps,
+      distanceMeters: lengthMeters(withTimestamps),
+      elevationGainMeters: calculateElevationGain(withTimestamps),
       snapped: true,
       usedGpsAltitude: usedFallback,
     };

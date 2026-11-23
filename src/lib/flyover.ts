@@ -1,5 +1,5 @@
 import { along, bearing, length as turfLength } from '@turf/turf';
-import type { LngLat, LngLatEle } from './polyline';
+import { toLngLatEle, type LngLat, type LngLatEle } from './polyline';
 
 export const FLYOVER_PITCH = 60;
 export const FLYOVER_ZOOM = 14.2;
@@ -37,7 +37,7 @@ export function buildFlyoverPath(coordinates: LngLatEle[]): FlyoverPath | null {
   const line: GeoJSON.Feature<GeoJSON.LineString> = {
     type: 'Feature',
     properties: {},
-    geometry: { type: 'LineString', coordinates },
+    geometry: { type: 'LineString', coordinates: coordinates.map(toLngLatEle) },
   };
 
   const cumulative: number[] = [0];

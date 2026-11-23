@@ -21,6 +21,7 @@ import { formatActivityDate, type ActivityRecord } from '@/lib/activity';
 import { buildGpx, gpxFileName } from '@/lib/gpx';
 import { exportGpxFile } from '@/lib/exportGpx';
 import { formatDistanceKm, formatDuration } from '@/lib/metrics';
+import { getPRHolderIds } from '@/lib/activityAnalytics';
 import type { ActivityType } from '@/lib/valhalla';
 
 const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
@@ -49,6 +50,11 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
       meters: recorded.reduce((total, activity) => total + activity.distanceMeters, 0),
     };
   }, [activities.activities]);
+
+  const prHolderIds = useMemo(
+    () => getPRHolderIds(activities.activities),
+    [activities.activities],
+  );
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
@@ -143,6 +149,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
             <ActivityCard
               key={String(activity.id)}
               activity={activity}
+              hasPR={prHolderIds.has(String(activity.id))}
               deleting={activities.deletingId === activity.id}
               onOpen={() => onOpen(activity)}
               onExport={() => void exportActivity(activity)}
@@ -261,12 +268,14 @@ function FilterTab({
 
 function ActivityCard({
   activity,
+  hasPR,
   deleting,
   onOpen,
   onExport,
   onDelete,
 }: {
   activity: ActivityRecord;
+  hasPR: boolean;
   deleting: boolean;
   onOpen: () => void;
   onExport: () => void;
@@ -286,6 +295,11 @@ function ActivityCard({
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
             <span className="truncate text-sm font-semibold text-slate-100">{activity.title}</span>
+            {hasPR && (
+              <span className="shrink-0 rounded-full border border-amber-300/50 bg-gradient-to-r from-amber-400/25 to-yellow-300/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+                🏆 PR
+              </span>
+            )}
             <span
               className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
                 activity.isPlannedRoute

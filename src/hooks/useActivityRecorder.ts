@@ -253,11 +253,15 @@ export function useActivityRecorder() {
     }
 
     const gpsAltitudes = recorded.map((point) => point.ele);
-    const gpsTrack: LngLatEle[] = recorded.map((point, index) => [
-      point.lng,
-      point.lat,
-      Number.isFinite(gpsAltitudes[index] ?? NaN) ? (gpsAltitudes[index] as number) : 0,
-    ]);
+    const gpsTrack: LngLatEle[] = recorded.map((point, index) => {
+      const ele = gpsAltitudes[index];
+      return [
+        point.lng,
+        point.lat,
+        Number.isFinite(ele ?? NaN) ? (ele as number) : 0,
+        point.time,
+      ];
+    });
 
     // Snap the raw GPS trace onto roads first; the helper falls back to the
     // untouched track when Valhalla is unreachable, so Finish never fails here.
