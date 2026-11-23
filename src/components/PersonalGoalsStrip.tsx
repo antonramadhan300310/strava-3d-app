@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bike, Footprints, Mountain, Plus, Target, Trash2, X } from 'lucide-react';
 import type { ActivityRecord } from '@/lib/activity';
 import {
@@ -131,132 +132,140 @@ export default function PersonalGoalsStrip({ goals, activities, onSave, onDelete
         </div>
       </div>
 
-      {editorOpen && (
-        <div className="fixed inset-0 z-[60] flex flex-col justify-end bg-slate-950/75 backdrop-blur-sm">
-          <button
-            type="button"
-            aria-label="Tutup editor target"
-            onClick={() => setEditorOpen(false)}
-            className="absolute inset-0"
-          />
-          <div className="relative max-h-[88vh] overflow-y-auto overscroll-contain rounded-t-3xl border-t border-white/10 bg-slate-900 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-3 shadow-2xl">
-            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/15" />
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-100">
-                {editingGoal ? 'Edit Target' : 'Target Baru'}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setEditorOpen(false)}
-                aria-label="Tutup"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-300 active:scale-95"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <Field label="Olahraga">
-              <div className="flex flex-wrap gap-1.5">
-                {GOAL_SPORTS.map((option) => (
-                  <Chip
-                    key={option.key}
-                    selected={sport === option.key}
-                    onClick={() => setSport(option.key)}
-                    icon={SPORT_ICONS[option.key]}
-                  >
-                    {option.label}
-                  </Chip>
-                ))}
-              </div>
-            </Field>
-
-            <Field label="Periode">
-              <div className="flex gap-1.5">
-                {GOAL_PERIODS.map((option) => (
-                  <Chip
-                    key={option.key}
-                    selected={period === option.key}
-                    onClick={() => changePeriod(option.key)}
-                    grow
-                  >
-                    {option.label}
-                  </Chip>
-                ))}
-              </div>
-            </Field>
-
-            <Field label="Satuan">
-              <div className="flex gap-1.5">
-                {GOAL_METRICS.map((option) => (
-                  <Chip
-                    key={option.key}
-                    selected={metric === option.key}
-                    onClick={() => changeMetric(option.key)}
-                    grow
-                  >
-                    {option.label}
-                  </Chip>
-                ))}
-              </div>
-            </Field>
-
-            <Field label="Angka Target">
-              <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-slate-950 px-3 py-2 focus-within:border-orange-500">
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="any"
-                  value={target}
-                  onChange={(event) => setTarget(event.target.value)}
-                  className="w-full bg-transparent text-lg font-bold tabular-nums text-slate-100 outline-none"
-                  aria-label="Angka target"
-                />
-                <span className="shrink-0 text-xs font-semibold text-slate-400">
-                  {metricUnit(metric)}
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {goalPresets(metric, period).map((preset) => (
+      {editorOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[60] flex flex-col justify-end bg-slate-950/75 backdrop-blur-sm">
+            <button
+              type="button"
+              aria-label="Tutup editor target"
+              onClick={() => setEditorOpen(false)}
+              className="absolute inset-0"
+            />
+            <div className="relative z-[60] flex max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl border-t border-white/10 bg-[#111827] shadow-2xl">
+              <div className="shrink-0 px-4 pt-3">
+                <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/15" />
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-100">
+                    {editingGoal ? 'Edit Target' : 'Target Baru'}
+                  </h2>
                   <button
-                    key={preset}
                     type="button"
-                    onClick={() => setTarget(String(preset))}
-                    className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold tabular-nums transition active:scale-95 ${
-                      parsedTarget === preset
-                        ? 'border-orange-500/60 bg-orange-500/20 text-orange-300'
-                        : 'border-white/10 bg-slate-800/70 text-slate-300'
-                    }`}
+                    onClick={() => setEditorOpen(false)}
+                    aria-label="Tutup"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-300 active:scale-95"
                   >
-                    {formatGoalValue(preset, metric, { withUnit: false })}
+                    <X size={16} />
                   </button>
-                ))}
+                </div>
               </div>
-            </Field>
 
-            <div className="mt-4 flex gap-2">
-              {editingGoal && (
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-sm font-semibold text-rose-300 active:scale-[0.98]"
-                >
-                  <Trash2 size={15} />
-                  Hapus
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={!canSave}
-                className="flex-1 rounded-xl bg-orange-500 py-2.5 text-sm font-semibold text-white shadow-lg transition active:scale-[0.98] disabled:opacity-40"
-              >
-                Simpan Target
-              </button>
+              <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
+                <Field label="Olahraga">
+                  <div className="flex flex-wrap gap-1.5">
+                    {GOAL_SPORTS.map((option) => (
+                      <Chip
+                        key={option.key}
+                        selected={sport === option.key}
+                        onClick={() => setSport(option.key)}
+                        icon={SPORT_ICONS[option.key]}
+                      >
+                        {option.label}
+                      </Chip>
+                    ))}
+                  </div>
+                </Field>
+
+                <Field label="Periode">
+                  <div className="flex gap-1.5">
+                    {GOAL_PERIODS.map((option) => (
+                      <Chip
+                        key={option.key}
+                        selected={period === option.key}
+                        onClick={() => changePeriod(option.key)}
+                        grow
+                      >
+                        {option.label}
+                      </Chip>
+                    ))}
+                  </div>
+                </Field>
+
+                <Field label="Satuan">
+                  <div className="flex gap-1.5">
+                    {GOAL_METRICS.map((option) => (
+                      <Chip
+                        key={option.key}
+                        selected={metric === option.key}
+                        onClick={() => changeMetric(option.key)}
+                        grow
+                      >
+                        {option.label}
+                      </Chip>
+                    ))}
+                  </div>
+                </Field>
+
+                <Field label="Angka Target">
+                  <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-slate-950 px-3 py-2 focus-within:border-orange-500">
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="any"
+                      value={target}
+                      onChange={(event) => setTarget(event.target.value)}
+                      className="w-full bg-transparent text-lg font-bold tabular-nums text-slate-100 outline-none"
+                      aria-label="Angka target"
+                    />
+                    <span className="shrink-0 text-xs font-semibold text-slate-400">
+                      {metricUnit(metric)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {goalPresets(metric, period).map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setTarget(String(preset))}
+                        className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold tabular-nums transition active:scale-95 ${
+                          parsedTarget === preset
+                            ? 'border-orange-500/60 bg-orange-500/20 text-orange-300'
+                            : 'border-white/10 bg-slate-800/70 text-slate-300'
+                        }`}
+                      >
+                        {formatGoalValue(preset, metric, { withUnit: false })}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+              </div>
+
+              <div className="shrink-0 border-t border-white/10 bg-[#111827] px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+                <div className="flex gap-2">
+                  {editingGoal && (
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-sm font-semibold text-rose-300 active:scale-[0.98]"
+                    >
+                      <Trash2 size={15} />
+                      Hapus Target
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={!canSave}
+                    className="w-full flex-1 rounded-xl bg-orange-500 py-2.5 text-sm font-semibold text-white shadow-lg transition active:scale-[0.98] disabled:opacity-40"
+                  >
+                    Simpan Target
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
