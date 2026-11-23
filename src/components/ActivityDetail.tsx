@@ -789,7 +789,10 @@ export default function ActivityDetail({
         open={profileOpen}
         activities={allActivities}
         onClose={() => setProfileOpen(false)}
-        onSaved={setProfile}
+        onSaved={(next) => {
+          setProfile(next);
+          onNotice('Profil berhasil disimpan');
+        }}
       />
 
       <ProPaywallSheet

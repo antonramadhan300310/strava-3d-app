@@ -29,11 +29,26 @@ import {
   writeScopedStorage,
   type LegacyMigration,
 } from '@/lib/userStorage';
+import {
+  sanitizeRiderProfile,
+  type RiderProfile,
+} from '@/lib/riderProfile';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unconfigured';
 export type SimulatedTier = 'pro' | 'free';
 
 type SignUpResult = { needsEmailConfirmation: boolean };
+
+export type SaveAthleteProfileInput = {
+  displayName: string;
+  riderProfile: RiderProfile;
+};
+
+export type SaveAthleteProfileResult = {
+  profile: RiderProfile;
+  /** False when the cloud write failed; the local copy is still saved. */
+  synced: boolean;
+};
 
 type AuthContextValue = {
   status: AuthStatus;
@@ -51,6 +66,7 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   updateProfile: (patch: ProfileUpdate) => Promise<void>;
+  saveAthleteProfile: (input: SaveAthleteProfileInput) => Promise<SaveAthleteProfileResult>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -62,14 +78,36 @@ function fallbackName(user: User): string {
   return email.split('@')[0] || 'Atlet ALLMOVA';
 }
 
+function hasRiderProfile(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
+/** Reads the active account's offline copy, which is the newest local edit. */
+function readLocalRiderProfile(): RiderProfile | null {
+  const raw = readScopedStorage(USER_STORAGE_KEYS.riderProfile);
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return hasRiderProfile(parsed) ? sanitizeRiderProfile(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
 function fallbackProfile(user: User): AthleteProfile {
+  const local = readLocalRiderProfile();
   return {
     id: user.id,
     email: user.email ?? null,
-    displayName: fallbackName(user),
+    displayName: local?.displayName ?? fallbackName(user),
     planTier: 'free',
     proExpiresAt: null,
-    riderProfile: null,
+    riderProfile: local,
     personalGoals: null,
   };
 }
@@ -81,6 +119,9 @@ function seedLocalCache(profile: AthleteProfile): void {
   }
   if (profile.personalGoals && !readScopedStorage(USER_STORAGE_KEYS.personalGoals)) {
     writeScopedStorage(USER_STORAGE_KEYS.personalGoals, JSON.stringify(profile.personalGoals));
+  }
+  if (!readScopedStorage(USER_STORAGE_KEYS.displayName)) {
+    writeScopedStorage(USER_STORAGE_KEYS.displayName, profile.displayName);
   }
 }
 
@@ -103,6 +144,17 @@ async function fetchProfile(
 
     if (data) {
       let profile = toAthleteProfile(data as ProfileRow, user.email ?? null, fallback.displayName);
+      if (!hasRiderProfile(profile.riderProfile)) {
+        profile = { ...profile, riderProfile: null };
+      }
+
+      // The offline copy is written on every save, so it is at least as new as
+      // the cloud row and must not be replaced by a stale cloud profile.
+      const local = readLocalRiderProfile();
+      if (local) {
+        profile = { ...profile, displayName: local.displayName, riderProfile: local };
+      }
+
       const patch: ProfileUpdate = {};
       if (migration?.riderProfile && !profile.riderProfile) {
         patch.rider_profile = migration.riderProfile;
@@ -140,7 +192,7 @@ async function fetchProfile(
           display_name: fallback.displayName,
           plan_tier: 'free',
           pro_expires_at: null,
-          rider_profile: migration?.riderProfile ?? null,
+          rider_profile: readLocalRiderProfile() ?? migration?.riderProfile ?? null,
           personal_goals: migration?.personalGoals ?? null,
         },
         { onConflict: 'id' },
@@ -233,7 +285,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     const supabase = getSupabaseClientOrNull();
-    if (!supabase) throw new Error('Supabase belum dikonfigurasi.');
+    if (!supabase) throw new Error('Server ALLMOVA belum dikonfigurasi.');
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
@@ -244,7 +296,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = useCallback(
     async (displayName: string, email: string, password: string): Promise<SignUpResult> => {
       const supabase = getSupabaseClientOrNull();
-      if (!supabase) throw new Error('Supabase belum dikonfigurasi.');
+      if (!supabase) throw new Error('Server ALLMOVA belum dikonfigurasi.');
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -258,7 +310,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const requestPasswordReset = useCallback(async (email: string) => {
     const supabase = getSupabaseClientOrNull();
-    if (!supabase) throw new Error('Supabase belum dikonfigurasi.');
+    if (!supabase) throw new Error('Server ALLMOVA belum dikonfigurasi.');
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
     if (error) throw error;
   }, []);
@@ -266,7 +318,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetPasswordWithOtp = useCallback(
     async (email: string, token: string, newPassword: string) => {
       const supabase = getSupabaseClientOrNull();
-      if (!supabase) throw new Error('Supabase belum dikonfigurasi.');
+      if (!supabase) throw new Error('Server ALLMOVA belum dikonfigurasi.');
       const { error } = await supabase.auth.verifyOtp({
         email: email.trim(),
         token: token.trim(),
@@ -390,6 +442,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [profile, session],
   );
 
+  /**
+   * Single write path for the athlete profile: React state, the per-account
+   * offline cache and the cloud row are updated together, so the sheet always
+   * reopens with the last saved values even after switching tabs.
+   */
+  const saveAthleteProfile = useCallback(
+    async ({
+      displayName,
+      riderProfile,
+    }: SaveAthleteProfileInput): Promise<SaveAthleteProfileResult> => {
+      const user = session?.user;
+      const saved = sanitizeRiderProfile({ ...riderProfile, displayName });
+
+      if (user) {
+        writeScopedStorage(USER_STORAGE_KEYS.riderProfile, JSON.stringify(saved));
+        writeScopedStorage(USER_STORAGE_KEYS.displayName, saved.displayName);
+      }
+
+      setProfile((previous) =>
+        previous
+          ? { ...previous, displayName: saved.displayName, riderProfile: saved }
+          : previous,
+      );
+
+      const supabase = getSupabaseClientOrNull();
+      if (!supabase || !user) return { profile: saved, synced: false };
+
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({ display_name: saved.displayName, rider_profile: saved })
+          .eq('id', user.id)
+          .select(PROFILE_COLUMNS)
+          .maybeSingle();
+
+        if (error) return { profile: saved, synced: false };
+
+        if (data) {
+          setProfile(
+            toAthleteProfile(data as ProfileRow, user.email ?? null, saved.displayName),
+          );
+          return { profile: saved, synced: true };
+        }
+
+        // A missing row is created with only the editable columns, so the
+        // protect_profile_tier trigger never sees a plan change.
+        const { error: createError } = await supabase.from('profiles').upsert(
+          {
+            id: user.id,
+            email: user.email ?? null,
+            display_name: saved.displayName,
+            rider_profile: saved,
+          },
+          { onConflict: 'id' },
+        );
+
+        return { profile: saved, synced: !createError };
+      } catch {
+        return { profile: saved, synced: false };
+      }
+    },
+    [session],
+  );
+
   const isOwner = isOwnerEmail(session?.user?.email);
   const planIsPro = profile ? isProfilePro(profile) : false;
   const isPro = isOwner ? ownerSimulatedTier === 'pro' : planIsPro;
@@ -411,6 +527,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       refreshProfile,
       updateProfile,
+      saveAthleteProfile,
     }),
     [
       status,
@@ -426,6 +543,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       refreshProfile,
       updateProfile,
+      saveAthleteProfile,
     ],
   );
 

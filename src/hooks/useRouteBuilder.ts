@@ -163,7 +163,7 @@ export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
       }
       if (!isSupabaseConfigured) {
         throw new Error(
-          'Supabase belum dikonfigurasi. Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY.',
+          'Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.',
         );
       }
       if (!user) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
@@ -177,7 +177,7 @@ export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
         durationSeconds: metrics.durationSeconds,
         coordinates,
       });
-      setInfo(`Rute "${title}" tersimpan.`);
+      setInfo(`Rute "${title}" tersimpan di Cloud ALLMOVA.`);
     },
     [coordinates, metrics, activityType, user],
   );
