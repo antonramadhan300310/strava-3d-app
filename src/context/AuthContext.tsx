@@ -316,21 +316,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const user = session?.user;
       if (!supabase || !user) return;
 
-      const current = profile;
-      const payload = {
-        id: user.id,
-        email: user.email ?? current?.email ?? null,
-        display_name: current?.displayName ?? fallbackName(user),
-        plan_tier: current?.planTier ?? 'free',
-        pro_expires_at: current?.proExpiresAt ?? null,
-        rider_profile: current?.riderProfile ?? null,
-        personal_goals: current?.personalGoals ?? null,
-        ...patch,
-      };
-
+      // Only send the changed fields: a fallback (offline) profile must never
+      // overwrite the real plan_tier or expiry in the cloud.
       const { data, error } = await supabase
         .from('profiles')
-        .upsert(payload, { onConflict: 'id' })
+        .update(patch)
+        .eq('id', user.id)
         .select(PROFILE_COLUMNS)
         .maybeSingle();
 
@@ -338,7 +329,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (data) {
         setProfile(
-          toAthleteProfile(data as ProfileRow, user.email ?? null, payload.display_name),
+          toAthleteProfile(
+            data as ProfileRow,
+            user.email ?? null,
+            profile?.displayName ?? fallbackName(user),
+          ),
+        );
+        return;
+      }
+
+      const { data: created, error: createError } = await supabase
+        .from('profiles')
+        .upsert(
+          {
+            id: user.id,
+            email: user.email ?? null,
+            display_name: profile?.displayName ?? fallbackName(user),
+            plan_tier: 'free',
+            pro_expires_at: null,
+            ...patch,
+          },
+          { onConflict: 'id' },
+        )
+        .select(PROFILE_COLUMNS)
+        .maybeSingle();
+
+      if (createError) throw new Error(createError.message);
+
+      if (created) {
+        setProfile(
+          toAthleteProfile(
+            created as ProfileRow,
+            user.email ?? null,
+            profile?.displayName ?? fallbackName(user),
+          ),
         );
         return;
       }
