@@ -251,6 +251,7 @@ export async function fetchActivityWeather(input: {
 }): Promise<ActivityWeather | null> {
   const { latitude, longitude } = input;
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
 
   const startedAt = input.startedAt ?? new Date();
   if (Number.isNaN(startedAt.getTime())) return null;
