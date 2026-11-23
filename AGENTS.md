@@ -33,15 +33,23 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 - `src/components/FlyoverMap.tsx` — imperative `applyFrame` handle; owns the map, marker,
   base line and progressive-reveal gradient. `captureFrame()` copies the WebGL buffer into a
   detached 2D canvas for the share poster.
-- `src/lib/shareCard.ts` — HTML5 Canvas renderer for the share images. `poster` (1080×1350)
-  draws the map frame as a cover background plus scrims, stats and an elevation profile;
-  `sticker` (1080×1080) leaves the canvas transparent and draws only the glowing route and
-  stats, so it can be composited onto a photo.
-- `src/lib/shareImage.ts` — writes the PNG to `Directory.Cache` and opens the Android share
-  sheet, or to `Directory.Documents` when saving; falls back to `navigator.share`/download
-  on the web.
-- `src/components/ShareCardModal.tsx` — style tabs, preview (checkerboard behind the sticker)
-  and the share/save actions.
+- `src/lib/heatmapCache.ts` — splits every track into ~11 m `segmentKey` buckets and sums how
+  often each one was ridden into a `weight` property.
+- `src/lib/heatmapRenderer.ts` — paint for the three heatmap layers: charcoal `casing`
+  (+8 px, blur 4), a soft `glow`, and the neon `core` (blur 1). Colour is a `step` on
+  `weight`: cyan `#00E5FF` under 2, orange `#FF6D00` 2–4, laser red `#FF1744` from 5.
+- `src/lib/shareCard.ts` — HTML5 Canvas renderer for the share images, three modes:
+  `card` (1080×1350 charcoal card with the GPS route, pins, stats), `route` (1080×1080
+  transparent sticker with route + shadowed stats) and `stats` (same size, no route).
+  `WATERMARK_HEIGHT_RATIO` (12% of canvas height) drives the bottom-right ALLMOVA lockup
+  that every tier gets.
+- `src/lib/shareImage.ts` — writes the PNG to `Directory.Cache`, then hands it to the native
+  `saveMediaToGallery` bridge for `Pictures/ALLMOVA`; falls back to Documents, the share
+  sheet, or `navigator.share`/download on the web.
+- `src/components/ShareActivitySheet.tsx` — mode tabs, checkerboard preview and the
+  share/save actions.
+- `src/lib/riderProfile.ts` — `powerZonePercents` (six lower bounds as % of FTP) feed both
+  `computePowerZoneRanges` and the zone histogram, so a custom Z1–Z6 split stays consistent.
 
 ## Native Android & OTA
 
@@ -52,7 +60,9 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   registered in `MainActivity.onCreate` before `super.onCreate`.
 - `src/lib/nativeTrackingService.ts` — the web-safe bridge; `useActivityRecorder` starts the
   service on Start/Resume and stops it on Pause/Finish/Save/discard. Exposes
-  `nativeTrackingActive` for the `GPS Latar Belakang Aktif` badge in `RecordOverlay`.
+  `nativeTrackingActive` for the `GPS Latar Belakang Aktif` badge in `RecordOverlay`, and
+  `saveMediaToGallery` for the MediaStore gallery write (`Pictures/ALLMOVA`,
+  `Movies/ALLMOVA`; `IS_PENDING` on API 29+, legacy path + media scan below that).
 - `src/lib/otaUpdater.ts` + `src/components/OtaUpdateManager.tsx` — `@capgo/capacitor-updater`
   with `autoUpdate: false`. On launch the app calls `notifyAppReady()`, reads
   `version.json` from the `ota-latest` GitHub release, gates on `minNativeVersion` against
@@ -80,3 +90,8 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 - PostgREST returns a PostGIS `geometry` column as hex EWKB, not GeoJSON.
   `parseActivityGeometry` in `src/lib/activity.ts` handles both.
 - `line-gradient` stops must be strictly ascending — see `gradient()` in `FlyoverMap.tsx`.
+- MapLibre only accepts a `zoom` expression as the input of a top-level `step`/`interpolate`.
+  Adding pixels to an interpolated width has to be folded into each stop (see `neonWidth()` in
+  `heatmapRenderer.ts`); wrapping it in `['+', ...]` fails with a layer paint error.
+- `ShareActivitySheet` and the video exporter both draw the watermark unconditionally — there
+  is no Pro gate to re-add.

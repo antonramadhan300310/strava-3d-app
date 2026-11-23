@@ -145,10 +145,9 @@ function TrackerApp() {
   const heatmapLayers = useMemo(
     () => ({
       visible: isRoutes && heatmap.enabled,
-      scheme: heatmap.scheme,
       lines: heatmap.linesGeoJSON,
     }),
-    [isRoutes, heatmap.enabled, heatmap.scheme, heatmap.linesGeoJSON],
+    [isRoutes, heatmap.enabled, heatmap.linesGeoJSON],
   );
 
   const focusHeatmap = useCallback(() => {

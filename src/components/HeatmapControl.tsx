@@ -2,12 +2,8 @@
 
 import { useState } from 'react';
 import { ChevronDown, ChevronUp, Crosshair, Flame, Loader2 } from 'lucide-react';
-import {
-  HEATMAP_SCHEMES,
-  HEATMAP_TIME_FILTERS,
-  HEATMAP_TYPE_FILTERS,
-  type HeatmapScheme,
-} from '@/lib/heatmapCache';
+import { HEATMAP_TIME_FILTERS, HEATMAP_TYPE_FILTERS } from '@/lib/heatmapCache';
+import { HEATMAP_WEIGHT_TIERS } from '@/lib/heatmapRenderer';
 import type { HeatmapState } from '@/hooks/useHeatmap';
 
 type Props = {
@@ -80,17 +76,26 @@ export default function HeatmapControl({ heatmap, onFocus }: Props) {
                 ))}
               </FilterRow>
 
-              <FilterRow label="Warna">
-                {(Object.keys(HEATMAP_SCHEMES) as HeatmapScheme[]).map((key) => (
-                  <Chip
-                    key={key}
-                    label={HEATMAP_SCHEMES[key].label}
-                    selected={heatmap.scheme === key}
-                    onClick={() => heatmap.setScheme(key)}
-                    swatch={HEATMAP_SCHEMES[key].core}
-                  />
-                ))}
-              </FilterRow>
+              <div>
+                <p className="mb-1 text-[9px] uppercase tracking-wide text-slate-400">
+                  Intensitas Neon
+                </p>
+                <ul className="flex flex-wrap gap-1">
+                  {HEATMAP_WEIGHT_TIERS.map((tier) => (
+                    <li
+                      key={tier.range}
+                      className="flex items-center gap-1 rounded-full bg-[#1E2E16] px-2 py-1 text-[10px] font-semibold text-slate-300"
+                    >
+                      <span
+                        className="h-2 w-2 rounded-full border border-white/40"
+                        style={{ backgroundColor: tier.color }}
+                        aria-hidden="true"
+                      />
+                      {tier.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
 
               {heatmap.error && (
                 <p className="text-[10px] text-rose-300" role="alert">
@@ -133,12 +138,10 @@ function Chip({
   label,
   selected,
   onClick,
-  swatch,
 }: {
   label: string;
   selected: boolean;
   onClick: () => void;
-  swatch?: string;
 }) {
   return (
     <button
@@ -149,13 +152,6 @@ function Chip({
         selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'bg-[#1E2E16] text-slate-300'
       }`}
     >
-      {swatch && (
-        <span
-          className="h-2 w-2 rounded-full border border-white/40"
-          style={{ backgroundColor: swatch }}
-          aria-hidden="true"
-        />
-      )}
       {label}
     </button>
   );

@@ -38,32 +38,12 @@ export type HeatmapFilters = {
   timeRange: HeatmapTimeFilter;
 };
 
-export type HeatmapScheme = 'fire' | 'neon';
-
-export type HeatmapPalette = {
-  label: string;
-  /** Widest, most blurred pass that produces the soft outer aura. */
-  halo: string;
-  /** Mid-width pass that brightens on repeated passes. */
-  glow: string;
-  /** Thin pass that keeps corners sharp at every zoom. */
-  core: string;
-};
-
-export const HEATMAP_SCHEMES: Record<HeatmapScheme, HeatmapPalette> = {
-  fire: {
-    label: 'Oranye Api',
-    halo: '#c2410c',
-    glow: '#f97316',
-    core: '#fef08a',
-  },
-  neon: {
-    label: 'Biru Neon',
-    halo: '#0369a1',
-    glow: '#06b6d4',
-    core: '#e0f2fe',
-  },
-};
+/**
+ * Grid used to recognise segments that reuse the same road. ~11 m is coarser
+ * than the 5-decimal coordinates but finer than a lane change, so repeated
+ * rides of one street collapse into a single weighted segment.
+ */
+const WEIGHT_SNAP_DEGREES = 1e-4;
 
 export const HEATMAP_TYPE_FILTERS: { key: HeatmapTypeFilter; label: string }[] = [
   { key: 'all', label: 'Semua' },
@@ -339,23 +319,83 @@ function timeCutoff(range: HeatmapTimeFilter): number | null {
 }
 
 /**
+ * Snapped, order-independent key for one segment. `null` for a zero-length
+ * segment, which happens when two fixes land in the same grid cell.
+ */
+function segmentKey(a: HeatmapCoord, b: HeatmapCoord): string | null {
+  const ax = Math.round(a[0] / WEIGHT_SNAP_DEGREES);
+  const ay = Math.round(a[1] / WEIGHT_SNAP_DEGREES);
+  const bx = Math.round(b[0] / WEIGHT_SNAP_DEGREES);
+  const by = Math.round(b[1] / WEIGHT_SNAP_DEGREES);
+  if (ax === bx && ay === by) return null;
+  return ax < bx || (ax === bx && ay < by)
+    ? `${ax},${ay}|${bx},${by}`
+    : `${bx},${by}|${ax},${ay}`;
+}
+
+/** How many distinct tracks cross each snapped segment. */
+function countSegmentWeights(tracks: HeatmapCoord[][]): Map<string, number> {
+  const weights = new Map<string, number>();
+
+  for (const track of tracks) {
+    const seen = new Set<string>();
+    for (let index = 1; index < track.length; index += 1) {
+      const key = segmentKey(track[index - 1], track[index]);
+      // One pass along a segment counts once, even if the rider doubled back.
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      weights.set(key, (weights.get(key) ?? 0) + 1);
+    }
+  }
+
+  return weights;
+}
+
+type WeightedRun = { weight: number; coords: HeatmapCoord[] };
+
+/**
+ * Splits a track into runs of equal weight so each run can be coloured by the
+ * data-driven paint expression. Consecutive runs share their boundary vertex,
+ * which keeps the line continuous where a popular street meets a quiet one.
+ */
+function splitByWeight(track: HeatmapCoord[], weights: Map<string, number>): WeightedRun[] {
+  const runs: WeightedRun[] = [];
+  let current: WeightedRun | null = null;
+
+  for (let index = 1; index < track.length; index += 1) {
+    const key = segmentKey(track[index - 1], track[index]);
+    if (!key) continue;
+
+    const segmentWeight = weights.get(key) ?? 1;
+    if (!current || current.weight !== segmentWeight) {
+      current = { weight: segmentWeight, coords: [track[index - 1]] };
+      runs.push(current);
+    }
+    current.coords.push(track[index]);
+  }
+
+  return runs.filter((run) => run.coords.length >= 2);
+}
+
+/**
  * Turns the cached history into the simplified line collection the map layers use.
  *
  * Every track stays a `LineString`, so MapLibre re-rasterises it at the native
  * screen resolution of each zoom level instead of showing a blocky point grid.
+ * Segments carry a `weight` property (how many activities cross them) that the
+ * neon heatmap paint expressions read.
  */
 export function buildHeatmapGeoJSON(
   activities: HeatmapActivity[],
   filters: HeatmapFilters,
 ): HeatmapGeoJSON {
   const cutoff = timeCutoff(filters.timeRange);
-  const lines: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+  const visible: HeatmapActivity[] = [];
 
   let west = Infinity;
   let south = Infinity;
   let east = -Infinity;
   let north = -Infinity;
-  let count = 0;
 
   for (const activity of activities) {
     if (filters.activityType !== 'all' && activity.type !== filters.activityType) continue;
@@ -365,17 +405,7 @@ export function buildHeatmapGeoJSON(
     }
     if (activity.coords.length < 2) continue;
 
-    count += 1;
-    lines.push({
-      type: 'Feature',
-      properties: {
-        id: activity.id,
-        type: activity.type,
-        date: activity.date,
-        distance: activity.distance,
-      },
-      geometry: { type: 'LineString', coordinates: activity.coords },
-    });
+    visible.push(activity);
 
     for (const [lng, lat] of activity.coords) {
       if (lng < west) west = lng;
@@ -384,6 +414,27 @@ export function buildHeatmapGeoJSON(
       if (lat > north) north = lat;
     }
   }
+
+  const weights = countSegmentWeights(visible.map((activity) => activity.coords));
+  const lines: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+
+  for (const activity of visible) {
+    for (const run of splitByWeight(activity.coords, weights)) {
+      lines.push({
+        type: 'Feature',
+        properties: {
+          id: activity.id,
+          type: activity.type,
+          date: activity.date,
+          distance: activity.distance,
+          weight: run.weight,
+        },
+        geometry: { type: 'LineString', coordinates: run.coords },
+      });
+    }
+  }
+
+  const count = visible.length;
 
   return {
     linesGeoJSON: { type: 'FeatureCollection', features: lines },

@@ -530,7 +530,7 @@ function bandRect(map: maplibregl.Map): { band: Rect; width: number; height: num
   const { width, height } = map.getCanvas().getBoundingClientRect();
   if (width === 0 || height === 0) return null;
 
-  const card = CARD_SIZES.poster;
+  const card = CARD_SIZES.card;
   const scale = Math.max(card.width / width, card.height / height);
   const offsetX = (card.width - width * scale) / 2;
   const offsetY = (card.height - height * scale) / 2;

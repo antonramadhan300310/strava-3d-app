@@ -1,5 +1,6 @@
 import { Muxer, StreamTarget } from 'mp4-muxer';
 import { allmovaFontStack, drawAllmovaLogoOnCanvas } from '@/components/AllmovaLogo';
+import { WATERMARK_HEIGHT_RATIO } from './shareCard';
 import { formatActivityDate, type ActivityRecord } from './activity';
 import {
   averageSpeedKmh,
@@ -153,7 +154,7 @@ export type ExportFlyoverVideoOptions = {
   /** Auto duration from `calculateFlyoverDuration`; drives frames and bitrate. */
   durationSeconds: number;
   hud: FlyoverExportHud;
-  /** Draws the ALLMOVA mark on every frame; Pro exports only. */
+  /** Draws the ALLMOVA mark on every frame. On by default for every tier. */
   watermark?: boolean;
   /** Drives the map to `progress` and returns the rendered frame. */
   captureFrame: (progress: number) => Promise<FlyoverFrameCapture | null>;
@@ -256,7 +257,7 @@ export async function exportFlyoverVideo({
   fps,
   durationSeconds,
   hud,
-  watermark = false,
+  watermark = true,
   captureFrame,
   signal,
   onProgress,
@@ -653,22 +654,26 @@ function drawHud(
   context.restore();
 }
 
-/** Bottom-right ALLMOVA mark at 78% opacity, sized against the 720 px frame. */
+/**
+ * Bottom-right ALLMOVA lockup on every export, free or pro.
+ *
+ * The height tracks the frame so the mark keeps the same relative weight at
+ * every export quality instead of shrinking with the width.
+ */
 function drawVideoWatermark(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
 ) {
-  const scale = (width / FLYOVER_EXPORT_WIDTH) * 0.42;
+  const logoHeight = height * WATERMARK_HEIGHT_RATIO;
+  const scale = logoHeight / 64;
   const logoWidth = 280 * scale;
-  const logoHeight = 64 * scale;
-  const marginX = 12 * (width / FLYOVER_EXPORT_WIDTH);
-  const marginY = 10 * (width / FLYOVER_EXPORT_WIDTH);
+  const margin = Math.round(width * 0.035);
   drawAllmovaLogoOnCanvas(
     context,
-    width - logoWidth - marginX,
-    height - logoHeight - marginY,
+    width - logoWidth - margin,
+    height - logoHeight - margin,
     scale,
-    { variant: 'compact', opacity: 0.78 },
+    { variant: 'compact', opacity: 0.94 },
   );
 }

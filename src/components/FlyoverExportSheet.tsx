@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { saveMediaToGallery } from '@/lib/nativeTrackingService';
 import { Check, Download, Loader2, Share2, Video, X } from 'lucide-react';
 import type { ActivityRecord } from '@/lib/activity';
 import {
@@ -30,7 +31,6 @@ type Stage = 'quality' | 'rendering' | 'done' | 'error';
 
 type Props = {
   activity: ActivityRecord;
-  isPro: boolean;
   captureFrame: (progress: number) => Promise<FlyoverFrameCapture | null>;
   onClose: () => void;
   onNotice: (message: string) => void;
@@ -38,7 +38,6 @@ type Props = {
 
 export default function FlyoverExportSheet({
   activity,
-  isPro,
   captureFrame,
   onClose,
   onNotice,
@@ -115,7 +114,7 @@ export default function FlyoverExportSheet({
           fps: quality,
           durationSeconds,
           hud: buildFlyoverExportHud(activity),
-          watermark: isPro,
+          watermark: true,
           captureFrame,
           signal: controller.signal,
           onProgress: (value) => {
@@ -170,7 +169,7 @@ export default function FlyoverExportSheet({
         abortRef.current = null;
       }
     },
-    [activity, captureFrame, durationSeconds, isPro, onClose, removeTempFile],
+    [activity, captureFrame, durationSeconds, onClose, removeTempFile],
   );
 
   const cancel = useCallback(() => {
@@ -185,6 +184,32 @@ export default function FlyoverExportSheet({
       const fileName = `ALLMOVA-Flyover-${fileTimestamp()}.mp4`;
 
       if (Capacitor.isNativePlatform()) {
+        const named = `gallery_${fileName}`;
+        try {
+          await Filesystem.copy({
+            from: TEMP_FILE,
+            directory: Directory.Cache,
+            to: named,
+            toDirectory: Directory.Cache,
+          });
+          const { uri } = await Filesystem.getUri({ path: named, directory: Directory.Cache });
+          const saved = await saveMediaToGallery({ filePath: uri, mimeType: 'video/mp4' });
+
+          if (saved) {
+            onNotice('Berhasil disimpan ke Galeri perangkat');
+            setSaved(true);
+            return;
+          }
+        } catch (cause) {
+          console.warn('MediaStore copy failed, falling back to Documents', cause);
+        } finally {
+          try {
+            await Filesystem.deleteFile({ path: named, directory: Directory.Cache });
+          } catch {
+            // The gallery copy is already independent of this cache file.
+          }
+        }
+
         try {
           await Filesystem.mkdir({
             path: DOCUMENTS_FOLDER,

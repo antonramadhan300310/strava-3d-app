@@ -6,7 +6,6 @@ import {
   buildHeatmapGeoJSON,
   getCachedHeatmapActivities,
   type HeatmapActivity,
-  type HeatmapScheme,
   type HeatmapTimeFilter,
   type HeatmapTypeFilter,
 } from '@/lib/heatmapCache';
@@ -22,7 +21,6 @@ export function useHeatmap(existingActivities: ActivityRecord[]) {
   const [enabled, setEnabled] = useState(false);
   const [activityType, setActivityType] = useState<HeatmapTypeFilter>('all');
   const [timeRange, setTimeRange] = useState<HeatmapTimeFilter>('all');
-  const [scheme, setScheme] = useState<HeatmapScheme>('fire');
   const [items, setItems] = useState<HeatmapActivity[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,10 +65,8 @@ export function useHeatmap(existingActivities: ActivityRecord[]) {
     toggle,
     activityType,
     timeRange,
-    scheme,
     setActivityType,
     setTimeRange,
-    setScheme,
     loading,
     error,
     count: geo.count,

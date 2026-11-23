@@ -5,7 +5,7 @@ import { CapacitorUpdater, type BundleInfo } from '@capgo/capacitor-updater';
  * Version of the installed native shell. Bump it whenever a change requires a
  * new APK, and set the same value as `minNativeVersion` in the OTA manifest.
  */
-export const NATIVE_APP_VERSION = '1.1.0';
+export const NATIVE_APP_VERSION = '1.2.0';
 
 const FALLBACK_REPO = 'antonramadhan1504-ops/strava-3d-app';
 const OTA_RELEASE_TAG = 'ota-latest';
