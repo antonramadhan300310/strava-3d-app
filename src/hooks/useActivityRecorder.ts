@@ -26,6 +26,7 @@ import { isSupabaseConfigured, saveRecordedActivity } from '@/lib/supabase';
 import { invalidateHeatmapCache } from '@/lib/heatmapCache';
 import { fetchActivityWeather } from '@/lib/weatherService';
 import { timestampOf, type LngLat, type LngLatEle } from '@/lib/polyline';
+import { startNativeTrackingService, stopNativeTrackingService } from '@/lib/nativeTrackingService';
 
 export type SessionPhase = 'idle' | 'recording' | 'paused' | 'finishing';
 
@@ -81,6 +82,7 @@ export function useActivityRecorder() {
   const [pendingRestore, setPendingRestore] = useState<SavedSession | null>(null);
   const [finishResult, setFinishResult] = useState<FinishResult | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [nativeTrackingActive, setNativeTrackingActive] = useState(false);
 
   const watchRef = useRef<LocationWatch | null>(null);
   const pointsRef = useRef<AcceptedPoint[]>([]);
@@ -114,6 +116,16 @@ export function useActivityRecorder() {
       points: pointsRef.current,
     });
   }, [currentActiveMs]);
+
+  const startBackgroundService = useCallback(async () => {
+    const started = await startNativeTrackingService();
+    setNativeTrackingActive(started);
+  }, []);
+
+  const stopBackgroundService = useCallback(() => {
+    setNativeTrackingActive(false);
+    void stopNativeTrackingService();
+  }, []);
 
   const stopWatch = useCallback(async () => {
     const watch = watchRef.current;
@@ -195,6 +207,8 @@ export function useActivityRecorder() {
   }, [points, phase, persist]);
 
   useEffect(() => () => {
+    // The WebView is going away, so the wake lock would outlive its watcher.
+    void stopNativeTrackingService();
     void stopWatch();
   }, [stopWatch]);
 
@@ -214,9 +228,12 @@ export function useActivityRecorder() {
       setGpsError(null);
       setPhase('recording');
       phaseRef.current = 'recording';
+      // Grab the wake lock before the location watcher starts so a screen lock
+      // right after Start cannot suspend the first fixes.
+      await startBackgroundService();
       await beginWatch();
     },
-    [beginWatch],
+    [beginWatch, startBackgroundService],
   );
 
   const pause = useCallback(() => {
@@ -228,15 +245,17 @@ export function useActivityRecorder() {
     // The HUD memo is keyed on the wall clock, so nudge it to show frozen values.
     setNowMs(Date.now());
     persist();
-  }, [flushElapsed, persist]);
+    stopBackgroundService();
+  }, [flushElapsed, persist, stopBackgroundService]);
 
   const resume = useCallback(async () => {
     if (phaseRef.current !== 'paused') return;
     runningSinceRef.current = Date.now();
     setPhase('recording');
     phaseRef.current = 'recording';
+    await startBackgroundService();
     await beginWatch();
-  }, [beginWatch]);
+  }, [beginWatch, startBackgroundService]);
 
   const finish = useCallback(async (): Promise<FinishResult | null> => {
     if (phaseRef.current === 'idle' || phaseRef.current === 'finishing') return null;
@@ -245,6 +264,7 @@ export function useActivityRecorder() {
     setPhase('finishing');
     phaseRef.current = 'finishing';
     setNowMs(Date.now());
+    stopBackgroundService();
     await stopWatch();
 
     const recorded = pointsRef.current;
@@ -292,7 +312,7 @@ export function useActivityRecorder() {
           : 'Rute ditempelkan ke jalan dengan elevasi kontur Valhalla.',
     );
     return result;
-  }, [flushElapsed, stopWatch, persist]);
+  }, [flushElapsed, stopWatch, persist, stopBackgroundService]);
 
   const saveActivity = useCallback(async (title: string, rpe?: number | null) => {
     if (!finishResult) throw new Error('Belum ada rekaman yang selesai diproses.');
@@ -327,6 +347,7 @@ export function useActivityRecorder() {
         rpe: rpe ?? null,
       });
       invalidateHeatmapCache();
+      stopBackgroundService();
       clearSession();
       setPhase('idle');
       phaseRef.current = 'idle';
@@ -341,9 +362,10 @@ export function useActivityRecorder() {
     } catch (cause) {
       throw cause;
     }
-  }, [finishResult, beginWatch, user]);
+  }, [finishResult, beginWatch, user, stopBackgroundService]);
 
   const discardFinish = useCallback(() => {
+    stopBackgroundService();
     setFinishResult(null);
     setNotice(null);
     setPhase('paused');
@@ -351,7 +373,7 @@ export function useActivityRecorder() {
     persist();
     // finish() stopped the watcher; restore the live dot for the paused session.
     if (previewRef.current) void beginWatch();
-  }, [persist, beginWatch]);
+  }, [persist, beginWatch, stopBackgroundService]);
 
   // Offer a recovery whenever the Record tab mounts with a leftover backup.
   useEffect(() => {
@@ -377,13 +399,14 @@ export function useActivityRecorder() {
       runningSinceRef.current = Date.now();
       setPhase('recording');
       phaseRef.current = 'recording';
+      await startBackgroundService();
       await beginWatch();
     } else {
       runningSinceRef.current = null;
       setPhase('paused');
       phaseRef.current = 'paused';
     }
-  }, [pendingRestore, beginWatch]);
+  }, [pendingRestore, beginWatch, startBackgroundService]);
 
   const dismissRestore = useCallback(() => {
     clearSession();
@@ -444,6 +467,7 @@ export function useActivityRecorder() {
     pendingRestore,
     finishResult,
     notice,
+    nativeTrackingActive,
     start,
     pause,
     resume,

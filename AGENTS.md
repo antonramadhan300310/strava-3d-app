@@ -43,7 +43,33 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 - `src/components/ShareCardModal.tsx` — style tabs, preview (checkerboard behind the sticker)
   and the share/save actions.
 
+## Native Android & OTA
+
+- `android/app/src/main/java/com/allmova/app/AllmovaTrackingService.java` — foreground
+  service (`allmova_tracking_channel`, id 1001) that holds a `PARTIAL_WAKE_LOCK` while a
+  recording runs, so the GPS watcher survives a locked screen. Started/stopped from the
+  `AllmovaTrackingPlugin` (`startTrackingService` / `stopTrackingService`), which is
+  registered in `MainActivity.onCreate` before `super.onCreate`.
+- `src/lib/nativeTrackingService.ts` — the web-safe bridge; `useActivityRecorder` starts the
+  service on Start/Resume and stops it on Pause/Finish/Save/discard. Exposes
+  `nativeTrackingActive` for the `GPS Latar Belakang Aktif` badge in `RecordOverlay`.
+- `src/lib/otaUpdater.ts` + `src/components/OtaUpdateManager.tsx` — `@capgo/capacitor-updater`
+  with `autoUpdate: false`. On launch the app calls `notifyAppReady()`, reads
+  `version.json` from the `ota-latest` GitHub release, gates on `minNativeVersion` against
+  `NATIVE_APP_VERSION`, then downloads/applies the zip bundle. Every network call fails
+  silently so an offline start still works.
+- `.github/workflows/build-apk.yml` republishes `allmova-ota-bundle.zip` (zip of `out/`),
+  `version.json` and `allmova-latest.apk` to the `ota-latest` release on every push to main.
+
 ## Gotchas
+
+- `@capgo/capacitor-updater` pulls `androidx.work` 2.10+ / `lifecycle` 2.10+, which require
+  `compileSdk 35` and `minSdk 23`. `android/variables.gradle` sets both, and
+  `android/gradle.properties` carries `android.suppressUnsupportedCompileSdk=35` because the
+  project stays on AGP 8.2.1 / Gradle 8.2.1.
+- Android 14 throws when a `location` foreground service starts without the runtime location
+  permission, so `AllmovaTrackingPlugin` requests it (and `POST_NOTIFICATIONS` on API 33+)
+  before `ContextCompat.startForegroundService`.
 
 - MapLibre's CSS sets `position: relative` on its container, which defeats `absolute inset-0`.
   `FlyoverMap` nests a `h-full w-full` div inside a positioned wrapper; keep that structure.

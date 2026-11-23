@@ -13,6 +13,9 @@ const config: CapacitorConfig = {
       androidScaleType: 'CENTER_CROP',
       showSpinner: false,
       launchAutoHide: true
+    },
+    CapacitorUpdater: {
+      autoUpdate: false
     }
   }
 };
