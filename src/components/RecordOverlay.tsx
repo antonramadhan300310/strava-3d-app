@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import type { ActivityRecorderState } from '@/hooks/useActivityRecorder';
+import { RPE_SCALE, rpeLabel } from '@/lib/powerAndEffort';
 import type { ActivityType } from '@/lib/valhalla';
 
 const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
@@ -51,6 +52,7 @@ function suggestedTitle(activityType: ActivityType): string {
 export default function RecordOverlay({ recorder }: { recorder: ActivityRecorderState }) {
   const [showSave, setShowSave] = useState(false);
   const [title, setTitle] = useState('');
+  const [rpe, setRpe] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -76,6 +78,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
     }
     setTitle(suggestedTitle(recorder.activityType));
     setSaveError(null);
+    setRpe(null);
     setShowSave(true);
   }, [finished, recorder.activityType]);
 
@@ -88,7 +91,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
     setSaving(true);
     setSaveError(null);
     try {
-      await recorder.saveActivity(trimmed);
+      await recorder.saveActivity(trimmed, rpe);
       setShowSave(false);
     } catch (cause) {
       setSaveError(cause instanceof Error ? cause.message : 'Gagal menyimpan aktivitas.');
@@ -261,6 +264,36 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
               className="mb-3 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-orange-500"
               placeholder="Lari pagi"
             />
+
+            <div className="mb-3">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs text-slate-400">Tingkat Usaha / RPE (opsional)</span>
+                <span className="text-[10px] font-semibold text-slate-300">
+                  {rpe === null ? 'Belum diisi' : `${rpe}/10 • ${rpeLabel(rpe)}`}
+                </span>
+              </div>
+              <div className="grid grid-cols-5 gap-1" role="group" aria-label="RPE 1 sampai 10">
+                {RPE_SCALE.map((entry) => {
+                  const selected = rpe === entry.value;
+                  return (
+                    <button
+                      key={entry.value}
+                      type="button"
+                      aria-pressed={selected}
+                      aria-label={`RPE ${entry.value}: ${entry.label}`}
+                      onClick={() => setRpe(selected ? null : entry.value)}
+                      className={`rounded-lg py-1.5 text-xs font-bold transition active:scale-95 ${
+                        selected
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-slate-800 text-slate-300 active:bg-slate-700'
+                      }`}
+                    >
+                      {entry.value}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             {saveError && <p className="mb-2 text-xs text-rose-400">{saveError}</p>}
 

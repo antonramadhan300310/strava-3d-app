@@ -292,7 +292,7 @@ export function useActivityRecorder() {
     return result;
   }, [flushElapsed, stopWatch, persist]);
 
-  const saveActivity = useCallback(async (title: string) => {
+  const saveActivity = useCallback(async (title: string, rpe?: number | null) => {
     if (!finishResult) throw new Error('Belum ada rekaman yang selesai diproses.');
     if (!isSupabaseConfigured) {
       throw new Error(
@@ -320,6 +320,7 @@ export function useActivityRecorder() {
         durationSeconds: finishResult.durationSeconds,
         coordinates: finishResult.coordinates,
         weather,
+        rpe: rpe ?? null,
       });
       invalidateHeatmapCache();
       clearSession();

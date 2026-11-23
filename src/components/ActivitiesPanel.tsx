@@ -16,6 +16,7 @@ import {
   Play,
   RefreshCw,
   Trash2,
+  UserRound,
   X,
 } from 'lucide-react';
 import { ACTIVITY_FILTERS, type ActivitiesState } from '@/hooks/useActivities';
@@ -33,6 +34,7 @@ import {
 import type { ActivityType } from '@/lib/valhalla';
 import PersonalGoalsStrip from './PersonalGoalsStrip';
 import TrainingLogView from './TrainingLogView';
+import AthleteProfileSheet from './AthleteProfileSheet';
 
 const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
   cycling: <Bike size={20} />,
@@ -60,6 +62,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
   const [pendingDelete, setPendingDelete] = useState<ActivityRecord | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('history');
   const [goals, setGoals] = useState<PersonalGoal[]>([]);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   // localStorage is client-only: loading in an effect keeps the static export
   // and the first client render identical.
@@ -117,16 +120,26 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
               {activities.counts.all} tersimpan di Supabase
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void activities.refresh()}
-            disabled={activities.loading}
-            aria-label="Muat ulang daftar aktivitas"
-            aria-busy={activities.loading}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-lg backdrop-blur transition active:scale-95 disabled:opacity-50"
-          >
-            <RefreshCw size={18} className={activities.loading ? 'animate-spin' : undefined} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void activities.refresh()}
+              disabled={activities.loading}
+              aria-label="Muat ulang daftar aktivitas"
+              aria-busy={activities.loading}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-lg backdrop-blur transition active:scale-95 disabled:opacity-50"
+            >
+              <RefreshCw size={18} className={activities.loading ? 'animate-spin' : undefined} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setProfileOpen(true)}
+              aria-label="Buka profil atlet"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-orange-400/40 bg-orange-500/15 text-orange-300 shadow-lg backdrop-blur transition active:scale-95"
+            >
+              <UserRound size={19} />
+            </button>
+          </div>
         </div>
 
         <div
@@ -269,6 +282,15 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
             </div>
           </div>
         </div>
+      )}
+
+      {profileOpen && (
+        <AthleteProfileSheet
+          open={profileOpen}
+          activities={activities.activities}
+          onClose={() => setProfileOpen(false)}
+          onSaved={(profile) => onNotice(`Profil ${profile.displayName} disimpan.`)}
+        />
       )}
     </section>
   );
