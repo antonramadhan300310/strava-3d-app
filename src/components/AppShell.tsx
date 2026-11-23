@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BottomNav, { type TabKey } from '@/components/BottomNav';
 import MapView, { type MapViewHandle } from '@/components/MapView';
 import RecordOverlay from '@/components/RecordOverlay';
@@ -10,6 +10,7 @@ import ActivityDetail from '@/components/ActivityDetail';
 import MapProviderModal from '@/components/MapProviderModal';
 import { useActivityRecorder } from '@/hooks/useActivityRecorder';
 import { useActivities } from '@/hooks/useActivities';
+import { useHeatmap } from '@/hooks/useHeatmap';
 import { useRouteBuilder } from '@/hooks/useRouteBuilder';
 import type { ActivityRecord } from '@/lib/activity';
 import { readMapProvider, writeMapProvider, type MapProvider } from '@/lib/mapProvider';
@@ -23,10 +24,13 @@ export default function AppShell() {
   const [provider, setProvider] = useState<MapProvider | null>(null);
   const [providerModalOpen, setProviderModalOpen] = useState(false);
   const [providerChecked, setProviderChecked] = useState(false);
+  const [heatmapFocusToken, setHeatmapFocusToken] = useState(0);
+  const consumedFocusRef = useRef(0);
   const mapRef = useRef<MapViewHandle | null>(null);
   const builder = useRouteBuilder(mapRef);
   const recorder = useActivityRecorder();
   const activities = useActivities();
+  const heatmap = useHeatmap(activities.activities);
   const isRoutes = tab === 'routes';
   const isRecord = tab === 'record';
   const isActivities = tab === 'activities';
@@ -65,6 +69,51 @@ export default function AppShell() {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // Saving a recording returns the recorder to idle; the new row must then show
+  // up in the feed (and in the heatmap cache) without reopening the tab.
+  const previousPhaseRef = useRef(recorder.phase);
+  useEffect(() => {
+    const previous = previousPhaseRef.current;
+    previousPhaseRef.current = recorder.phase;
+    if (previous !== 'idle' && recorder.phase === 'idle') void refreshActivities();
+  }, [recorder.phase, refreshActivities]);
+
+  const heatmapLayers = useMemo(
+    () => ({
+      visible: isRoutes && heatmap.enabled,
+      scheme: heatmap.scheme,
+      lines: heatmap.linesGeoJSON,
+      points: heatmap.pointsGeoJSON,
+    }),
+    [isRoutes, heatmap.enabled, heatmap.scheme, heatmap.linesGeoJSON, heatmap.pointsGeoJSON],
+  );
+
+  const focusHeatmap = useCallback(() => {
+    setHeatmapFocusToken((token) => token + 1);
+  }, []);
+
+  const openHeatmapFromActivities = useCallback(() => {
+    setTab('routes');
+    heatmap.enable();
+    setHeatmapFocusToken((token) => token + 1);
+  }, [heatmap.enable]);
+
+  // Frames the filtered extent once the data for a focus request is available.
+  useEffect(() => {
+    if (heatmapFocusToken === consumedFocusRef.current) return;
+    if (tab !== 'routes' || !heatmap.bounds) return;
+    consumedFocusRef.current = heatmapFocusToken;
+
+    const bounds = heatmap.bounds;
+    const timer = setTimeout(() => {
+      mapRef.current?.fitCoordinates([
+        [bounds[0], bounds[1]],
+        [bounds[2], bounds[3]],
+      ]);
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [heatmapFocusToken, heatmap.bounds, tab]);
+
   const closeActivity = useCallback(() => {
     setOpenActivity(null);
     void refreshActivities();
@@ -97,14 +146,27 @@ export default function AppShell() {
           followEnabled={followEnabled}
           showGpsStatus={liveGps}
           activityType={recorder.activityType}
+          heatmap={heatmapLayers}
         />
       )}
 
-      {isRoutes && <RouteBuilderOverlay builder={builder} mapRef={mapRef} />}
+      {isRoutes && (
+        <RouteBuilderOverlay
+          builder={builder}
+          mapRef={mapRef}
+          heatmap={heatmap}
+          onFocusHeatmap={focusHeatmap}
+        />
+      )}
       {isRecord && <RecordOverlay recorder={recorder} />}
 
       {isActivities && !openActivity && (
-        <ActivitiesPanel activities={activities} onOpen={setOpenActivity} onNotice={setNotice} />
+        <ActivitiesPanel
+          activities={activities}
+          onOpen={setOpenActivity}
+          onNotice={setNotice}
+          onOpenHeatmap={openHeatmapFromActivities}
+        />
       )}
 
       {openActivity && provider && (

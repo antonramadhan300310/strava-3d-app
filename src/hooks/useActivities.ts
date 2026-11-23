@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { deleteActivity, fetchActivities, isSupabaseConfigured } from '@/lib/supabase';
+import { invalidateHeatmapCache } from '@/lib/heatmapCache';
 import type { ActivityRecord } from '@/lib/activity';
 
 export type ActivityFilter = 'all' | 'recorded' | 'planned';
@@ -54,6 +55,7 @@ export function useActivities() {
     setError(null);
     try {
       await deleteActivity(id);
+      invalidateHeatmapCache();
       setActivities((current) => current.filter((activity) => activity.id !== id));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Gagal menghapus aktivitas.');

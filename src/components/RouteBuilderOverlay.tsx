@@ -16,7 +16,9 @@ import {
 } from 'lucide-react';
 import { FloatingButton, type MapViewHandle } from '@/components/MapView';
 import RouteSearchBar from '@/components/RouteSearchBar';
+import HeatmapControl from '@/components/HeatmapControl';
 import RouteTerrainSheet from '@/components/RouteTerrainSheet';
+import type { HeatmapState } from '@/hooks/useHeatmap';
 import type { RouteBuilderState } from '@/hooks/useRouteBuilder';
 import type { LngLat } from '@/lib/polyline';
 import { PROFILES, type ActivityType } from '@/lib/valhalla';
@@ -31,9 +33,12 @@ const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
 type Props = {
   builder: RouteBuilderState;
   mapRef: React.RefObject<MapViewHandle | null>;
+  heatmap: HeatmapState;
+  /** Frames the filtered heatmap extent on the map. */
+  onFocusHeatmap: () => void;
 };
 
-export default function RouteBuilderOverlay({ builder, mapRef }: Props) {
+export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusHeatmap }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showSave, setShowSave] = useState(false);
   const [showTerrain, setShowTerrain] = useState(false);
@@ -124,6 +129,10 @@ export default function RouteBuilderOverlay({ builder, mapRef }: Props) {
             />
           </div>
         )}
+
+        <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
+          <HeatmapControl heatmap={heatmap} onFocus={onFocusHeatmap} />
+        </div>
       </div>
 
       <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 px-3 pb-[calc(env(safe-area-inset-bottom)+5.5rem)]">
