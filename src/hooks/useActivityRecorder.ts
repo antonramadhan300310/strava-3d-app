@@ -22,6 +22,7 @@ import {
 import { clearSession, loadSession, saveSession, type SavedSession } from '@/lib/session';
 import { snapRouteToRoad, type ActivityType } from '@/lib/valhalla';
 import { isSupabaseConfigured, saveRecordedActivity } from '@/lib/supabase';
+import { invalidateHeatmapCache } from '@/lib/heatmapCache';
 import type { LngLat, LngLatEle } from '@/lib/polyline';
 
 export type SessionPhase = 'idle' | 'recording' | 'paused' | 'finishing';
@@ -303,6 +304,7 @@ export function useActivityRecorder() {
         durationSeconds: finishResult.durationSeconds,
         coordinates: finishResult.coordinates,
       });
+      invalidateHeatmapCache();
       clearSession();
       setPhase('idle');
       phaseRef.current = 'idle';

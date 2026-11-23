@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
+  ArrowRight,
   Bike,
   Download,
+  Flame,
   Footprints,
   Loader2,
   MapPin,
@@ -32,10 +34,21 @@ type Props = {
   activities: ActivitiesState;
   onOpen: (activity: ActivityRecord) => void;
   onNotice: (message: string) => void;
+  /** Jumps to the Routes tab with the heatmap already switched on. */
+  onOpenHeatmap: () => void;
 };
 
-export default function ActivitiesPanel({ activities, onOpen, onNotice }: Props) {
+export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHeatmap }: Props) {
   const [pendingDelete, setPendingDelete] = useState<ActivityRecord | null>(null);
+
+  // Recorded tracks only: a planned route was never actually travelled.
+  const journey = useMemo(() => {
+    const recorded = activities.activities.filter((activity) => !activity.isPlannedRoute);
+    return {
+      count: recorded.length,
+      meters: recorded.reduce((total, activity) => total + activity.distanceMeters, 0),
+    };
+  }, [activities.activities]);
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
@@ -89,6 +102,12 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice }: Props)
       </header>
 
       <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
+        <HeatmapShortcutCard
+          count={journey.count}
+          meters={journey.meters}
+          onOpen={onOpenHeatmap}
+        />
+
         {activities.error && (
           <div className="mb-3 flex items-start gap-2 rounded-xl bg-rose-500/95 px-3 py-2 text-xs font-medium text-white shadow-lg">
             <span className="flex-1">{activities.error}</span>
@@ -161,6 +180,48 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice }: Props)
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+function HeatmapShortcutCard({
+  count,
+  meters,
+  onOpen,
+}: {
+  count: number;
+  meters: number;
+  onOpen: () => void;
+}) {
+  return (
+    <section className="mb-3 overflow-hidden rounded-2xl border border-orange-500/25 bg-gradient-to-br from-slate-900 via-slate-900 to-orange-950/50 p-3 shadow-xl">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500/20 text-orange-400">
+            <Flame size={18} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-100">Heatmap Jelajah</p>
+            <p className="text-[11px] text-slate-400">{count} aktivitas terekam</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-bold leading-none tabular-nums text-orange-400">
+            {(meters / 1000).toFixed(1)}
+          </p>
+          <p className="text-[9px] uppercase tracking-wide text-slate-400">km jelajah</p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onOpen}
+        className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white shadow transition active:scale-[0.98]"
+      >
+        <Flame size={14} />
+        Buka Heatmap Jelajah
+        <ArrowRight size={14} />
+      </button>
     </section>
   );
 }

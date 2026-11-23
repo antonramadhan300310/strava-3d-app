@@ -20,6 +20,11 @@ function getClient(): SupabaseClient {
   return client;
 }
 
+/** Read-only helpers degrade gracefully instead of throwing when unconfigured. */
+export function getSupabaseClientOrNull(): SupabaseClient | null {
+  return isSupabaseConfigured ? getClient() : null;
+}
+
 export type PlannedRoute = {
   title: string;
   activityType: ActivityType;

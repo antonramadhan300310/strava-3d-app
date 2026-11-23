@@ -1,7 +1,10 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import maplibregl from 'maplibre-gl';
+import maplibregl, {
+  type HeatmapLayerSpecification,
+  type LineLayerSpecification,
+} from 'maplibre-gl';
 import { Layers, LocateFixed, Mountain, Square } from 'lucide-react';
 import type { LngLat, LngLatEle } from '@/lib/polyline';
 import { gpsBadgeText, gpsQuality, type GpsQuality } from '@/lib/metrics';
@@ -16,6 +19,7 @@ import {
   resolveMapStyle,
   type BaseMapStyle,
 } from '@/lib/mapStyle';
+import { HEATMAP_SCHEMES, type HeatmapScheme } from '@/lib/heatmapCache';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const TERRAIN_SOURCE_ID = 'terrain-source';
@@ -28,6 +32,13 @@ const TRACK_SOURCE_ID = 'live-track';
 const TRACK_CASING_LAYER_ID = 'live-track-casing';
 const TRACK_LAYER_ID = 'live-track-layer';
 const TRACK_COLOR = '#22d3ee';
+const HEATMAP_LINES_SOURCE_ID = 'personal-heatmap-lines';
+const HEATMAP_POINTS_SOURCE_ID = 'personal-heatmap-points';
+const HEATMAP_CLOUD_LAYER_ID = 'personal-heatmap-cloud';
+const HEATMAP_GLOW_LAYER_ID = 'personal-heatmap-glow';
+const HEATMAP_CORE_LAYER_ID = 'personal-heatmap-core';
+/** Lines hand over to the heat cloud above this zoom. */
+const HEATMAP_CLOUD_MAX_ZOOM = 13;
 const DEFAULT_CENTER: [number, number] = [107.6191, -6.9175];
 const DEFAULT_ZOOM = 13;
 const PITCH_3D = 60;
@@ -71,6 +82,15 @@ type Props = {
   showGpsStatus?: boolean;
   /** Drives the live activity badge icon. */
   activityType?: ActivityType;
+  /** Personal heatmap drawn beneath the active route line and waypoint markers. */
+  heatmap?: HeatmapLayers | null;
+};
+
+export type HeatmapLayers = {
+  visible: boolean;
+  scheme: HeatmapScheme;
+  lines: GeoJSON.FeatureCollection<GeoJSON.LineString> | null;
+  points: GeoJSON.FeatureCollection<GeoJSON.Point> | null;
 };
 
 const EMPTY_LINE: GeoJSON.Feature<GeoJSON.LineString> = {
@@ -83,6 +103,16 @@ const EMPTY_TRACK: GeoJSON.Feature<GeoJSON.LineString> = {
   type: 'Feature',
   properties: {},
   geometry: { type: 'LineString', coordinates: [] },
+};
+
+const EMPTY_HEATMAP_LINES: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+  type: 'FeatureCollection',
+  features: [],
+};
+
+const EMPTY_HEATMAP_POINTS: GeoJSON.FeatureCollection<GeoJSON.Point> = {
+  type: 'FeatureCollection',
+  features: [],
 };
 
 const GPS_BADGE_STYLES: Record<GpsQuality, string> = {
@@ -105,6 +135,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     followEnabled = false,
     showGpsStatus = false,
     activityType = 'cycling',
+    heatmap = null,
   },
   ref,
 ) {
@@ -119,6 +150,12 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   const clickRef = useRef(onMapClick);
   const positionRef = useRef(livePosition);
   const providerRef = useRef(provider);
+  const heatmapRef = useRef(heatmap);
+  /** Last collections pushed to the GPU, so unchanged filters skip re-parsing. */
+  const appliedHeatmapRef = useRef<{ lines: unknown; points: unknown }>({
+    lines: null,
+    points: null,
+  });
   const [mapStyle, setMapStyle] = useState<BaseMapStyle>('outdoor');
   const [is3D, setIs3D] = useState(true);
   const is3DRef = useRef(is3D);
@@ -134,6 +171,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   positionRef.current = livePosition;
   is3DRef.current = is3D;
   providerRef.current = provider;
+  heatmapRef.current = heatmap;
 
   useEffect(() => {
     if (!followEnabled) setAutoFollow(false);
@@ -211,6 +249,9 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       }
       applyRoute(map, routeRef.current);
       applyTrack(map, trackRef.current);
+      ensureHeatmapLayers(map);
+      appliedHeatmapRef.current = { lines: null, points: null };
+      applyHeatmap(map, heatmapRef.current, appliedHeatmapRef);
     };
 
     map.on('style.load', () => {
@@ -365,6 +406,12 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   useEffect(() => {
     if (mapRef.current) applyTrack(mapRef.current, liveTrack);
   }, [liveTrack]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    applyHeatmap(map, heatmap, appliedHeatmapRef);
+  }, [heatmap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -561,6 +608,152 @@ function applyTrack(map: maplibregl.Map, track: LngLatEle[] | null) {
       coordinates: track && track.length > 1 ? track : [],
     },
   });
+}
+
+/**
+ * Heatmap layers sit directly under the route casing, so the active planning
+ * line, live track and HTML waypoint markers always stay readable on top.
+ */
+function ensureHeatmapLayers(map: maplibregl.Map) {
+  const before = map.getLayer(ROUTE_CASING_LAYER_ID) ? ROUTE_CASING_LAYER_ID : undefined;
+
+  if (!map.getSource(HEATMAP_LINES_SOURCE_ID)) {
+    map.addSource(HEATMAP_LINES_SOURCE_ID, { type: 'geojson', data: EMPTY_HEATMAP_LINES });
+  }
+  if (!map.getSource(HEATMAP_POINTS_SOURCE_ID)) {
+    map.addSource(HEATMAP_POINTS_SOURCE_ID, { type: 'geojson', data: EMPTY_HEATMAP_POINTS });
+  }
+
+  if (!map.getLayer(HEATMAP_CLOUD_LAYER_ID)) {
+    map.addLayer(
+      {
+        id: HEATMAP_CLOUD_LAYER_ID,
+        type: 'heatmap',
+        source: HEATMAP_POINTS_SOURCE_ID,
+        maxzoom: HEATMAP_CLOUD_MAX_ZOOM,
+        layout: { visibility: 'none' },
+        paint: heatmapCloudPaint('fire'),
+      },
+      before,
+    );
+  }
+
+  if (!map.getLayer(HEATMAP_GLOW_LAYER_ID)) {
+    map.addLayer(
+      {
+        id: HEATMAP_GLOW_LAYER_ID,
+        type: 'line',
+        source: HEATMAP_LINES_SOURCE_ID,
+        layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
+        paint: heatmapGlowPaint('fire'),
+      },
+      before,
+    );
+  }
+
+  if (!map.getLayer(HEATMAP_CORE_LAYER_ID)) {
+    map.addLayer(
+      {
+        id: HEATMAP_CORE_LAYER_ID,
+        type: 'line',
+        source: HEATMAP_LINES_SOURCE_ID,
+        layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
+        paint: heatmapCorePaint('fire'),
+      },
+      before,
+    );
+  }
+}
+
+function heatmapCloudPaint(
+  scheme: HeatmapScheme,
+): NonNullable<HeatmapLayerSpecification['paint']> {
+  const palette = HEATMAP_SCHEMES[scheme];
+  return {
+    'heatmap-weight': ['interpolate', ['linear'], ['get', 'weight'], 0, 0, 1, 1],
+    'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 9, 0.9, 13, 1.8],
+    'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 10, 11, 18, 13, 34],
+    'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 11, 1, 13, 0],
+    'heatmap-color': [
+      'interpolate',
+      ['linear'],
+      ['heatmap-density'],
+      0,
+      'rgba(0, 0, 0, 0)',
+      0.2,
+      palette.cloud[0],
+      0.55,
+      palette.cloud[1],
+      0.85,
+      palette.cloud[2],
+      1,
+      '#ffffff',
+    ],
+  };
+}
+
+function heatmapGlowPaint(scheme: HeatmapScheme): NonNullable<LineLayerSpecification['paint']> {
+  return {
+    'line-color': HEATMAP_SCHEMES[scheme].glow,
+    'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 9, 17, 14],
+    'line-blur': 8,
+    'line-opacity': 0.32,
+  };
+}
+
+function heatmapCorePaint(scheme: HeatmapScheme): NonNullable<LineLayerSpecification['paint']> {
+  return {
+    'line-color': HEATMAP_SCHEMES[scheme].core,
+    'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2.5, 17, 4],
+    'line-opacity': 0.45,
+  };
+}
+
+function applyHeatmap(
+  map: maplibregl.Map,
+  heatmap: HeatmapLayers | null | undefined,
+  appliedRef?: { current: { lines: unknown; points: unknown } },
+) {
+  const linesSource = map.getSource(HEATMAP_LINES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  const pointsSource = map.getSource(HEATMAP_POINTS_SOURCE_ID) as
+    | maplibregl.GeoJSONSource
+    | undefined;
+  if (!linesSource || !pointsSource) return;
+
+  const lines = heatmap?.lines ?? EMPTY_HEATMAP_LINES;
+  const points = heatmap?.points ?? EMPTY_HEATMAP_POINTS;
+
+  if (!appliedRef || appliedRef.current.lines !== lines) {
+    linesSource.setData(lines);
+    if (appliedRef) appliedRef.current.lines = lines;
+  }
+  if (!appliedRef || appliedRef.current.points !== points) {
+    pointsSource.setData(points);
+    if (appliedRef) appliedRef.current.points = points;
+  }
+
+  const visibility = heatmap?.visible ? 'visible' : 'none';
+  const scheme = heatmap?.scheme ?? 'fire';
+  const palette = HEATMAP_SCHEMES[scheme];
+
+  for (const layerId of [HEATMAP_CLOUD_LAYER_ID, HEATMAP_GLOW_LAYER_ID, HEATMAP_CORE_LAYER_ID]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', visibility);
+  }
+
+  if (map.getLayer(HEATMAP_CLOUD_LAYER_ID)) {
+    map.setPaintProperty(
+      HEATMAP_CLOUD_LAYER_ID,
+      'heatmap-color',
+      heatmapCloudPaint(scheme)['heatmap-color'],
+    );
+  }
+  if (map.getLayer(HEATMAP_GLOW_LAYER_ID)) {
+    map.setPaintProperty(HEATMAP_GLOW_LAYER_ID, 'line-color', palette.glow);
+  }
+  if (map.getLayer(HEATMAP_CORE_LAYER_ID)) {
+    map.setPaintProperty(HEATMAP_CORE_LAYER_ID, 'line-color', palette.core);
+  }
 }
 
 export function FloatingButton({
