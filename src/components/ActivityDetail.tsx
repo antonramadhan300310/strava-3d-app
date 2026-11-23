@@ -137,6 +137,10 @@ export default function ActivityDetail({
     setMapStyle('outdoor');
   }, [isPro, mapStyle]);
 
+  useEffect(() => {
+    if (!isPro && exportOpen) setExportOpen(false);
+  }, [isPro, exportOpen]);
+
   const [weather, setWeather] = useState<ActivityWeather | null>(() => {
     const embedded = getEmbeddedActivityWeather(activity);
     if (embedded) return embedded;
