@@ -298,7 +298,7 @@ export function useActivityRecorder() {
     if (!finishResult) throw new Error('Belum ada rekaman yang selesai diproses.');
     if (!isSupabaseConfigured) {
       throw new Error(
-        'Supabase belum dikonfigurasi. Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY.',
+        'Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.',
       );
     }
     if (!user) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
@@ -336,7 +336,7 @@ export function useActivityRecorder() {
       activeMsRef.current = 0;
       runningSinceRef.current = null;
       lastFixTimeRef.current = null;
-      setNotice(`Aktivitas "${title}" tersimpan.`);
+      setNotice(`Aktivitas "${title}" tersimpan di Cloud ALLMOVA.`);
       if (previewRef.current) await beginWatch();
     } catch (cause) {
       throw cause;

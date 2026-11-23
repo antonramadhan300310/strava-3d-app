@@ -13,7 +13,7 @@ let client: SupabaseClient | null = null;
 
 function getClient(): SupabaseClient {
   if (!isSupabaseConfigured) {
-    throw new Error('Supabase belum dikonfigurasi. Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+    throw new Error('Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.');
   }
   if (!client) {
     client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);

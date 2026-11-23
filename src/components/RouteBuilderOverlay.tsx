@@ -243,7 +243,7 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-semibold text-[#0D1112] transition active:scale-[0.98] disabled:opacity-60"
             >
               {saving && <Loader2 size={16} className="animate-spin" />}
-              {saving ? 'Menyimpan…' : 'Simpan ke Supabase'}
+              {saving ? 'Menyimpan ke Cloud ALLMOVA...' : 'Simpan ke Cloud ALLMOVA'}
             </button>
           </div>
         </div>

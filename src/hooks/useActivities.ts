@@ -36,7 +36,7 @@ export function useActivities() {
     }
     if (!isSupabaseConfigured) {
       setError(
-        'Supabase belum dikonfigurasi. Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY.',
+        'Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.',
       );
       setActivities([]);
       return;

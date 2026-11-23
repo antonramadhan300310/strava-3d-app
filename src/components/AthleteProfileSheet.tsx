@@ -1,7 +1,21 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { Bike, Crown, Gauge, Loader2, LogOut, Mail, Save, UserRound, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Bike,
+  Check,
+  Cloud,
+  CloudOff,
+  Crown,
+  Gauge,
+  Loader2,
+  LogOut,
+  Mail,
+  Pencil,
+  Save,
+  UserRound,
+  X,
+} from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import type { ActivityRecord } from '@/lib/activity';
 import { findSuggestedFtpFromHistory } from '@/lib/powerAndEffort';
@@ -12,7 +26,6 @@ import {
   computePowerZoneRanges,
   loadRiderProfile,
   sanitizeRiderProfile,
-  saveRiderProfile,
   type BikeType,
   type RiderProfile,
 } from '@/lib/riderProfile';
@@ -25,6 +38,19 @@ type Props = {
   onSaved?: (profile: RiderProfile) => void;
 };
 
+type SyncState = 'cloud' | 'local';
+
+const SAVED_NOTICE_MS = 2500;
+
+function hasStoredProfile(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
 export default function AthleteProfileSheet({ open, activities, onClose, onSaved }: Props) {
   const {
     user,
@@ -34,18 +60,64 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     ownerSimulatedTier,
     setOwnerSimulatedTier,
     signOut,
-    updateProfile,
+    saveAthleteProfile,
   } = useAuth();
-  const [initial] = useState(loadRiderProfile);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState(initial.displayName);
-  const [bodyWeight, setBodyWeight] = useState(String(initial.bodyWeightKg));
-  const [bikeWeight, setBikeWeight] = useState(String(initial.bikeWeightKg));
-  const [bikeType, setBikeType] = useState<BikeType>(initial.bikeType);
-  const [ftp, setFtp] = useState(String(initial.ftpWatts));
+  const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>(() =>
+    typeof navigator !== 'undefined' && navigator.onLine === false ? 'local' : 'cloud',
+  );
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
+
+  // The context profile is the source of truth; localStorage only fills the gap
+  // before the cloud fetch finishes or while the device is offline.
+  const savedProfile = useMemo<RiderProfile>(() => {
+    if (hasStoredProfile(account?.riderProfile)) {
+      return sanitizeRiderProfile({
+        ...(account?.riderProfile as Partial<RiderProfile>),
+        displayName: account?.displayName || undefined,
+      });
+    }
+    const local = loadRiderProfile();
+    return { ...local, displayName: account?.displayName || local.displayName };
+  }, [account?.riderProfile, account?.displayName]);
+
+  const [displayName, setDisplayName] = useState(savedProfile.displayName);
+  const [bodyWeight, setBodyWeight] = useState(String(savedProfile.bodyWeightKg));
+  const [bikeWeight, setBikeWeight] = useState(String(savedProfile.bikeWeightKg));
+  const [bikeType, setBikeType] = useState<BikeType>(savedProfile.bikeType);
+  const [ftp, setFtp] = useState(String(savedProfile.ftpWatts));
+
+  const resetForm = () => {
+    setDisplayName(savedProfile.displayName);
+    setBodyWeight(String(savedProfile.bodyWeightKg));
+    setBikeWeight(String(savedProfile.bikeWeightKg));
+    setBikeType(savedProfile.bikeType);
+    setFtp(String(savedProfile.ftpWatts));
+  };
+
+  // Reopening the sheet always starts in read mode with the saved values.
+  useEffect(() => {
+    if (!open) setIsEditing(false);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || isEditing) return;
+    resetForm();
+    // resetForm only derives from savedProfile, which is already a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isEditing, savedProfile]);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    };
+  }, []);
 
   const stats = useMemo(() => {
     const recorded = activities.filter((activity) => !activity.isPlannedRoute);
@@ -84,22 +156,41 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     setBikeWeight(String(BIKE_PHYSICS[next].defaultWeightKg));
   };
 
-  const handleSave = () => {
-    const saved = saveRiderProfile({
-      displayName,
-      bodyWeightKg: Number(bodyWeight),
-      bikeWeightKg: Number(bikeWeight),
-      bikeType,
-      ftpWatts: Number(ftp),
-    });
-    void updateProfile({
-      display_name: saved.displayName,
-      rider_profile: saved,
-    }).catch(() => {
-      // The scoped local copy stays authoritative until the next sync.
-    });
-    onSaved?.(saved);
-    onClose();
+  const startEditing = () => {
+    resetForm();
+    setSavedNotice(null);
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => {
+    resetForm();
+    setIsEditing(false);
+  };
+
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    setAccountError(null);
+    try {
+      const result = await saveAthleteProfile({
+        displayName,
+        riderProfile: {
+          displayName,
+          bodyWeightKg: Number(bodyWeight),
+          bikeWeightKg: Number(bikeWeight),
+          bikeType,
+          ftpWatts: Number(ftp),
+        },
+      });
+      setSyncState(result.synced ? 'cloud' : 'local');
+      onSaved?.(result.profile);
+      setIsEditing(false);
+      setSavedNotice('Profil berhasil disimpan');
+      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = window.setTimeout(() => setSavedNotice(null), SAVED_NOTICE_MS);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -126,7 +217,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold text-slate-100">Profil Atlet</h2>
               <p className="truncate text-[10px] text-slate-400">
-                Data lokal • dipakai untuk estimasi daya
+                Profil atlet • estimasi daya &amp; kalibrasi FTP
               </p>
             </div>
           </div>
@@ -157,23 +248,61 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               </span>
             </div>
 
-            <label
-              htmlFor="rider-display-name"
-              className="mb-1 mt-2 block text-[11px] text-slate-400"
-            >
-              Nama panggilan
-            </label>
-            <input
-              id="rider-display-name"
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder={DEFAULT_RIDER_PROFILE.displayName}
-              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
-            />
+            {isEditing ? (
+              <>
+                <label
+                  htmlFor="rider-display-name"
+                  className="mb-1 mt-2 block text-[11px] text-slate-400"
+                >
+                  Nama panggilan
+                </label>
+                <input
+                  id="rider-display-name"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder={DEFAULT_RIDER_PROFILE.displayName}
+                  className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
+                />
+              </>
+            ) : (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-[#1E2E16]/70 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] text-slate-400">Nama panggilan</p>
+                  <p className="truncate text-sm font-semibold text-slate-100">
+                    {savedProfile.displayName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={startEditing}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-[#B9F51E]/40 bg-[#B9F51E]/10 px-2.5 py-1.5 text-[11px] font-bold text-[#B9F51E] active:scale-95"
+                >
+                  <Pencil size={12} />
+                  Edit Profil
+                </button>
+              </div>
+            )}
 
             <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
               <Mail size={12} className="shrink-0" />
-              <span className="truncate">{user?.email ?? account?.email ?? 'Email tidak tersedia'}</span>
+              <span className="truncate">
+                {user?.email ?? account?.email ?? 'Email tidak tersedia'}
+              </span>
+            </p>
+
+            <p
+              className={`mt-1.5 flex items-center gap-1.5 text-[10px] font-medium ${
+                syncState === 'cloud' ? 'text-emerald-300' : 'text-amber-300'
+              }`}
+            >
+              {syncState === 'cloud' ? (
+                <Cloud size={12} className="shrink-0" />
+              ) : (
+                <CloudOff size={12} className="shrink-0" />
+              )}
+              {syncState === 'cloud'
+                ? 'Tersinkron ke Cloud ALLMOVA'
+                : 'Tersimpan Lokal (Offline)'}
             </p>
 
             {isPro ? (
@@ -247,55 +376,76 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               Data Fisik &amp; Profil Sepeda
             </p>
 
-            <label htmlFor="rider-body-weight" className="mb-1 mt-2 block text-[11px] text-slate-400">
-              Berat Badan (kg)
-            </label>
-            <input
-              id="rider-body-weight"
-              type="number"
-              inputMode="decimal"
-              min={20}
-              max={250}
-              step={0.1}
-              value={bodyWeight}
-              onChange={(event) => setBodyWeight(event.target.value)}
-              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
-            />
+            {isEditing ? (
+              <>
+                <label
+                  htmlFor="rider-body-weight"
+                  className="mb-1 mt-2 block text-[11px] text-slate-400"
+                >
+                  Berat Badan (kg)
+                </label>
+                <input
+                  id="rider-body-weight"
+                  type="number"
+                  inputMode="decimal"
+                  min={20}
+                  max={250}
+                  step={0.1}
+                  value={bodyWeight}
+                  onChange={(event) => setBodyWeight(event.target.value)}
+                  className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
+                />
 
-            <p className="mb-1 mt-2 text-[11px] text-slate-400">Jenis sepeda</p>
-            <div className="grid grid-cols-3 gap-1" role="group" aria-label="Jenis sepeda">
-              {BIKE_TYPES.map((key) => {
-                const selected = bikeType === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => selectBikeType(key)}
-                    className={`rounded-xl py-2 text-[11px] font-semibold transition active:scale-95 ${
-                      selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'bg-[#1E2E16] text-slate-300'
-                    }`}
-                  >
-                    {BIKE_PHYSICS[key].label}
-                  </button>
-                );
-              })}
-            </div>
+                <p className="mb-1 mt-2 text-[11px] text-slate-400">Jenis sepeda</p>
+                <div className="grid grid-cols-3 gap-1" role="group" aria-label="Jenis sepeda">
+                  {BIKE_TYPES.map((key) => {
+                    const selected = bikeType === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => selectBikeType(key)}
+                        className={`rounded-xl py-2 text-[11px] font-semibold transition active:scale-95 ${
+                          selected
+                            ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+                            : 'bg-[#1E2E16] text-slate-300'
+                        }`}
+                      >
+                        {BIKE_PHYSICS[key].label}
+                      </button>
+                    );
+                  })}
+                </div>
 
-            <label htmlFor="rider-bike-weight" className="mb-1 mt-2 block text-[11px] text-slate-400">
-              Berat Sepeda (kg)
-            </label>
-            <input
-              id="rider-bike-weight"
-              type="number"
-              inputMode="decimal"
-              min={2}
-              max={40}
-              step={0.1}
-              value={bikeWeight}
-              onChange={(event) => setBikeWeight(event.target.value)}
-              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
-            />
+                <label
+                  htmlFor="rider-bike-weight"
+                  className="mb-1 mt-2 block text-[11px] text-slate-400"
+                >
+                  Berat Sepeda (kg)
+                </label>
+                <input
+                  id="rider-bike-weight"
+                  type="number"
+                  inputMode="decimal"
+                  min={2}
+                  max={40}
+                  step={0.1}
+                  value={bikeWeight}
+                  onChange={(event) => setBikeWeight(event.target.value)}
+                  className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
+                />
+              </>
+            ) : (
+              <dl className="mt-2 grid grid-cols-3 gap-1.5">
+                <ReadOnlyField label="Berat Badan" value={`${savedProfile.bodyWeightKg} kg`} />
+                <ReadOnlyField
+                  label="Jenis Sepeda"
+                  value={BIKE_PHYSICS[savedProfile.bikeType].label}
+                />
+                <ReadOnlyField label="Berat Sepeda" value={`${savedProfile.bikeWeightKg} kg`} />
+              </dl>
+            )}
           </section>
 
           <section className="mt-3 rounded-xl border border-white/10 bg-[#151B1D]/70 p-3">
@@ -304,29 +454,40 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               Kalibrasi FTP &amp; Zona Daya
             </p>
 
-            <label htmlFor="rider-ftp" className="mb-1 mt-2 block text-[11px] text-slate-400">
-              FTP (Watt)
-            </label>
-            <input
-              id="rider-ftp"
-              type="number"
-              inputMode="numeric"
-              min={40}
-              max={700}
-              step={1}
-              value={ftp}
-              onChange={(event) => setFtp(event.target.value)}
-              className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
-            />
+            {isEditing ? (
+              <>
+                <label htmlFor="rider-ftp" className="mb-1 mt-2 block text-[11px] text-slate-400">
+                  FTP (Watt)
+                </label>
+                <input
+                  id="rider-ftp"
+                  type="number"
+                  inputMode="numeric"
+                  min={40}
+                  max={700}
+                  step={1}
+                  value={ftp}
+                  onChange={(event) => setFtp(event.target.value)}
+                  className="w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
+                />
 
-            {suggestedFtp !== null && (
-              <button
-                type="button"
-                onClick={() => setFtp(String(suggestedFtp))}
-                className="mt-2 flex w-full items-center justify-center gap-1 rounded-xl border border-sky-400/30 bg-sky-400/10 py-2 text-[11px] font-semibold text-sky-300 active:scale-[0.99]"
-              >
-                Gunakan 95% Peak 20m ({suggestedFtp} W)
-              </button>
+                {suggestedFtp !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setFtp(String(suggestedFtp))}
+                    className="mt-2 flex w-full items-center justify-center gap-1 rounded-xl border border-sky-400/30 bg-sky-400/10 py-2 text-[11px] font-semibold text-sky-300 active:scale-[0.99]"
+                  >
+                    Gunakan 95% Peak 20m ({suggestedFtp} W)
+                  </button>
+                )}
+              </>
+            ) : (
+              <div className="mt-2 flex items-baseline justify-between rounded-xl bg-[#1E2E16]/70 px-3 py-2">
+                <span className="text-[11px] text-slate-400">FTP</span>
+                <span className="text-sm font-bold tabular-nums text-slate-100">
+                  {savedProfile.ftpWatts} W
+                </span>
+              </div>
             )}
 
             <ul className="mt-3 flex flex-col gap-1">
@@ -355,7 +516,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
             {confirmLogout ? (
               <>
                 <p className="text-[11px] font-medium leading-relaxed text-rose-200">
-                  Keluar dari akun ini? Data aktivitas tetap tersimpan di cloud.
+                  Keluar dari akun ini? Data aktivitas tetap tersimpan di Cloud ALLMOVA.
                 </p>
                 <div className="mt-2 flex gap-2">
                   <button
@@ -399,14 +560,46 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
         </div>
 
         <footer className="shrink-0 border-t border-white/10 bg-[#151B1D] px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-          <button
-            type="button"
-            onClick={handleSave}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] transition active:scale-[0.99]"
-          >
-            <Save size={16} />
-            Simpan Profil
-          </button>
+          {savedNotice && (
+            <p
+              role="status"
+              className="mb-2 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#B9F51E]"
+            >
+              <Check size={13} />
+              {savedNotice}
+            </p>
+          )}
+
+          {isEditing ? (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={cancelEditing}
+                disabled={saving}
+                className="flex flex-1 items-center justify-center rounded-xl border border-white/15 py-3 text-sm font-semibold text-slate-200 transition active:scale-[0.99] disabled:opacity-60"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="flex flex-[1.6] items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] transition active:scale-[0.99] disabled:opacity-60"
+              >
+                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                {saving ? 'Menyimpan…' : 'Simpan Perubahan'}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={startEditing}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] transition active:scale-[0.99]"
+            >
+              <Pencil size={16} />
+              Edit Profil
+            </button>
+          )}
         </footer>
       </div>
 
@@ -421,6 +614,15 @@ function StatBox({ label, value, unit }: { label: string; value: string; unit: s
       <dt className="text-[8px] uppercase leading-tight tracking-wide text-slate-400">{label}</dt>
       <dd className="text-[12px] font-bold leading-tight tabular-nums text-slate-100">{value}</dd>
       <span className="text-[8px] text-slate-500">{unit}</span>
+    </div>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col rounded-lg bg-[#1E2E16]/70 px-2 py-1.5">
+      <dt className="text-[9px] uppercase leading-tight tracking-wide text-slate-400">{label}</dt>
+      <dd className="mt-0.5 text-[12px] font-bold leading-tight text-slate-100">{value}</dd>
     </div>
   );
 }

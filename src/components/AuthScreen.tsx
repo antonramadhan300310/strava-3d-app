@@ -65,7 +65,7 @@ export default function AuthScreen() {
 
   const guard = (): boolean => {
     if (!isConfigured) {
-      setError('Supabase belum dikonfigurasi. Hubungi admin aplikasi.');
+      setError('Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.');
       return false;
     }
     return true;
@@ -238,8 +238,7 @@ export default function AuthScreen() {
           {!isConfigured && (
             <p className="flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
               <AlertCircle size={14} className="mt-0.5 shrink-0" />
-              Supabase belum dikonfigurasi. Isi NEXT_PUBLIC_SUPABASE_URL dan
-              NEXT_PUBLIC_SUPABASE_ANON_KEY.
+              Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.
             </p>
           )}
 

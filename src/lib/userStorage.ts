@@ -1,13 +1,14 @@
 /**
  * Per-account localStorage scoping.
  *
- * Every cache key is suffixed with the active Supabase user id so two accounts
- * on the same device never read each other's data. The active id lives in
- * module memory and is set by `AuthContext` before any screen mounts.
+ * Every cache key is suffixed with the active account id so two accounts on the
+ * same device never read each other's data. The active id lives in module
+ * memory and is set by `AuthContext` before any screen mounts.
  */
 
 export const USER_STORAGE_KEYS = {
   riderProfile: 'tracker3d_rider_profile_v1',
+  displayName: 'tracker3d_display_name_v1',
   personalGoals: 'personal_goals_v1',
   heatmap: 'tracker3d_personal_heatmap_v1',
   weather: 'tracker3d_activity_weather_v1',

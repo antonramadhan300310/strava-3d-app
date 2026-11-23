@@ -37,7 +37,7 @@ const TRANSLATIONS: { match: RegExp; message: string }[] = [
   },
 ];
 
-/** Turns raw Supabase Auth errors into short Indonesian copy. */
+/** Turns raw authentication errors into short Indonesian copy. */
 export function translateAuthError(error: unknown): string {
   const raw =
     error instanceof Error
@@ -51,7 +51,11 @@ export function translateAuthError(error: unknown): string {
   const known = TRANSLATIONS.find((entry) => entry.match.test(raw));
   if (known) return known.message;
 
-  return raw.trim().length > 0
-    ? `Gagal memproses permintaan: ${raw}`
-    : 'Terjadi kesalahan. Coba lagi.';
+  const message =
+    raw.trim().length > 0
+      ? `Gagal memproses permintaan: ${raw}`
+      : 'Terjadi kesalahan. Coba lagi.';
+
+  // The SDK can echo its own brand in provider errors; never show it in the UI.
+  return message.replace(/supabase/gi, 'Server ALLMOVA');
 }

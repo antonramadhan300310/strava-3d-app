@@ -142,7 +142,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
             <AllmovaLogo variant="compact" className="h-6 w-auto" />
             <h1 className="mt-1 text-lg font-semibold text-slate-100">Aktivitas</h1>
             <p className="text-[11px] text-slate-400">
-              {activities.counts.all} tersimpan di Supabase
+              {activities.counts.all} tersimpan di Cloud ALLMOVA
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -317,7 +317,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#151B1D] p-4 shadow-2xl">
             <h2 className="mb-1 text-sm font-semibold text-slate-100">Hapus aktivitas?</h2>
             <p className="mb-4 text-xs text-slate-400">
-              &ldquo;{pendingDelete.title}&rdquo; akan dihapus permanen dari Supabase. Tindakan ini
+              &ldquo;{pendingDelete.title}&rdquo; akan dihapus permanen dari Cloud ALLMOVA. Tindakan ini
               tidak dapat dibatalkan.
             </p>
             <div className="flex gap-2">
@@ -346,7 +346,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
           open={profileOpen}
           activities={activities.activities}
           onClose={() => setProfileOpen(false)}
-          onSaved={(profile) => onNotice(`Profil ${profile.displayName} disimpan.`)}
+          onSaved={() => onNotice('Profil berhasil disimpan')}
         />
       )}
 
