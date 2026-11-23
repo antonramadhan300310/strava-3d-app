@@ -10,6 +10,7 @@ import {
   Footprints,
   List,
   Loader2,
+  Lock,
   MapPin,
   Mountain,
   MountainSnow,
@@ -19,6 +20,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 import { ACTIVITY_FILTERS, type ActivitiesState } from '@/hooks/useActivities';
 import { formatActivityDate, type ActivityRecord } from '@/lib/activity';
 import { buildGpx, gpxFileName } from '@/lib/gpx';
@@ -33,6 +35,7 @@ import {
 } from '@/lib/trainingLog';
 import type { ActivityType } from '@/lib/valhalla';
 import PersonalGoalsStrip from './PersonalGoalsStrip';
+import ProPaywallSheet from './ProPaywallSheet';
 import TrainingLogView from './TrainingLogView';
 import AthleteProfileSheet from './AthleteProfileSheet';
 
@@ -59,10 +62,18 @@ const VIEW_MODES: { key: ViewMode; label: string; icon: React.ReactNode }[] = [
 ];
 
 export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHeatmap }: Props) {
+  const { isPro, updateProfile } = useAuth();
   const [pendingDelete, setPendingDelete] = useState<ActivityRecord | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('history');
   const [goals, setGoals] = useState<PersonalGoal[]>([]);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [paywallReason, setPaywallReason] = useState<string | undefined>(undefined);
+
+  const requirePro = (reason: string) => {
+    setPaywallReason(reason);
+    setPaywallOpen(true);
+  };
 
   // localStorage is client-only: loading in an effect keeps the static export
   // and the first client render identical.
@@ -70,13 +81,25 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
     setGoals(loadPersonalGoals());
   }, []);
 
+  useEffect(() => {
+    if (!isPro && viewMode === 'log') setViewMode('history');
+  }, [isPro, viewMode]);
+
   const handleSaveGoal = (goal: PersonalGoal) => {
-    setGoals(savePersonalGoal(goal));
+    const next = savePersonalGoal(goal);
+    setGoals(next);
+    void updateProfile({ personal_goals: next }).catch(() => {
+      // The local copy stays authoritative when the cloud sync fails.
+    });
     onNotice('Target pribadi disimpan.');
   };
 
   const handleDeleteGoal = (id: string) => {
-    setGoals(deletePersonalGoal(id));
+    const next = deletePersonalGoal(id);
+    setGoals(next);
+    void updateProfile({ personal_goals: next }).catch(() => {
+      // The local copy stays authoritative when the cloud sync fails.
+    });
     onNotice('Target pribadi dihapus.');
   };
 
@@ -147,21 +170,33 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
           role="tablist"
           aria-label="Mode daftar aktivitas"
         >
-          {VIEW_MODES.map(({ key, label, icon }) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={viewMode === key}
-              onClick={() => setViewMode(key)}
-              className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-semibold transition active:scale-95 ${
-                viewMode === key ? 'bg-orange-500 text-white' : 'text-slate-300 active:bg-slate-800'
-              }`}
-            >
-              {icon}
-              {label}
-            </button>
-          ))}
+          {VIEW_MODES.map(({ key, label, icon }) => {
+            const locked = key === 'log' && !isPro;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={viewMode === key}
+                onClick={() =>
+                  locked ? requirePro('Training Log khusus Pro.') : setViewMode(key)
+                }
+                className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-semibold transition active:scale-95 ${
+                  viewMode === key
+                    ? 'bg-orange-500 text-white'
+                    : 'text-slate-300 active:bg-slate-800'
+                }`}
+              >
+                {icon}
+                {label}
+                {locked && (
+                  <span className="rounded-full bg-amber-400/20 px-1 py-0.5 text-[8px] font-bold text-amber-300">
+                    👑 PRO
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {viewMode === 'history' && (
@@ -183,15 +218,28 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
         <HeatmapShortcutCard
           count={journey.count}
           meters={journey.meters}
-          onOpen={onOpenHeatmap}
+          locked={!isPro}
+          onOpen={
+            isPro
+              ? onOpenHeatmap
+              : () => requirePro('Heatmap Personal Vektor khusus Pro.')
+          }
         />
 
-        <PersonalGoalsStrip
-          goals={goals}
-          activities={activities.activities}
-          onSave={handleSaveGoal}
-          onDelete={handleDeleteGoal}
-        />
+        {isPro ? (
+          <PersonalGoalsStrip
+            goals={goals}
+            activities={activities.activities}
+            onSave={handleSaveGoal}
+            onDelete={handleDeleteGoal}
+          />
+        ) : (
+          <LockedProCard
+            title="Target Pribadi"
+            description="Strip target mingguan, bulanan, dan tahunan tanpa batas."
+            onOpen={() => requirePro('Target Pribadi khusus Pro.')}
+          />
+        )}
 
         {activities.error && (
           <div className="mb-3 flex items-start gap-2 rounded-xl bg-rose-500/95 px-3 py-2 text-xs font-medium text-white shadow-lg">
@@ -243,9 +291,14 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
                 <ActivityCard
                   key={String(activity.id)}
                   activity={activity}
-                  hasPR={prHolderIds.has(String(activity.id))}
+                  hasPR={isPro && prHolderIds.has(String(activity.id))}
                   deleting={activities.deletingId === activity.id}
                   onOpen={() => onOpen(activity)}
+                  onFlyover={() =>
+                    isPro
+                      ? onOpen(activity)
+                      : requirePro('3D Flyover khusus Pro.')
+                  }
                   onExport={() => void exportActivity(activity)}
                   onDelete={() => setPendingDelete(activity)}
                 />
@@ -292,6 +345,12 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
           onSaved={(profile) => onNotice(`Profil ${profile.displayName} disimpan.`)}
         />
       )}
+
+      <ProPaywallSheet
+        open={paywallOpen}
+        reason={paywallReason}
+        onClose={() => setPaywallOpen(false)}
+      />
     </section>
   );
 }
@@ -299,10 +358,12 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
 function HeatmapShortcutCard({
   count,
   meters,
+  locked,
   onOpen,
 }: {
   count: number;
   meters: number;
+  locked?: boolean;
   onOpen: () => void;
 }) {
   return (
@@ -313,7 +374,14 @@ function HeatmapShortcutCard({
             <Flame size={18} />
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-100">Heatmap Jelajah</p>
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-100">
+              Heatmap Jelajah
+              {locked && (
+                <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+                  👑 PRO
+                </span>
+              )}
+            </p>
             <p className="text-[11px] text-slate-400">{count} aktivitas terekam</p>
           </div>
         </div>
@@ -376,6 +444,7 @@ function ActivityCard({
   hasPR,
   deleting,
   onOpen,
+  onFlyover,
   onExport,
   onDelete,
 }: {
@@ -383,6 +452,7 @@ function ActivityCard({
   hasPR: boolean;
   deleting: boolean;
   onOpen: () => void;
+  onFlyover: () => void;
   onExport: () => void;
   onDelete: () => void;
 }) {
@@ -429,7 +499,7 @@ function ActivityCard({
       </button>
 
       <div className="flex items-center gap-1 border-t border-white/10 px-2 py-1.5">
-        <CardAction label="3D Flyover" onClick={onOpen}>
+        <CardAction label="3D Flyover" onClick={onFlyover}>
           <Play size={14} />
         </CardAction>
         <CardAction label="Export GPX" onClick={onExport}>
@@ -440,6 +510,36 @@ function ActivityCard({
         </CardAction>
       </div>
     </li>
+  );
+}
+
+function LockedProCard({
+  title,
+  description,
+  onOpen,
+}: {
+  title: string;
+  description: string;
+  onOpen: () => void;
+}) {
+  return (
+    <section className="mb-3 rounded-2xl border border-amber-300/25 bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 p-3 shadow-xl">
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-100">
+        <Lock size={14} className="text-amber-300" />
+        {title}
+        <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+          👑 PRO
+        </span>
+      </p>
+      <p className="mt-0.5 text-[11px] text-slate-400">{description}</p>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="mt-2 w-full rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white shadow transition active:scale-[0.98]"
+      >
+        Upgrade ke Pro
+      </button>
+    </section>
   );
 }
 

@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Bike, Gauge, Save, UserRound, X } from 'lucide-react';
+import { Bike, Crown, Gauge, Loader2, LogOut, Mail, Save, UserRound, X } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 import type { ActivityRecord } from '@/lib/activity';
 import { findSuggestedFtpFromHistory } from '@/lib/powerAndEffort';
 import {
@@ -15,6 +16,7 @@ import {
   type BikeType,
   type RiderProfile,
 } from '@/lib/riderProfile';
+import ProPaywallSheet from './ProPaywallSheet';
 
 type Props = {
   open: boolean;
@@ -24,7 +26,21 @@ type Props = {
 };
 
 export default function AthleteProfileSheet({ open, activities, onClose, onSaved }: Props) {
+  const {
+    user,
+    profile: account,
+    isPro,
+    isOwner,
+    ownerSimulatedTier,
+    setOwnerSimulatedTier,
+    signOut,
+    updateProfile,
+  } = useAuth();
   const [initial] = useState(loadRiderProfile);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState(initial.displayName);
   const [bodyWeight, setBodyWeight] = useState(String(initial.bodyWeightKg));
   const [bikeWeight, setBikeWeight] = useState(String(initial.bikeWeightKg));
@@ -76,8 +92,27 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
       bikeType,
       ftpWatts: Number(ftp),
     });
+    void updateProfile({
+      display_name: saved.displayName,
+      rider_profile: saved,
+    }).catch(() => {
+      // The scoped local copy stays authoritative until the next sync.
+    });
     onSaved?.(saved);
     onClose();
+  };
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    setAccountError(null);
+    try {
+      await signOut();
+      onClose();
+    } catch (cause) {
+      setAccountError(cause instanceof Error ? cause.message : 'Gagal keluar dari akun.');
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -111,8 +146,14 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Identitas
               </p>
-              <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300">
-                Mode Lokal
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${
+                  isPro
+                    ? 'border-amber-300/40 bg-amber-400/15 text-amber-300'
+                    : 'border-slate-600 bg-slate-800 text-slate-300'
+                }`}
+              >
+                {isPro ? '👑 AKUN PRO' : 'AKUN FREE'}
               </span>
             </div>
 
@@ -130,6 +171,33 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-orange-500"
             />
 
+            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
+              <Mail size={12} className="shrink-0" />
+              <span className="truncate">{user?.email ?? account?.email ?? 'Email tidak tersedia'}</span>
+            </p>
+
+            {isPro ? (
+              account?.proExpiresAt && (
+                <p className="mt-1 text-[10px] text-amber-300/80">
+                  Pro aktif hingga{' '}
+                  {new Date(account.proExpiresAt).toLocaleDateString('id-ID', {
+                    day: '2-digit',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+                </p>
+              )
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPaywallOpen(true)}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-orange-500 py-2 text-[11px] font-bold text-white shadow transition active:scale-[0.99]"
+              >
+                <Crown size={14} />
+                Upgrade ke Pro
+              </button>
+            )}
+
             <dl className="mt-3 grid grid-cols-4 gap-1">
               <StatBox label="Total Jarak" value={stats.distanceKm.toFixed(1)} unit="km" />
               <StatBox label="Total Elevasi" value={`${stats.elevation}`} unit="m" />
@@ -137,6 +205,41 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               <StatBox label="Sesi" value={`${stats.sessions}`} unit="sesi" />
             </dl>
           </section>
+
+          {isOwner && (
+            <section className="mt-3 rounded-xl border border-sky-400/25 bg-sky-500/5 p-3">
+              <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-sky-300">
+                <Crown size={11} />
+                Kontrol Pemilik
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                Simulasi Tampilan untuk menguji fitur terkunci maupun terbuka.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-slate-800/70 p-1">
+                {(['pro', 'free'] as const).map((tier) => {
+                  const selected = ownerSimulatedTier === tier;
+                  return (
+                    <button
+                      key={tier}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setOwnerSimulatedTier(tier)}
+                      className={`rounded-lg py-2 text-[11px] font-bold transition active:scale-95 ${
+                        selected
+                          ? 'bg-orange-500 text-white'
+                          : 'text-slate-300 active:bg-slate-800'
+                      }`}
+                    >
+                      {tier === 'pro' ? '👑 Pro' : 'Free'}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-500">
+                Tampilan aktif: {ownerSimulatedTier === 'pro' ? 'Pro' : 'Free'}
+              </p>
+            </section>
+          )}
 
           <section className="mt-3 rounded-xl border border-white/10 bg-slate-900/70 p-3">
             <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
@@ -247,6 +350,52 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               ))}
             </ul>
           </section>
+
+          <section className="mt-3 rounded-xl border border-rose-500/25 bg-rose-500/5 p-3">
+            {confirmLogout ? (
+              <>
+                <p className="text-[11px] font-medium leading-relaxed text-rose-200">
+                  Keluar dari akun ini? Data aktivitas tetap tersimpan di cloud.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmLogout(false)}
+                    className="flex-1 rounded-xl border border-white/15 py-2 text-[11px] font-semibold text-slate-200 active:scale-[0.98]"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleLogout()}
+                    disabled={loggingOut}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-rose-500 py-2 text-[11px] font-semibold text-white active:scale-[0.98] disabled:opacity-60"
+                  >
+                    {loggingOut ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <LogOut size={14} />
+                    )}
+                    Keluar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmLogout(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/40 py-2.5 text-[12px] font-semibold text-rose-300 active:scale-[0.98]"
+              >
+                <LogOut size={15} />
+                Keluar Akun (Logout)
+              </button>
+            )}
+            {accountError && (
+              <p role="alert" className="mt-2 text-[10px] font-medium text-rose-300">
+                {accountError}
+              </p>
+            )}
+          </section>
         </div>
 
         <footer className="shrink-0 border-t border-white/10 bg-[#111827] px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
@@ -260,6 +409,8 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
           </button>
         </footer>
       </div>
+
+      <ProPaywallSheet open={paywallOpen} onClose={() => setPaywallOpen(false)} />
     </div>
   );
 }

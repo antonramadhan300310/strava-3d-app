@@ -10,14 +10,27 @@ type Props = {
   onSelect: (provider: MapProvider) => void;
   /** Present only when the modal is reopened from the map badge. */
   onClose?: () => void;
+  isPro?: boolean;
+  /** Opens the Pro paywall when a free account taps the satellite stack. */
+  onRequirePro?: () => void;
 };
 
-export default function MapProviderModal({ current, onSelect, onClose }: Props) {
+export default function MapProviderModal({
+  current,
+  onSelect,
+  onClose,
+  isPro = true,
+  onRequirePro,
+}: Props) {
   const [pinMode, setPinMode] = useState(false);
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const chooseMaptiler = () => {
+    if (!isPro) {
+      onRequirePro?.();
+      return;
+    }
     setError(null);
     setPinMode(true);
   };
@@ -77,10 +90,11 @@ export default function MapProviderModal({ current, onSelect, onClose }: Props) 
             />
             <ProviderCard
               title="MapTiler Pro"
-              subtitle="Akses Pribadi"
-              description="Outdoor v2 + Hybrid + Terrain RGB • Memerlukan PIN akses"
+              subtitle="Peta Satelit HD"
+              description="Outdoor v2 + Hybrid + Terrain RGB • Fitur Pro, memerlukan PIN akses"
               icon={<Lock size={22} />}
               selected={current === 'maptiler'}
+              badge={isPro ? undefined : '👑 PRO'}
               onClick={chooseMaptiler}
             />
           </div>
@@ -162,6 +176,7 @@ function ProviderCard({
   description,
   icon,
   selected,
+  badge,
   onClick,
 }: {
   title: string;
@@ -169,6 +184,7 @@ function ProviderCard({
   description: string;
   icon: React.ReactNode;
   selected: boolean;
+  badge?: string;
   onClick: () => void;
 }) {
   return (
@@ -189,6 +205,11 @@ function ProviderCard({
         <span className="flex items-center gap-1.5">
           <span className="text-sm font-semibold text-slate-100">{title}</span>
           {selected && <Check size={14} className="text-orange-400" />}
+          {badge && (
+            <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+              {badge}
+            </span>
+          )}
         </span>
         <span className="mt-0.5 block text-[11px] font-semibold uppercase tracking-wide text-orange-400">
           {subtitle}

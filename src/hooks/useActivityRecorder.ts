@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import {
   currentSpeedKmh,
   formatDistanceKm,
@@ -70,6 +71,7 @@ function formatSavedAt(epochMs: number): string {
 }
 
 export function useActivityRecorder() {
+  const { user } = useAuth();
   const [phase, setPhase] = useState<SessionPhase>('idle');
   const [activityType, setActivityType] = useState<ActivityType>('cycling');
   const [points, setPoints] = useState<AcceptedPoint[]>([]);
@@ -299,6 +301,7 @@ export function useActivityRecorder() {
         'Supabase belum dikonfigurasi. Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY.',
       );
     }
+    if (!user) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
 
     try {
       const first = finishResult.coordinates[0];
@@ -313,6 +316,7 @@ export function useActivityRecorder() {
         : null;
 
       await saveRecordedActivity({
+        userId: user.id,
         title,
         activityType: activityRef.current,
         distanceMeters: finishResult.distanceMeters,
@@ -337,7 +341,7 @@ export function useActivityRecorder() {
     } catch (cause) {
       throw cause;
     }
-  }, [finishResult, beginWatch]);
+  }, [finishResult, beginWatch, user]);
 
   const discardFinish = useCallback(() => {
     setFinishResult(null);

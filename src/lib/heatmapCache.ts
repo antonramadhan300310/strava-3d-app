@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseActivityGeometry, type ActivityRecord } from './activity';
 import type { LngLat } from './polyline';
+import { readScopedStorage, removeScopedStorage, writeScopedStorage } from './userStorage';
 import { normalizeActivityType, type ActivityType } from './valhalla';
 
 /** localStorage key holding the simplified heatmap history. */
@@ -233,7 +234,7 @@ function parseCachedEntry(value: unknown): HeatmapActivity | null {
 export function readHeatmapCache(): HeatmapActivity[] | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(HEATMAP_CACHE_KEY);
+    const raw = readScopedStorage(HEATMAP_CACHE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
@@ -248,7 +249,7 @@ export function readHeatmapCache(): HeatmapActivity[] | null {
 export function writeHeatmapCache(items: HeatmapActivity[]): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(HEATMAP_CACHE_KEY, JSON.stringify(items));
+    writeScopedStorage(HEATMAP_CACHE_KEY, JSON.stringify(items));
   } catch {
     // Quota or private mode: the heatmap still works for this session.
   }
@@ -258,7 +259,7 @@ export function writeHeatmapCache(items: HeatmapActivity[]): void {
 export function invalidateHeatmapCache(): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.removeItem(HEATMAP_CACHE_KEY);
+    removeScopedStorage(HEATMAP_CACHE_KEY);
   } catch {
     // Nothing to do if storage is unavailable.
   }

@@ -27,6 +27,7 @@ export function getSupabaseClientOrNull(): SupabaseClient | null {
 }
 
 export type PlannedRoute = {
+  userId: string;
   title: string;
   activityType: ActivityType;
   distanceMeters: number;
@@ -107,6 +108,7 @@ export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
   await writeGeometryWithFallback(
     async (geometry) =>
       supabase.from('activities').insert({
+        user_id: route.userId,
         title: route.title,
         activity_type: route.activityType,
         is_planned_route: true,
@@ -120,6 +122,7 @@ export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
 }
 
 export type RecordedActivity = {
+  userId: string;
   title: string;
   activityType: ActivityType;
   distanceMeters: number;
@@ -141,6 +144,7 @@ export async function saveRecordedActivity(activity: RecordedActivity): Promise<
   await writeGeometryWithFallback(
     async (geometry) =>
       supabase.from('activities').insert({
+        user_id: activity.userId,
         title: activity.title,
         activity_type: activity.activityType,
         is_planned_route: false,
@@ -163,12 +167,11 @@ const ACTIVITY_COLUMNS =
  * Rows whose geometry cannot be decoded are dropped instead of breaking the
  * whole feed, because a single malformed row should not hide the rest.
  */
-export async function fetchActivities(): Promise<ActivityRecord[]> {
+export async function fetchActivities(userId?: string): Promise<ActivityRecord[]> {
   const supabase = getClient();
-  const { data, error } = await supabase
-    .from('activities')
-    .select(ACTIVITY_COLUMNS)
-    .order('created_at', { ascending: false });
+  const base = supabase.from('activities').select(ACTIVITY_COLUMNS);
+  const query = userId ? base.eq('user_id', userId) : base;
+  const { data, error } = await query.order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
   if (!Array.isArray(data)) return [];

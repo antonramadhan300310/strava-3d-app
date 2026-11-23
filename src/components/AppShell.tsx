@@ -1,6 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Bike, Loader2 } from 'lucide-react';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
+import AuthScreen from '@/components/AuthScreen';
+import ProPaywallSheet from '@/components/ProPaywallSheet';
 import BottomNav, { type TabKey } from '@/components/BottomNav';
 import MapView, { type MapViewHandle } from '@/components/MapView';
 import RecordOverlay from '@/components/RecordOverlay';
@@ -18,7 +22,38 @@ import { readMapProvider, writeMapProvider, type MapProvider } from '@/lib/mapPr
 const NOTICE_MS = 3000;
 
 export default function AppShell() {
-  const [tab, setTab] = useState<TabKey>('routes');
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
+  );
+}
+
+function AuthGate() {
+  const { status, user } = useAuth();
+
+  if (status === 'loading') return <SplashScreen />;
+  if (status !== 'authenticated' || !user) return <AuthScreen />;
+  return <TrackerApp />;
+}
+
+function SplashScreen() {
+  return (
+    <main className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-[#0b0f19] text-slate-100">
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-orange-500/30 bg-orange-500/15 text-orange-400">
+        <Bike size={28} />
+      </span>
+      <Loader2 size={18} className="animate-spin text-orange-400" />
+      <p className="text-[11px] text-slate-400">Memuat sesi…</p>
+    </main>
+  );
+}
+
+function TrackerApp() {
+  const { isPro } = useAuth();
+  const [tab, setTab] = useState<TabKey>(isPro ? 'routes' : 'record');
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [paywallReason, setPaywallReason] = useState<string | undefined>(undefined);
   const [openActivity, setOpenActivity] = useState<ActivityRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [provider, setProvider] = useState<MapProvider | null>(null);
@@ -31,9 +66,37 @@ export default function AppShell() {
   const recorder = useActivityRecorder();
   const activities = useActivities();
   const heatmap = useHeatmap(activities.activities);
-  const isRoutes = tab === 'routes';
+  const isRoutes = tab === 'routes' && isPro;
   const isRecord = tab === 'record';
   const isActivities = tab === 'activities';
+
+  const requirePro = useCallback((reason?: string) => {
+    setPaywallReason(reason);
+    setPaywallOpen(true);
+  }, []);
+
+  // A free account never lands on (or stays on) the Pro-only Routes tab.
+  useEffect(() => {
+    if (!isPro && tab === 'routes') setTab('record');
+  }, [isPro, tab]);
+
+  // Satellite tiles are part of Pro, so a downgraded account falls back.
+  useEffect(() => {
+    if (!provider || isPro || provider !== 'maptiler') return;
+    writeMapProvider('opendata');
+    setProvider('opendata');
+  }, [provider, isPro]);
+
+  const changeTab = useCallback(
+    (next: TabKey) => {
+      if (next === 'routes' && !isPro) {
+        requirePro('Perencanaan Rute 3D, Import/Export GPX, dan Heatmap Personal khusus Pro.');
+        return;
+      }
+      setTab(next);
+    },
+    [isPro, requirePro],
+  );
 
   // A stored choice means the app goes straight in; otherwise the full-screen
   // picker is shown before the map is ever created.
@@ -92,10 +155,14 @@ export default function AppShell() {
   }, []);
 
   const openHeatmapFromActivities = useCallback(() => {
+    if (!isPro) {
+      requirePro('Heatmap Personal Vektor khusus Pro.');
+      return;
+    }
     setTab('routes');
     heatmap.enable();
     setHeatmapFocusToken((token) => token + 1);
-  }, [heatmap.enable]);
+  }, [heatmap.enable, isPro, requirePro]);
 
   // Frames the filtered extent once the data for a focus request is available.
   useEffect(() => {
@@ -188,15 +255,29 @@ export default function AppShell() {
         </p>
       )}
 
-      {!openActivity && <BottomNav active={tab} onChange={setTab} />}
+      {!openActivity && (
+        <BottomNav
+          active={tab}
+          onChange={changeTab}
+          lockedTabs={isPro ? [] : ['routes']}
+        />
+      )}
 
       {providerChecked && providerModalOpen && (
         <MapProviderModal
           current={provider}
           onSelect={selectProvider}
           onClose={provider ? () => setProviderModalOpen(false) : undefined}
+          isPro={isPro}
+          onRequirePro={() => requirePro('Peta satelit HD MapTiler khusus Pro.')}
         />
       )}
+
+      <ProPaywallSheet
+        open={paywallOpen}
+        reason={paywallReason}
+        onClose={() => setPaywallOpen(false)}
+      />
     </main>
   );
 }

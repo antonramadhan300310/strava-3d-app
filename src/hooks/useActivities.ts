@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { deleteActivity, fetchActivities, isSupabaseConfigured } from '@/lib/supabase';
 import { invalidateHeatmapCache } from '@/lib/heatmapCache';
 import type { ActivityRecord } from '@/lib/activity';
@@ -20,6 +21,8 @@ function matchesFilter(activity: ActivityRecord, filter: ActivityFilter): boolea
 }
 
 export function useActivities() {
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [activities, setActivities] = useState<ActivityRecord[]>([]);
   const [filter, setFilter] = useState<ActivityFilter>('all');
   const [loading, setLoading] = useState(false);
@@ -27,6 +30,10 @@ export function useActivities() {
   const [deletingId, setDeletingId] = useState<string | number | null>(null);
 
   const refresh = useCallback(async () => {
+    if (!userId) {
+      setActivities([]);
+      return;
+    }
     if (!isSupabaseConfigured) {
       setError(
         'Supabase belum dikonfigurasi. Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY.',
@@ -38,13 +45,13 @@ export function useActivities() {
     setLoading(true);
     setError(null);
     try {
-      setActivities(await fetchActivities());
+      setActivities(await fetchActivities(userId));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Gagal memuat daftar aktivitas.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     void refresh();
