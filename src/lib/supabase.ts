@@ -128,10 +128,16 @@ export type RecordedActivity = {
   coordinates: LngLatEle[];
   /** Optional weather snapshot embedded into the GeoJSON properties. */
   weather?: ActivityWeather | null;
+  /** Optional perceived exertion (1–10) embedded into the GeoJSON properties. */
+  rpe?: number | null;
 };
 
 export async function saveRecordedActivity(activity: RecordedActivity): Promise<void> {
   const supabase = getClient();
+  const properties: Record<string, unknown> = {};
+  if (activity.weather) properties.weather = activity.weather;
+  if (typeof activity.rpe === 'number') properties.rpe = activity.rpe;
+
   await writeGeometryWithFallback(
     async (geometry) =>
       supabase.from('activities').insert({
@@ -144,7 +150,7 @@ export async function saveRecordedActivity(activity: RecordedActivity): Promise<
         geojson: geometry,
       }),
     activity.coordinates,
-    activity.weather ? { weather: activity.weather } : undefined,
+    Object.keys(properties).length > 0 ? properties : undefined,
   );
 }
 
@@ -201,5 +207,23 @@ export async function updateActivityTrack(
         })
         .eq('id', id),
     track.coordinates,
+  );
+}
+
+/**
+ * Merges properties into an activity's GeoJSON Feature. Used for optional
+ * metadata such as RPE, where the geometry itself must stay untouched.
+ */
+export async function updateActivityProperties(
+  id: string | number,
+  coordinates: LngLatEle[],
+  properties: Record<string, unknown>,
+): Promise<void> {
+  const supabase = getClient();
+  await writeGeometryWithFallback(
+    async (geometry) =>
+      supabase.from('activities').update({ geojson: geometry }).eq('id', id),
+    coordinates,
+    properties,
   );
 }

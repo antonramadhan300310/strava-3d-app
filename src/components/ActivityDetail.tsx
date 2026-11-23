@@ -27,6 +27,9 @@ import ElevationChart from '@/components/ElevationChart';
 import FlyoverExportSheet from '@/components/FlyoverExportSheet';
 import ShareCardModal from '@/components/ShareCardModal';
 import ActivityWeatherCard from '@/components/ActivityWeatherCard';
+import ActivityRpeCard from '@/components/ActivityRpeCard';
+import VirtualPowerCard from '@/components/VirtualPowerCard';
+import AthleteProfileSheet from '@/components/AthleteProfileSheet';
 import { useFlyoverPlayback } from '@/hooks/useFlyoverPlayback';
 import type { ActivityRecord } from '@/lib/activity';
 import {
@@ -50,7 +53,13 @@ import {
   paceSecondsPerKm,
 } from '@/lib/metrics';
 import { snapRouteToRoad, type ActivityType } from '@/lib/valhalla';
-import { getSupabaseClientOrNull, updateActivityTrack } from '@/lib/supabase';
+import {
+  getSupabaseClientOrNull,
+  updateActivityProperties,
+  updateActivityTrack,
+} from '@/lib/supabase';
+import { computeCyclingPowerAnalysis, getActivityRpe, storeActivityRpe } from '@/lib/powerAndEffort';
+import { loadRiderProfile, type RiderProfile } from '@/lib/riderProfile';
 import {
   getCachedActivityWeather,
   getEmbeddedActivityWeather,
@@ -102,6 +111,9 @@ export default function ActivityDetail({
   const [introPending, setIntroPending] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<DetailTab>('summary');
+  const [profile, setProfile] = useState<RiderProfile>(loadRiderProfile);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [rpe, setRpe] = useState<number | null>(() => getActivityRpe(activity));
 
   const [weather, setWeather] = useState<ActivityWeather | null>(() => {
     const embedded = getEmbeddedActivityWeather(activity);
@@ -266,6 +278,24 @@ export default function ActivityDetail({
   }, [activity, allActivities]);
 
   const isFoot = isFootSport(activity.activityType);
+
+  const powerAnalysis = useMemo(
+    () => computeCyclingPowerAnalysis(activity, profile),
+    [activity, profile],
+  );
+
+  /** Caches locally and mirrors into GeoJSON properties; offline failures are silent. */
+  const handleRpeChange = useCallback(
+    (next: number) => {
+      setRpe(next);
+      storeActivityRpe(activity.id, next);
+      const properties = { ...(activity.geojson?.properties ?? {}), rpe: next };
+      void updateActivityProperties(activity.id, activity.coordinates, properties).catch(() => {
+        // The device cache keeps the value until the next successful sync.
+      });
+    },
+    [activity],
+  );
 
   const summary = useMemo(() => {
     const averageSpeed = averageSpeedKmh(activity.distanceMeters, activity.durationSeconds);
@@ -477,6 +507,19 @@ export default function ActivityDetail({
 
                 <ActivityWeatherCard weather={weather} loading={weatherLoading} />
 
+                <ActivityRpeCard
+                  rpe={rpe}
+                  durationSeconds={activity.durationSeconds}
+                  onChange={handleRpeChange}
+                />
+
+                {powerAnalysis && (
+                  <VirtualPowerCard
+                    analysis={powerAnalysis}
+                    onOpenProfile={() => setProfileOpen(true)}
+                  />
+                )}
+
                 <div className="mt-2.5">
                   <ElevationChart
                     coordinates={activity.coordinates}
@@ -617,6 +660,13 @@ export default function ActivityDetail({
           onNotice={onNotice}
         />
       )}
+
+      <AthleteProfileSheet
+        open={profileOpen}
+        activities={allActivities}
+        onClose={() => setProfileOpen(false)}
+        onSaved={setProfile}
+      />
     </section>
   );
 }
