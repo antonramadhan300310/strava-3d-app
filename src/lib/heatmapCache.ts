@@ -15,9 +15,6 @@ const MAX_POINTS_PER_ACTIVITY = 150;
 /** 5 decimals ≈ 1.1 m, far below GPS accuracy but a third of the JSON size. */
 const COORD_PRECISION = 5;
 
-/** Sampled points per activity feeding the zoomed-out heat cloud. */
-const CLOUD_SAMPLE_POINTS = 28;
-
 /** Only the columns the heatmap needs, so the one-off read stays small. */
 const HEATMAP_COLUMNS = 'id,activity_type,created_at,distance_meters,geojson';
 
@@ -44,26 +41,26 @@ export type HeatmapScheme = 'fire' | 'neon';
 
 export type HeatmapPalette = {
   label: string;
-  /** Deepest tone, used for the blurred glow under each line. */
+  /** Widest, most blurred pass that produces the soft outer aura. */
+  halo: string;
+  /** Mid-width pass that brightens on repeated passes. */
   glow: string;
-  /** Bright tone, used for the thin core line that saturates on repeat passes. */
+  /** Thin pass that keeps corners sharp at every zoom. */
   core: string;
-  /** Cloud ramp: low density → mid → hot core. */
-  cloud: [string, string, string];
 };
 
 export const HEATMAP_SCHEMES: Record<HeatmapScheme, HeatmapPalette> = {
   fire: {
     label: 'Oranye Api',
-    glow: '#ea580c',
-    core: '#f97316',
-    cloud: ['#ea580c', '#f97316', '#fef08a'],
+    halo: '#c2410c',
+    glow: '#f97316',
+    core: '#fef08a',
   },
   neon: {
     label: 'Biru Neon',
-    glow: '#0284c7',
-    core: '#06b6d4',
-    cloud: ['#0284c7', '#06b6d4', '#e0f2fe'],
+    halo: '#0369a1',
+    glow: '#06b6d4',
+    core: '#e0f2fe',
   },
 };
 
@@ -83,7 +80,6 @@ export const HEATMAP_TIME_FILTERS: { key: HeatmapTimeFilter; label: string }[] =
 
 export type HeatmapGeoJSON = {
   linesGeoJSON: GeoJSON.FeatureCollection<GeoJSON.LineString>;
-  pointsGeoJSON: GeoJSON.FeatureCollection<GeoJSON.Point>;
   /** `[west, south, east, north]` of the filtered tracks, or null when empty. */
   bounds: [number, number, number, number] | null;
   count: number;
@@ -341,19 +337,11 @@ function timeCutoff(range: HeatmapTimeFilter): number | null {
   return now.getTime() - 30 * 24 * 60 * 60 * 1000;
 }
 
-function sampleForCloud(coords: HeatmapCoord[]): HeatmapCoord[] {
-  if (coords.length <= CLOUD_SAMPLE_POINTS) return coords;
-  const step = (coords.length - 1) / (CLOUD_SAMPLE_POINTS - 1);
-  const out: HeatmapCoord[] = [];
-  for (let i = 0; i < CLOUD_SAMPLE_POINTS; i += 1) out.push(coords[Math.round(i * step)]);
-  return out;
-}
-
 /**
- * Turns the cached history into the two GeoJSON collections the map layers use.
+ * Turns the cached history into the simplified line collection the map layers use.
  *
- * Lines feed the stacked glow/core layers at street zoom; sampled points feed
- * the heat cloud that only shows while zoomed out.
+ * Every track stays a `LineString`, so MapLibre re-rasterises it at the native
+ * screen resolution of each zoom level instead of showing a blocky point grid.
  */
 export function buildHeatmapGeoJSON(
   activities: HeatmapActivity[],
@@ -361,7 +349,6 @@ export function buildHeatmapGeoJSON(
 ): HeatmapGeoJSON {
   const cutoff = timeCutoff(filters.timeRange);
   const lines: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-  const points: GeoJSON.Feature<GeoJSON.Point>[] = [];
 
   let west = Infinity;
   let south = Infinity;
@@ -389,14 +376,6 @@ export function buildHeatmapGeoJSON(
       geometry: { type: 'LineString', coordinates: activity.coords },
     });
 
-    for (const coord of sampleForCloud(activity.coords)) {
-      points.push({
-        type: 'Feature',
-        properties: { weight: 1 },
-        geometry: { type: 'Point', coordinates: coord },
-      });
-    }
-
     for (const [lng, lat] of activity.coords) {
       if (lng < west) west = lng;
       if (lng > east) east = lng;
@@ -407,7 +386,6 @@ export function buildHeatmapGeoJSON(
 
   return {
     linesGeoJSON: { type: 'FeatureCollection', features: lines },
-    pointsGeoJSON: { type: 'FeatureCollection', features: points },
     bounds: count > 0 ? [west, south, east, north] : null,
     count,
   };

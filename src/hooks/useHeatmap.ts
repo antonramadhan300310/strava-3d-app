@@ -76,7 +76,6 @@ export function useHeatmap(existingActivities: ActivityRecord[]) {
     count: geo.count,
     bounds: geo.bounds,
     linesGeoJSON: geo.linesGeoJSON,
-    pointsGeoJSON: geo.pointsGeoJSON,
   };
 }
 

@@ -11,14 +11,15 @@ import {
   FlyoverExportAbortedError,
   FlyoverExportUnsupportedError,
   UNSUPPORTED_MESSAGE,
-  arrayBufferToBase64,
   buildFlyoverExportHud,
   buildFlyoverExportQualities,
+  bytesToBase64,
   calculateFlyoverDuration,
   exportFlyoverVideo,
   pickSupportedH264Codec,
   type FlyoverExportFps,
   type FlyoverFrameCapture,
+  type FlyoverVideo,
 } from '@/lib/flyoverExporter';
 
 /** Temporary render target; cleared before a new export and on close. */
@@ -77,7 +78,7 @@ export default function FlyoverExportSheet({
   // instead of a failed render.
   useEffect(() => {
     let cancelled = false;
-    void pickSupportedH264Codec(30, qualities[30].bitrate).then((codec) => {
+    void pickSupportedH264Codec(30, qualities[30].bitrate, qualities[30]).then((codec) => {
       if (!cancelled) setSupported(codec !== null);
     });
     return () => {
@@ -105,8 +106,10 @@ export default function FlyoverExportSheet({
       const controller = new AbortController();
       abortRef.current = controller;
 
+      let video: FlyoverVideo | null = null;
+
       try {
-        const blob = await exportFlyoverVideo({
+        video = await exportFlyoverVideo({
           fps: quality,
           durationSeconds,
           hud: buildFlyoverExportHud(activity),
@@ -119,23 +122,37 @@ export default function FlyoverExportSheet({
             setProgress(value);
           },
         });
-        blobRef.current = blob;
 
         let uri = '';
         if (Capacitor.isNativePlatform()) {
           await removeTempFile();
-          await Filesystem.writeFile({
-            path: TEMP_FILE,
-            data: arrayBufferToBase64(await blob.arrayBuffer()),
-            directory: Directory.Cache,
-            recursive: true,
-          });
+          // Appending one chunk at a time keeps the ~40 MB MP4 out of a single
+          // JS string, which is what killed the WebView on 60 s exports.
+          for (let index = 0; index < video.chunks.length; index += 1) {
+            const data = bytesToBase64(video.chunks[index]);
+            if (index === 0) {
+              await Filesystem.writeFile({
+                path: TEMP_FILE,
+                data,
+                directory: Directory.Cache,
+                recursive: true,
+              });
+            } else {
+              await Filesystem.appendFile({
+                path: TEMP_FILE,
+                data,
+                directory: Directory.Cache,
+              });
+            }
+          }
           uri = (
             await Filesystem.getUri({ path: TEMP_FILE, directory: Directory.Cache })
           ).uri;
+        } else {
+          blobRef.current = video.toBlob();
         }
 
-        setResult({ size: blob.size, uri });
+        setResult({ size: video.size, uri });
         setProgress(1);
         setStage('done');
       } catch (cause) {
@@ -146,6 +163,7 @@ export default function FlyoverExportSheet({
         setError(describeError(cause));
         setStage('error');
       } finally {
+        video?.dispose();
         abortRef.current = null;
       }
     },

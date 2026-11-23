@@ -1,4 +1,4 @@
-import { ArrayBufferTarget, Muxer } from 'mp4-muxer';
+import { Muxer, StreamTarget } from 'mp4-muxer';
 import { formatActivityDate, type ActivityRecord } from './activity';
 import {
   averageSpeedKmh,
@@ -17,6 +17,16 @@ export const FLYOVER_EXPORT_MIN_SECONDS = 10;
 export const FLYOVER_EXPORT_MAX_SECONDS = 60;
 /** Above this length the bitrate drops so the file stays around 35–42 MB. */
 export const FLYOVER_EXPORT_LONG_SECONDS = 30;
+/** From this length on, resolution and bitrate switch to the 720p memory budget. */
+export const FLYOVER_EXPORT_ADAPTIVE_SECONDS = 45;
+/** Longest canvas side for 45–60 s clips; 720p portrait fits inside it. */
+export const FLYOVER_EXPORT_MAX_LONG_SIDE = 1280;
+/** 4 Mbps target for long clips, small enough for low-RAM Android WebViews. */
+export const FLYOVER_EXPORT_LONG_BITRATE = 4_000_000;
+/** Bytes buffered per StreamTarget chunk before it is handed to the caller. */
+const STREAM_CHUNK_BYTES = 1 << 20;
+/** Frames allowed in the encoder queue before the loop waits for it to drain. */
+const ENCODE_QUEUE_LIMIT = 3;
 
 /** Hard cap per frame so a slow tile fetch cannot stall the whole export. */
 export const EXPORT_FRAME_TIMEOUT_MS = 350;
@@ -30,6 +40,9 @@ export const UNSUPPORTED_MESSAGE =
 export type FlyoverExportQuality = {
   fps: FlyoverExportFps;
   bitrate: number;
+  /** Canvas size for this clip; both sides are always even for H.264. */
+  width: number;
+  height: number;
   /** Short label used by the quality picker. */
   label: string;
   hint: string;
@@ -37,6 +50,8 @@ export type FlyoverExportQuality = {
   qualityLabel: string;
   totalFrames: number;
 };
+
+export type FlyoverExportDimensions = { width: number; height: number };
 
 /** 2 km or less → 10 s, 20 km or more → 60 s, linear in between. */
 export function calculateFlyoverDuration(distanceMeters: number): number {
@@ -48,10 +63,38 @@ export function calculateFlyoverDuration(distanceMeters: number): number {
   );
 }
 
+/** H.264 `avc1` needs even dimensions on every Android encoder. */
+function evenFloor(value: number): number {
+  return Math.floor(value / 2) * 2;
+}
+
+/**
+ * Keeps the canvas inside the memory budget of long clips: 45–60 s renders are
+ * capped to a 1280 px longest side, which is exactly the 720×1280 portrait frame.
+ */
+export function resolveFlyoverExportDimensions(
+  durationSeconds: number,
+): FlyoverExportDimensions {
+  const base = { width: FLYOVER_EXPORT_WIDTH, height: FLYOVER_EXPORT_HEIGHT };
+  if (durationSeconds < FLYOVER_EXPORT_ADAPTIVE_SECONDS) {
+    return { width: evenFloor(base.width), height: evenFloor(base.height) };
+  }
+
+  const longest = Math.max(base.width, base.height);
+  const scale = Math.min(1, FLYOVER_EXPORT_MAX_LONG_SIDE / longest);
+  return {
+    width: evenFloor(base.width * scale),
+    height: evenFloor(base.height * scale),
+  };
+}
+
 export function flyoverExportBitrate(
   fps: FlyoverExportFps,
   durationSeconds: number,
 ): number {
+  if (durationSeconds >= FLYOVER_EXPORT_ADAPTIVE_SECONDS) {
+    return FLYOVER_EXPORT_LONG_BITRATE;
+  }
   const long = durationSeconds > FLYOVER_EXPORT_LONG_SECONDS;
   if (fps === 30) return long ? 3_500_000 : 4_500_000;
   return long ? 5_500_000 : 7_500_000;
@@ -60,10 +103,13 @@ export function flyoverExportBitrate(
 export function buildFlyoverExportQualities(
   durationSeconds: number,
 ): Record<FlyoverExportFps, FlyoverExportQuality> {
+  const { width, height } = resolveFlyoverExportDimensions(durationSeconds);
   return {
     30: {
       fps: 30,
       bitrate: flyoverExportBitrate(30, durationSeconds),
+      width,
+      height,
       label: '30fps (Cepat)',
       hint: 'Render cepat • Cocok untuk WhatsApp',
       qualityLabel: '720p 30fps',
@@ -72,6 +118,8 @@ export function buildFlyoverExportQualities(
     60: {
       fps: 60,
       bitrate: flyoverExportBitrate(60, durationSeconds),
+      width,
+      height,
       label: '60fps (Mulus)',
       hint: 'Gerakan ekstra halus • Cocok untuk IG Story',
       qualityLabel: '720p 60fps',
@@ -146,13 +194,14 @@ export function buildFlyoverExportHud(activity: ActivityRecord): FlyoverExportHu
 export async function pickSupportedH264Codec(
   fps: FlyoverExportFps,
   bitrate: number,
+  dimensions: FlyoverExportDimensions = resolveFlyoverExportDimensions(0),
 ): Promise<string | null> {
   if (typeof VideoEncoder === 'undefined') return null;
 
   for (const codec of H264_CODECS) {
     try {
       const support = await VideoEncoder.isConfigSupported(
-        buildEncoderConfig(codec, fps, bitrate),
+        buildEncoderConfig(codec, fps, bitrate, dimensions),
       );
       if (support.supported) return codec;
     } catch {
@@ -170,11 +219,12 @@ function buildEncoderConfig(
   codec: string,
   fps: FlyoverExportFps,
   bitrate: number,
+  { width, height }: FlyoverExportDimensions,
 ): VideoEncoderConfig {
   return {
     codec,
-    width: FLYOVER_EXPORT_WIDTH,
-    height: FLYOVER_EXPORT_HEIGHT,
+    width,
+    height,
     framerate: fps,
     bitrate,
     latencyMode: 'quality',
@@ -183,9 +233,21 @@ function buildEncoderConfig(
   };
 }
 
+/** Muxed MP4 bytes, split into chunks so no single huge buffer is allocated. */
+export type FlyoverVideo = {
+  size: number;
+  /** File-order chunks. Empty after `toBlob()` or `dispose()`. */
+  chunks: Uint8Array[];
+  /** Builds the Blob and immediately releases the chunk references. */
+  toBlob: () => Blob;
+  /** Drops the chunk references so the JS heap can be reclaimed. */
+  dispose: () => void;
+};
+
 /**
  * Renders the flyover frame-by-frame, muxes H.264 into an MP4 and returns it as
- * a Blob. Everything runs on-device: no network, no ffmpeg, no Supabase writes.
+ * chunked bytes. Everything runs on-device: no network, no ffmpeg, no Supabase
+ * writes.
  */
 export async function exportFlyoverVideo({
   fps,
@@ -194,27 +256,36 @@ export async function exportFlyoverVideo({
   captureFrame,
   signal,
   onProgress,
-}: ExportFlyoverVideoOptions): Promise<Blob> {
+}: ExportFlyoverVideoOptions): Promise<FlyoverVideo> {
   const quality = buildFlyoverExportQualities(durationSeconds)[fps];
-  const codec = await pickSupportedH264Codec(fps, quality.bitrate);
+  const codec = await pickSupportedH264Codec(fps, quality.bitrate, quality);
   if (!codec) throw new FlyoverExportUnsupportedError();
 
   const canvas = document.createElement('canvas');
-  canvas.width = FLYOVER_EXPORT_WIDTH;
-  canvas.height = FLYOVER_EXPORT_HEIGHT;
+  canvas.width = quality.width;
+  canvas.height = quality.height;
   const context = canvas.getContext('2d', { alpha: false });
   if (!context) throw new Error('Kanvas video tidak tersedia di perangkat ini.');
 
-  const target = new ArrayBufferTarget();
+  const parts: StreamPart[] = [];
+  const target = new StreamTarget({
+    chunked: true,
+    chunkSize: STREAM_CHUNK_BYTES,
+    onData: (data, position) => {
+      parts.push({ position, data });
+    },
+  });
   const muxer = new Muxer({
     target,
     video: {
       codec: 'avc',
-      width: FLYOVER_EXPORT_WIDTH,
-      height: FLYOVER_EXPORT_HEIGHT,
+      width: quality.width,
+      height: quality.height,
       frameRate: fps,
     },
-    fastStart: 'in-memory',
+    // Reserves the moov space up front and streams media as it is encoded, so
+    // memory stays flat instead of growing into one giant buffer.
+    fastStart: { expectedVideoChunks: quality.totalFrames },
   });
 
   let encoderError: Error | null = null;
@@ -226,7 +297,7 @@ export async function exportFlyoverVideo({
         encoderError = error instanceof Error ? error : new Error(String(error));
       },
     });
-    encoder.configure(buildEncoderConfig(codec, fps, quality.bitrate));
+    encoder.configure(buildEncoderConfig(codec, fps, quality.bitrate, quality));
   } catch {
     // Some WebViews advertise H.264 but fail once the encoder is configured.
     throw new FlyoverExportUnsupportedError();
@@ -240,6 +311,10 @@ export async function exportFlyoverVideo({
       throwIfAborted(signal);
       if (encoderError) throw encoderError;
 
+      // Backpressure before capturing the next map frame: an unbounded queue
+      // holds hundreds of raw frames in RAM and gets the WebView killed.
+      await waitForEncoderQueue(encoder, signal);
+
       // Deterministic progress, so a dropped frame never shifts the camera.
       const progress = totalFrames > 1 ? index / (totalFrames - 1) : 0;
 
@@ -247,19 +322,24 @@ export async function exportFlyoverVideo({
       throwIfAborted(signal);
 
       context.fillStyle = '#0f172a';
-      context.fillRect(0, 0, FLYOVER_EXPORT_WIDTH, FLYOVER_EXPORT_HEIGHT);
-      if (frame) drawCapturedFrame(context, frame);
-      drawHud(context, hud, progress);
+      context.fillRect(0, 0, quality.width, quality.height);
+      if (frame) drawCapturedFrame(context, frame, quality.width, quality.height);
+      drawHud(context, hud, progress, quality.width, quality.height);
 
-      const videoFrame = new VideoFrame(canvas, {
-        timestamp: Math.round(index * frameDurationMicros),
-        duration: frameDurationMicros,
-      });
-      encoder.encode(videoFrame, { keyFrame: index % fps === 0 });
-      // Closing right away keeps GPU/CPU memory flat even on 3 600-frame clips.
-      videoFrame.close();
+      let videoFrame: VideoFrame | null = null;
+      try {
+        videoFrame = new VideoFrame(canvas, {
+          timestamp: Math.round(index * frameDurationMicros),
+          duration: frameDurationMicros,
+        });
+        encoder.encode(videoFrame, { keyFrame: index % fps === 0 });
+      } finally {
+        // Releasing the GPU texture every frame keeps memory flat up to 60 s.
+        videoFrame?.close();
+      }
 
-      await drainEncoder(encoder, signal);
+      // Yields to the UI so the progress percentage can repaint.
+      await delay(0);
 
       onProgress?.((index + 1) / totalFrames);
     }
@@ -269,18 +349,36 @@ export async function exportFlyoverVideo({
     if (encoderError) throw encoderError;
 
     muxer.finalize();
-    return new Blob([target.buffer], { type: 'video/mp4' });
+
+    const chunks = mergeStreamParts(parts);
+    parts.length = 0;
+    const size = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+
+    return {
+      size,
+      chunks,
+      toBlob: () => {
+        const blob = new Blob(chunks as unknown as BlobPart[], { type: 'video/mp4' });
+        chunks.length = 0;
+        return blob;
+      },
+      dispose: () => {
+        chunks.length = 0;
+      },
+    };
   } finally {
+    // Frees the canvas backing store; the encoded frames are already muxed.
+    canvas.width = 0;
+    canvas.height = 0;
     if (encoder.state !== 'closed') encoder.close();
   }
 }
 
 /**
- * Base64-encodes the muxed MP4 for `@capacitor/filesystem`. Chunked so a
- * ~40 MB buffer never overflows the call stack via `String.fromCharCode(...)`.
+ * Base64-encodes bytes for `@capacitor/filesystem`. Chunked so a multi-MB
+ * buffer never overflows the call stack via `String.fromCharCode(...)`.
  */
-export function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+export function bytesToBase64(bytes: Uint8Array): string {
   const chunkSize = 8192;
   const parts: string[] = [];
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
@@ -290,21 +388,71 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(parts.join(''));
 }
 
+type StreamPart = { position: number; data: Uint8Array };
+
+/**
+ * Turns StreamTarget writes into contiguous, file-order chunks.
+ *
+ * `mp4-muxer` patches the `mdat` header (and, with Fast Start, the `moov` box)
+ * after the media data has already been streamed out, so a later write to an
+ * already-written range must replace the earlier bytes.
+ */
+function mergeStreamParts(parts: StreamPart[]): Uint8Array[] {
+  const segments: StreamPart[] = [];
+
+  for (const part of parts) {
+    const start = part.position;
+    const end = start + part.data.byteLength;
+    const next: StreamPart[] = [];
+
+    for (const segment of segments) {
+      const segmentEnd = segment.position + segment.data.byteLength;
+      if (segmentEnd <= start || segment.position >= end) {
+        next.push(segment);
+        continue;
+      }
+      if (segment.position < start) {
+        next.push({
+          position: segment.position,
+          data: segment.data.subarray(0, start - segment.position),
+        });
+      }
+      if (segmentEnd > end) {
+        next.push({ position: end, data: segment.data.subarray(end - segment.position) });
+      }
+    }
+
+    next.push(part);
+    segments.length = 0;
+    segments.push(...next);
+  }
+
+  segments.sort((a, b) => a.position - b.position);
+
+  // Reserved `free` boxes are skipped by the writer, so a gap must be filled
+  // with zeros to keep every following byte at its real file offset.
+  const chunks: Uint8Array[] = [];
+  let cursor = 0;
+  for (const segment of segments) {
+    if (segment.position > cursor) {
+      chunks.push(new Uint8Array(segment.position - cursor));
+    }
+    chunks.push(segment.data);
+    cursor = segment.position + segment.data.byteLength;
+  }
+  return chunks;
+}
+
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new FlyoverExportAbortedError();
 }
 
-/** Lets the encoder catch up instead of queueing every frame into RAM. */
-async function drainEncoder(encoder: VideoEncoder, signal?: AbortSignal) {
-  let waited = 0;
-  while (encoder.encodeQueueSize > 8) {
-    if (waited > 2_000) return;
-    await delay(4);
+/** Waits until the encoder queue has room for another frame. */
+async function waitForEncoderQueue(encoder: VideoEncoder, signal?: AbortSignal) {
+  while (encoder.encodeQueueSize >= ENCODE_QUEUE_LIMIT) {
     throwIfAborted(signal);
-    waited += 4;
+    await delay(12);
   }
-  // Yields to the UI so the progress percentage can repaint.
-  await delay(0);
 }
 
 function delay(ms: number): Promise<void> {
@@ -312,37 +460,40 @@ function delay(ms: number): Promise<void> {
 }
 
 /** Aspect-fill (`cover`) so the 9:16 video is never squashed. */
-function drawCapturedFrame(context: CanvasRenderingContext2D, frame: FlyoverFrameCapture) {
+function drawCapturedFrame(
+  context: CanvasRenderingContext2D,
+  frame: FlyoverFrameCapture,
+  width: number,
+  height: number,
+) {
   const source = frame.image;
   if (source.width === 0 || source.height === 0) return;
 
-  const scale = Math.max(
-    FLYOVER_EXPORT_WIDTH / source.width,
-    FLYOVER_EXPORT_HEIGHT / source.height,
-  );
-  const width = source.width * scale;
-  const height = source.height * scale;
-  const x = (FLYOVER_EXPORT_WIDTH - width) / 2;
-  const y = (FLYOVER_EXPORT_HEIGHT - height) / 2;
+  const scale = Math.max(width / source.width, height / source.height);
+  const drawWidth = source.width * scale;
+  const drawHeight = source.height * scale;
+  const x = (width - drawWidth) / 2;
+  const y = (height - drawHeight) / 2;
 
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
-  context.drawImage(source, x, y, width, height);
+  context.drawImage(source, x, y, drawWidth, drawHeight);
 
   // MapLibre HTML markers live outside the WebGL buffer, so the moving marker
   // is painted here using its projected position in the captured frame.
-  const markerX = x + frame.markerX * width;
-  const markerY = y + frame.markerY * height;
+  const markerX = x + frame.markerX * drawWidth;
+  const markerY = y + frame.markerY * drawHeight;
+  const markerScale = width / FLYOVER_EXPORT_WIDTH;
   context.save();
   context.beginPath();
-  context.arc(markerX, markerY, 22, 0, Math.PI * 2);
+  context.arc(markerX, markerY, 22 * markerScale, 0, Math.PI * 2);
   context.fillStyle = 'rgba(249,115,22,0.28)';
   context.fill();
   context.beginPath();
-  context.arc(markerX, markerY, 12, 0, Math.PI * 2);
+  context.arc(markerX, markerY, 12 * markerScale, 0, Math.PI * 2);
   context.fillStyle = '#f97316';
   context.fill();
-  context.lineWidth = 4;
+  context.lineWidth = 4 * markerScale;
   context.strokeStyle = '#ffffff';
   context.stroke();
   context.restore();
@@ -400,15 +551,25 @@ function drawHud(
   context: CanvasRenderingContext2D,
   hud: FlyoverExportHud,
   progress: number,
+  width: number,
+  height: number,
 ) {
-  const width = FLYOVER_EXPORT_WIDTH;
-  const height = FLYOVER_EXPORT_HEIGHT;
+  // Layout is authored in the 720×1280 design space and scaled as a whole.
+  const scale = Math.min(
+    width / FLYOVER_EXPORT_WIDTH,
+    height / FLYOVER_EXPORT_HEIGHT,
+  );
+  context.save();
+  if (scale !== 1) context.scale(scale, scale);
+
+  const designWidth = FLYOVER_EXPORT_WIDTH;
+  const designHeight = FLYOVER_EXPORT_HEIGHT;
 
   const scrim = context.createLinearGradient(0, 0, 0, 340);
   scrim.addColorStop(0, 'rgba(2,6,23,0.88)');
   scrim.addColorStop(1, 'rgba(2,6,23,0)');
   context.fillStyle = scrim;
-  context.fillRect(0, 0, width, 340);
+  context.fillRect(0, 0, designWidth, 340);
 
   context.textAlign = 'left';
   context.textBaseline = 'middle';
@@ -423,19 +584,19 @@ function drawHud(
 
   context.font = font(42, 700);
   context.fillStyle = '#f8fafc';
-  context.fillText(truncateText(context, hud.title, width - HUD_MARGIN * 2), HUD_MARGIN, 152);
+  context.fillText(truncateText(context, hud.title, designWidth - HUD_MARGIN * 2), HUD_MARGIN, 152);
 
   context.font = font(24, 500);
   context.fillStyle = 'rgba(203,213,225,0.92)';
   context.fillText(
-    truncateText(context, hud.date, width - HUD_MARGIN * 2),
+    truncateText(context, hud.date, designWidth - HUD_MARGIN * 2),
     HUD_MARGIN,
     202,
   );
 
   const cardX = 32;
-  const cardY = height - CARD_HEIGHT - 40;
-  const cardWidth = width - cardX * 2;
+  const cardY = designHeight - CARD_HEIGHT - 40;
+  const cardWidth = designWidth - cardX * 2;
 
   roundedRect(context, cardX, cardY, cardWidth, CARD_HEIGHT, 28);
   context.fillStyle = 'rgba(15,23,42,0.78)';
@@ -486,4 +647,5 @@ function drawHud(
   context.fillStyle = 'rgba(203,213,225,0.9)';
   context.fillText(`${Math.round(clamped * 100)}%`, barX + barWidth, barY - 20);
   context.textAlign = 'left';
+  context.restore();
 }
