@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Bike,
@@ -26,6 +26,7 @@ import FlyoverMap, { type FlyoverMapHandle, type FlyoverMapStyle } from '@/compo
 import ElevationChart from '@/components/ElevationChart';
 import FlyoverExportSheet from '@/components/FlyoverExportSheet';
 import ShareCardModal from '@/components/ShareCardModal';
+import ActivityWeatherCard from '@/components/ActivityWeatherCard';
 import { useFlyoverPlayback } from '@/hooks/useFlyoverPlayback';
 import type { ActivityRecord } from '@/lib/activity';
 import {
@@ -49,7 +50,13 @@ import {
   paceSecondsPerKm,
 } from '@/lib/metrics';
 import { snapRouteToRoad, type ActivityType } from '@/lib/valhalla';
-import { updateActivityTrack } from '@/lib/supabase';
+import { getSupabaseClientOrNull, updateActivityTrack } from '@/lib/supabase';
+import {
+  getCachedActivityWeather,
+  getEmbeddedActivityWeather,
+  getOrFetchActivityWeather,
+  type ActivityWeather,
+} from '@/lib/weatherService';
 import type { MapProvider } from '@/lib/mapProvider';
 
 const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
@@ -95,6 +102,62 @@ export default function ActivityDetail({
   const [introPending, setIntroPending] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<DetailTab>('summary');
+
+  const [weather, setWeather] = useState<ActivityWeather | null>(() => {
+    const embedded = getEmbeddedActivityWeather(activity);
+    if (embedded) return embedded;
+    if (typeof window === 'undefined') return null;
+    return getCachedActivityWeather(activity.id);
+  });
+  const [weatherLoading, setWeatherLoading] = useState(
+    () => weather === null && !activity.isPlannedRoute,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const embedded = getEmbeddedActivityWeather(activity);
+    if (embedded) {
+      setWeather(embedded);
+      setWeatherLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const cached = getCachedActivityWeather(activity.id);
+    if (cached) {
+      setWeather(cached);
+      setWeatherLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (activity.isPlannedRoute || activity.coordinates.length === 0) {
+      setWeather(null);
+      setWeatherLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setWeatherLoading(true);
+    getOrFetchActivityWeather(activity, getSupabaseClientOrNull())
+      .then((result) => {
+        if (!cancelled) setWeather(result);
+      })
+      .catch(() => {
+        if (!cancelled) setWeather(null);
+      })
+      .finally(() => {
+        if (!cancelled) setWeatherLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activity]);
 
   const path = useMemo(() => buildFlyoverPath(activity.coordinates), [activity.coordinates]);
 
@@ -390,11 +453,6 @@ export default function ActivityDetail({
                   </span>
                 </div>
 
-                <ElevationChart
-                  coordinates={activity.coordinates}
-                  progress={playback.telemetry.progress}
-                />
-
                 <dl className="mt-2 grid grid-cols-3 gap-1.5">
                   <SummaryMetric icon={<TrendingUp size={12} />} label="Jarak" value={summary.distance} />
                   <SummaryMetric icon={<Mountain size={12} />} label="Elevasi" value={summary.elevation} />
@@ -416,6 +474,15 @@ export default function ActivityDetail({
                     value={formatActivityType(activity.activityType)}
                   />
                 </dl>
+
+                <ActivityWeatherCard weather={weather} loading={weatherLoading} />
+
+                <div className="mt-2.5">
+                  <ElevationChart
+                    coordinates={activity.coordinates}
+                    progress={playback.telemetry.progress}
+                  />
+                </div>
 
                 {analytics.matched.length >= 2 && (
                   <MatchedRoutesCard matches={analytics.matched} isFoot={isFoot} />
