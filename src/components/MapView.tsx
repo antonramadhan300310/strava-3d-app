@@ -17,6 +17,8 @@ import {
   type BaseMapStyle,
 } from '@/lib/mapStyle';
 import { HEATMAP_SCHEMES, type HeatmapScheme } from '@/lib/heatmapCache';
+import { applyCleanAllmovaMapStyle } from '@/lib/mapStyleSanitizer';
+import { updateRouteEndpointMarkers } from '@/lib/routeEndpoints';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const TERRAIN_SOURCE_ID = 'terrain-source';
@@ -130,6 +132,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const routeEndpointMarkersRef = useRef<maplibregl.Marker[]>([]);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const userMarkerKeyRef = useRef<string | null>(null);
   const haloRef = useRef<HTMLDivElement | null>(null);
@@ -144,6 +147,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     lines: null,
   });
   const [mapStyle, setMapStyle] = useState<BaseMapStyle>('outdoor');
+  const mapStyleRef = useRef<BaseMapStyle>('outdoor');
   const [is3D, setIs3D] = useState(true);
   const is3DRef = useRef(is3D);
   const [locating, setLocating] = useState(false);
@@ -157,6 +161,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   clickRef.current = onMapClick;
   positionRef.current = livePosition;
   is3DRef.current = is3D;
+  mapStyleRef.current = mapStyle;
   providerRef.current = provider;
   heatmapRef.current = heatmap;
 
@@ -197,7 +202,11 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
           type: 'line',
           source: ROUTE_SOURCE_ID,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': '#0D1112', 'line-width': 9, 'line-opacity': 0.5 },
+          paint: {
+            'line-color': '#0D1112',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 10, 7.5, 14, 10, 18, 12.5],
+            'line-opacity': 0.94,
+          },
         });
       }
       if (!map.getLayer(ROUTE_LAYER_ID)) {
@@ -206,7 +215,11 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
           type: 'line',
           source: ROUTE_SOURCE_ID,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': ROUTE_COLOR, 'line-width': 5 },
+          paint: {
+            'line-color': ROUTE_COLOR,
+            'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4.8, 14, 6.8, 18, 8.5],
+            'line-opacity': 1,
+          },
         });
       }
       if (!map.getSource(TRACK_SOURCE_ID)) {
@@ -243,11 +256,17 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
 
     map.on('style.load', () => {
       if (is3DRef.current) applySky(map);
+      applyCleanAllmovaMapStyle(map, { isSatellite: mapStyleRef.current === 'satellite' });
       installTerrain(map, providerRef.current, {
         source: TERRAIN_SOURCE_ID,
         hillshade: HILLSHADE_LAYER_ID,
       });
       ensureRouteLayers();
+      routeEndpointMarkersRef.current = updateRouteEndpointMarkers(
+        map,
+        routeRef.current,
+        routeEndpointMarkersRef.current,
+      );
     });
 
     map.on('click', (event) => {
@@ -261,6 +280,8 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     return () => {
       for (const marker of markersRef.current) marker.remove();
       markersRef.current = [];
+      for (const marker of routeEndpointMarkersRef.current) marker.remove();
+      routeEndpointMarkersRef.current = [];
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
       userMarkerKeyRef.current = null;
@@ -388,6 +409,16 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
 
   useEffect(() => {
     if (mapRef.current) applyRoute(mapRef.current, route);
+  }, [route]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    routeEndpointMarkersRef.current = updateRouteEndpointMarkers(
+      map,
+      route,
+      routeEndpointMarkersRef.current,
+    );
   }, [route]);
 
   useEffect(() => {
