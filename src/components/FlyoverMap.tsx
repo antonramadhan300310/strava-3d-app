@@ -119,6 +119,8 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
   /** Last reveal progress, so a poster capture can repaint and restore it. */
   const revealRef = useRef(0);
   const capturingRef = useRef(false);
+  /** Reused export snapshot, so a 1 800-frame render allocates one canvas. */
+  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pathRef = useRef(path);
 
   pathRef.current = path;
@@ -420,8 +422,9 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
         map.triggerRepaint();
         await waitForRender(map, EXPORT_FRAME_TIMEOUT_MS);
 
-        const image = copyCanvas(map, false);
+        const image = copyCanvas(map, false, captureCanvasRef.current);
         if (!image) return null;
+        captureCanvasRef.current = image;
 
         const point = map.project(marker);
         const { width, height } = map.getCanvas().getBoundingClientRect();
@@ -609,15 +612,16 @@ function isSamePadding(
 function copyCanvas(
   map: maplibregl.Map | null,
   verifyReadable = true,
+  reuse: HTMLCanvasElement | null = null,
 ): HTMLCanvasElement | null {
   if (!map) return null;
 
   const source = map.getCanvas();
   if (source.width === 0 || source.height === 0) return null;
 
-  const snapshot = document.createElement('canvas');
-  snapshot.width = source.width;
-  snapshot.height = source.height;
+  const snapshot = reuse ?? document.createElement('canvas');
+  if (snapshot.width !== source.width) snapshot.width = source.width;
+  if (snapshot.height !== source.height) snapshot.height = source.height;
   const context = snapshot.getContext('2d');
   if (!context) return null;
 

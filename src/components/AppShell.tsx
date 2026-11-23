@@ -83,9 +83,8 @@ export default function AppShell() {
       visible: isRoutes && heatmap.enabled,
       scheme: heatmap.scheme,
       lines: heatmap.linesGeoJSON,
-      points: heatmap.pointsGeoJSON,
     }),
-    [isRoutes, heatmap.enabled, heatmap.scheme, heatmap.linesGeoJSON, heatmap.pointsGeoJSON],
+    [isRoutes, heatmap.enabled, heatmap.scheme, heatmap.linesGeoJSON],
   );
 
   const focusHeatmap = useCallback(() => {

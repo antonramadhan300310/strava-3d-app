@@ -1,10 +1,7 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import maplibregl, {
-  type HeatmapLayerSpecification,
-  type LineLayerSpecification,
-} from 'maplibre-gl';
+import maplibregl, { type LineLayerSpecification } from 'maplibre-gl';
 import { Layers, LocateFixed, Mountain, Square } from 'lucide-react';
 import { toLngLatEle, type LngLat, type LngLatEle } from '@/lib/polyline';
 import { gpsBadgeText, gpsQuality, type GpsQuality } from '@/lib/metrics';
@@ -33,12 +30,9 @@ const TRACK_CASING_LAYER_ID = 'live-track-casing';
 const TRACK_LAYER_ID = 'live-track-layer';
 const TRACK_COLOR = '#22d3ee';
 const HEATMAP_LINES_SOURCE_ID = 'personal-heatmap-lines';
-const HEATMAP_POINTS_SOURCE_ID = 'personal-heatmap-points';
-const HEATMAP_CLOUD_LAYER_ID = 'personal-heatmap-cloud';
+const HEATMAP_HALO_LAYER_ID = 'personal-heatmap-halo';
 const HEATMAP_GLOW_LAYER_ID = 'personal-heatmap-glow';
 const HEATMAP_CORE_LAYER_ID = 'personal-heatmap-core';
-/** Lines hand over to the heat cloud above this zoom. */
-const HEATMAP_CLOUD_MAX_ZOOM = 13;
 const DEFAULT_CENTER: [number, number] = [107.6191, -6.9175];
 const DEFAULT_ZOOM = 13;
 const PITCH_3D = 60;
@@ -90,7 +84,6 @@ export type HeatmapLayers = {
   visible: boolean;
   scheme: HeatmapScheme;
   lines: GeoJSON.FeatureCollection<GeoJSON.LineString> | null;
-  points: GeoJSON.FeatureCollection<GeoJSON.Point> | null;
 };
 
 const EMPTY_LINE: GeoJSON.Feature<GeoJSON.LineString> = {
@@ -106,11 +99,6 @@ const EMPTY_TRACK: GeoJSON.Feature<GeoJSON.LineString> = {
 };
 
 const EMPTY_HEATMAP_LINES: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
-  type: 'FeatureCollection',
-  features: [],
-};
-
-const EMPTY_HEATMAP_POINTS: GeoJSON.FeatureCollection<GeoJSON.Point> = {
   type: 'FeatureCollection',
   features: [],
 };
@@ -151,10 +139,9 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   const positionRef = useRef(livePosition);
   const providerRef = useRef(provider);
   const heatmapRef = useRef(heatmap);
-  /** Last collections pushed to the GPU, so unchanged filters skip re-parsing. */
-  const appliedHeatmapRef = useRef<{ lines: unknown; points: unknown }>({
+  /** Last line collection pushed to the GPU, so unchanged filters skip re-parsing. */
+  const appliedHeatmapRef = useRef<{ lines: unknown }>({
     lines: null,
-    points: null,
   });
   const [mapStyle, setMapStyle] = useState<BaseMapStyle>('outdoor');
   const [is3D, setIs3D] = useState(true);
@@ -250,7 +237,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       applyRoute(map, routeRef.current);
       applyTrack(map, trackRef.current);
       ensureHeatmapLayers(map);
-      appliedHeatmapRef.current = { lines: null, points: null };
+      appliedHeatmapRef.current = { lines: null };
       applyHeatmap(map, heatmapRef.current, appliedHeatmapRef);
     };
 
@@ -611,8 +598,13 @@ function applyTrack(map: maplibregl.Map, track: LngLatEle[] | null) {
 }
 
 /**
- * Heatmap layers sit directly under the route casing, so the active planning
- * line, live track and HTML waypoint markers always stay readable on top.
+ * Three stacked vector passes (halo → glow → core) sit directly under the route
+ * casing, so the active planning line, live track and HTML waypoint markers
+ * always stay readable on top.
+ *
+ * All three render the same `LineString` source at the native screen resolution
+ * of the current zoom, which removes the blocky point grid the old raster
+ * heatmap showed when zoomed out.
  */
 function ensureHeatmapLayers(map: maplibregl.Map) {
   const before = map.getLayer(ROUTE_CASING_LAYER_ID) ? ROUTE_CASING_LAYER_ID : undefined;
@@ -620,19 +612,15 @@ function ensureHeatmapLayers(map: maplibregl.Map) {
   if (!map.getSource(HEATMAP_LINES_SOURCE_ID)) {
     map.addSource(HEATMAP_LINES_SOURCE_ID, { type: 'geojson', data: EMPTY_HEATMAP_LINES });
   }
-  if (!map.getSource(HEATMAP_POINTS_SOURCE_ID)) {
-    map.addSource(HEATMAP_POINTS_SOURCE_ID, { type: 'geojson', data: EMPTY_HEATMAP_POINTS });
-  }
 
-  if (!map.getLayer(HEATMAP_CLOUD_LAYER_ID)) {
+  if (!map.getLayer(HEATMAP_HALO_LAYER_ID)) {
     map.addLayer(
       {
-        id: HEATMAP_CLOUD_LAYER_ID,
-        type: 'heatmap',
-        source: HEATMAP_POINTS_SOURCE_ID,
-        maxzoom: HEATMAP_CLOUD_MAX_ZOOM,
-        layout: { visibility: 'none' },
-        paint: heatmapCloudPaint('fire'),
+        id: HEATMAP_HALO_LAYER_ID,
+        type: 'line',
+        source: HEATMAP_LINES_SOURCE_ID,
+        layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
+        paint: heatmapHaloPaint('fire'),
       },
       before,
     );
@@ -665,88 +653,58 @@ function ensureHeatmapLayers(map: maplibregl.Map) {
   }
 }
 
-function heatmapCloudPaint(
-  scheme: HeatmapScheme,
-): NonNullable<HeatmapLayerSpecification['paint']> {
-  const palette = HEATMAP_SCHEMES[scheme];
+function heatmapHaloPaint(scheme: HeatmapScheme): NonNullable<LineLayerSpecification['paint']> {
   return {
-    'heatmap-weight': ['interpolate', ['linear'], ['get', 'weight'], 0, 0, 1, 1],
-    'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 9, 0.9, 13, 1.8],
-    'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 10, 11, 18, 13, 34],
-    'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 11, 1, 13, 0],
-    'heatmap-color': [
-      'interpolate',
-      ['linear'],
-      ['heatmap-density'],
-      0,
-      'rgba(0, 0, 0, 0)',
-      0.2,
-      palette.cloud[0],
-      0.55,
-      palette.cloud[1],
-      0.85,
-      palette.cloud[2],
-      1,
-      '#ffffff',
-    ],
+    'line-color': HEATMAP_SCHEMES[scheme].halo,
+    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 12, 12, 16, 16, 20],
+    'line-blur': ['interpolate', ['linear'], ['zoom'], 8, 9, 14, 13],
+    'line-opacity': 0.15,
   };
 }
 
 function heatmapGlowPaint(scheme: HeatmapScheme): NonNullable<LineLayerSpecification['paint']> {
   return {
     'line-color': HEATMAP_SCHEMES[scheme].glow,
-    'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 9, 17, 14],
-    'line-blur': 8,
-    'line-opacity': 0.32,
+    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 4.5, 12, 6.5, 16, 9],
+    'line-blur': ['interpolate', ['linear'], ['zoom'], 8, 3.5, 14, 5],
+    'line-opacity': 0.3,
   };
 }
 
 function heatmapCorePaint(scheme: HeatmapScheme): NonNullable<LineLayerSpecification['paint']> {
   return {
     'line-color': HEATMAP_SCHEMES[scheme].core,
-    'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2.5, 17, 4],
-    'line-opacity': 0.45,
+    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.4, 12, 2.2, 16, 3.4],
+    'line-blur': 0.4,
+    'line-opacity': 0.48,
   };
 }
 
 function applyHeatmap(
   map: maplibregl.Map,
   heatmap: HeatmapLayers | null | undefined,
-  appliedRef?: { current: { lines: unknown; points: unknown } },
+  appliedRef?: { current: { lines: unknown } },
 ) {
   const linesSource = map.getSource(HEATMAP_LINES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
-  const pointsSource = map.getSource(HEATMAP_POINTS_SOURCE_ID) as
-    | maplibregl.GeoJSONSource
-    | undefined;
-  if (!linesSource || !pointsSource) return;
+  if (!linesSource) return;
 
   const lines = heatmap?.lines ?? EMPTY_HEATMAP_LINES;
-  const points = heatmap?.points ?? EMPTY_HEATMAP_POINTS;
 
   if (!appliedRef || appliedRef.current.lines !== lines) {
     linesSource.setData(lines);
     if (appliedRef) appliedRef.current.lines = lines;
   }
-  if (!appliedRef || appliedRef.current.points !== points) {
-    pointsSource.setData(points);
-    if (appliedRef) appliedRef.current.points = points;
-  }
 
   const visibility = heatmap?.visible ? 'visible' : 'none';
-  const scheme = heatmap?.scheme ?? 'fire';
-  const palette = HEATMAP_SCHEMES[scheme];
+  const palette = HEATMAP_SCHEMES[heatmap?.scheme ?? 'fire'];
 
-  for (const layerId of [HEATMAP_CLOUD_LAYER_ID, HEATMAP_GLOW_LAYER_ID, HEATMAP_CORE_LAYER_ID]) {
+  for (const layerId of [HEATMAP_HALO_LAYER_ID, HEATMAP_GLOW_LAYER_ID, HEATMAP_CORE_LAYER_ID]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', visibility);
   }
 
-  if (map.getLayer(HEATMAP_CLOUD_LAYER_ID)) {
-    map.setPaintProperty(
-      HEATMAP_CLOUD_LAYER_ID,
-      'heatmap-color',
-      heatmapCloudPaint(scheme)['heatmap-color'],
-    );
+  if (map.getLayer(HEATMAP_HALO_LAYER_ID)) {
+    map.setPaintProperty(HEATMAP_HALO_LAYER_ID, 'line-color', palette.halo);
   }
   if (map.getLayer(HEATMAP_GLOW_LAYER_ID)) {
     map.setPaintProperty(HEATMAP_GLOW_LAYER_ID, 'line-color', palette.glow);
