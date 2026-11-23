@@ -744,6 +744,7 @@ export default function ActivityDetail({
       {shareActivityOpen && (
         <ShareActivitySheet
           activity={activity}
+          provider={provider}
           onClose={() => setShareActivityOpen(false)}
           onNotice={onNotice}
         />
