@@ -1,12 +1,14 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
+  BarChart3,
   Bike,
   Download,
   Flame,
   Footprints,
+  List,
   Loader2,
   MapPin,
   Mountain,
@@ -22,7 +24,15 @@ import { buildGpx, gpxFileName } from '@/lib/gpx';
 import { exportGpxFile } from '@/lib/exportGpx';
 import { formatDistanceKm, formatDuration } from '@/lib/metrics';
 import { getPRHolderIds } from '@/lib/activityAnalytics';
+import {
+  deletePersonalGoal,
+  loadPersonalGoals,
+  savePersonalGoal,
+  type PersonalGoal,
+} from '@/lib/trainingLog';
 import type { ActivityType } from '@/lib/valhalla';
+import PersonalGoalsStrip from './PersonalGoalsStrip';
+import TrainingLogView from './TrainingLogView';
 
 const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
   cycling: <Bike size={20} />,
@@ -39,8 +49,33 @@ type Props = {
   onOpenHeatmap: () => void;
 };
 
+type ViewMode = 'history' | 'log';
+
+const VIEW_MODES: { key: ViewMode; label: string; icon: React.ReactNode }[] = [
+  { key: 'history', label: 'Riwayat', icon: <List size={13} /> },
+  { key: 'log', label: 'Training Log', icon: <BarChart3 size={13} /> },
+];
+
 export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHeatmap }: Props) {
   const [pendingDelete, setPendingDelete] = useState<ActivityRecord | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('history');
+  const [goals, setGoals] = useState<PersonalGoal[]>([]);
+
+  // localStorage is client-only: loading in an effect keeps the static export
+  // and the first client render identical.
+  useEffect(() => {
+    setGoals(loadPersonalGoals());
+  }, []);
+
+  const handleSaveGoal = (goal: PersonalGoal) => {
+    setGoals(savePersonalGoal(goal));
+    onNotice('Target pribadi disimpan.');
+  };
+
+  const handleDeleteGoal = (id: string) => {
+    setGoals(deletePersonalGoal(id));
+    onNotice('Target pribadi dihapus.');
+  };
 
   // Recorded tracks only: a planned route was never actually travelled.
   const journey = useMemo(() => {
@@ -94,17 +129,41 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
           </button>
         </div>
 
-        <div className="mt-3 flex gap-1 rounded-xl bg-slate-900/80 p-1" role="tablist" aria-label="Filter aktivitas">
-          {ACTIVITY_FILTERS.map(({ key, label }) => (
-            <FilterTab
+        <div
+          className="mt-3 flex gap-1 rounded-xl bg-slate-900/80 p-1"
+          role="tablist"
+          aria-label="Mode daftar aktivitas"
+        >
+          {VIEW_MODES.map(({ key, label, icon }) => (
+            <button
               key={key}
-              label={label}
-              count={activities.counts[key]}
-              selected={activities.filter === key}
-              onClick={() => activities.setFilter(key)}
-            />
+              type="button"
+              role="tab"
+              aria-selected={viewMode === key}
+              onClick={() => setViewMode(key)}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-semibold transition active:scale-95 ${
+                viewMode === key ? 'bg-orange-500 text-white' : 'text-slate-300 active:bg-slate-800'
+              }`}
+            >
+              {icon}
+              {label}
+            </button>
           ))}
         </div>
+
+        {viewMode === 'history' && (
+          <div className="mt-2 flex gap-1 rounded-xl bg-slate-900/80 p-1" role="tablist" aria-label="Filter aktivitas">
+            {ACTIVITY_FILTERS.map(({ key, label }) => (
+              <FilterTab
+                key={key}
+                label={label}
+                count={activities.counts[key]}
+                selected={activities.filter === key}
+                onClick={() => activities.setFilter(key)}
+              />
+            ))}
+          </div>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
@@ -112,6 +171,13 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
           count={journey.count}
           meters={journey.meters}
           onOpen={onOpenHeatmap}
+        />
+
+        <PersonalGoalsStrip
+          goals={goals}
+          activities={activities.activities}
+          onSave={handleSaveGoal}
+          onDelete={handleDeleteGoal}
         />
 
         {activities.error && (
@@ -123,40 +189,57 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
           </div>
         )}
 
-        {activities.loading && activities.activities.length === 0 && (
-          <p className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
-            <Loader2 size={16} className="animate-spin" />
-            Memuat aktivitas…
-          </p>
-        )}
-
-        {!activities.loading && activities.visible.length === 0 && !activities.error && (
-          <div className="flex flex-col items-center gap-2 py-14 text-center">
-            <MountainSnow size={32} className="text-slate-600" />
-            <p className="text-sm font-medium text-slate-300">Belum ada aktivitas</p>
-            <p className="max-w-[16rem] text-xs text-slate-500">
-              {activities.filter === 'planned'
-                ? 'Simpan rute dari tab Routes untuk melihatnya di sini.'
-                : activities.filter === 'recorded'
-                  ? 'Rekam aktivitas dari tab Record untuk melihatnya di sini.'
-                  : 'Rekam aktivitas atau simpan rute rencana untuk memulai.'}
+        {viewMode === 'log' ? (
+          activities.loading && activities.activities.length === 0 ? (
+            <p className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+              <Loader2 size={16} className="animate-spin" />
+              Memuat aktivitas…
             </p>
-          </div>
-        )}
-
-        <ul className="flex flex-col gap-2.5">
-          {activities.visible.map((activity) => (
-            <ActivityCard
-              key={String(activity.id)}
-              activity={activity}
-              hasPR={prHolderIds.has(String(activity.id))}
-              deleting={activities.deletingId === activity.id}
-              onOpen={() => onOpen(activity)}
-              onExport={() => void exportActivity(activity)}
-              onDelete={() => setPendingDelete(activity)}
+          ) : (
+            <TrainingLogView
+              activities={activities.activities}
+              goals={goals}
+              onOpen={onOpen}
             />
-          ))}
-        </ul>
+          )
+        ) : (
+          <>
+            {activities.loading && activities.activities.length === 0 && (
+              <p className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+                <Loader2 size={16} className="animate-spin" />
+                Memuat aktivitas…
+              </p>
+            )}
+
+            {!activities.loading && activities.visible.length === 0 && !activities.error && (
+              <div className="flex flex-col items-center gap-2 py-14 text-center">
+                <MountainSnow size={32} className="text-slate-600" />
+                <p className="text-sm font-medium text-slate-300">Belum ada aktivitas</p>
+                <p className="max-w-[16rem] text-xs text-slate-500">
+                  {activities.filter === 'planned'
+                    ? 'Simpan rute dari tab Routes untuk melihatnya di sini.'
+                    : activities.filter === 'recorded'
+                      ? 'Rekam aktivitas dari tab Record untuk melihatnya di sini.'
+                      : 'Rekam aktivitas atau simpan rute rencana untuk memulai.'}
+                </p>
+              </div>
+            )}
+
+            <ul className="flex flex-col gap-2.5">
+              {activities.visible.map((activity) => (
+                <ActivityCard
+                  key={String(activity.id)}
+                  activity={activity}
+                  hasPR={prHolderIds.has(String(activity.id))}
+                  deleting={activities.deletingId === activity.id}
+                  onOpen={() => onOpen(activity)}
+                  onExport={() => void exportActivity(activity)}
+                  onDelete={() => setPendingDelete(activity)}
+                />
+              ))}
+            </ul>
+          </>
+        )}
       </div>
 
       {pendingDelete && (
