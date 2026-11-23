@@ -27,18 +27,18 @@ export default function HeatmapControl({ heatmap, onFocus }: Props) {
         aria-pressed={heatmap.enabled}
         className={`flex w-fit items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold shadow-lg backdrop-blur transition active:scale-95 ${
           heatmap.enabled
-            ? 'border-orange-400/60 bg-orange-500 text-white'
-            : 'border-white/15 bg-slate-900/90 text-slate-100'
+            ? 'border-[#B9F51E]/60 bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+            : 'border-white/15 bg-[#151B1D]/90 text-slate-100'
         }`}
       >
-        <Flame size={13} className={heatmap.enabled ? 'text-white' : 'text-orange-400'} />
+        <Flame size={13} className={heatmap.enabled ? 'text-white' : 'text-[#B9F51E]'} />
         Heatmap
       </button>
 
       {heatmap.enabled && (
-        <div className="rounded-2xl border border-white/10 bg-slate-900/95 p-2.5 text-slate-100 shadow-2xl backdrop-blur">
+        <div className="rounded-2xl border border-white/10 bg-[#151B1D]/95 p-2.5 text-slate-100 shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-orange-300">
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[#B9F51E]">
               <Flame size={13} />
               Peta Panas Jelajah
             </span>
@@ -49,7 +49,7 @@ export default function HeatmapControl({ heatmap, onFocus }: Props) {
                 onClick={() => setExpanded((current) => !current)}
                 aria-expanded={expanded}
                 aria-label={expanded ? 'Tutup filter heatmap' : 'Buka filter heatmap'}
-                className="rounded-full p-1 text-slate-300 transition active:bg-slate-800"
+                className="rounded-full p-1 text-slate-300 transition active:bg-[#1E2E16]"
               >
                 {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
               </button>
@@ -106,7 +106,7 @@ export default function HeatmapControl({ heatmap, onFocus }: Props) {
                   type="button"
                   onClick={onFocus}
                   disabled={!heatmap.bounds}
-                  className="flex items-center gap-1 rounded-full bg-orange-500 px-2.5 py-1 text-[10px] font-semibold text-white shadow transition active:scale-95 disabled:opacity-40"
+                  className="flex items-center gap-1 rounded-full bg-[#B9F51E] hover:bg-[#A5E012] px-2.5 py-1 text-[10px] font-semibold text-[#0D1112] shadow transition active:scale-95 disabled:opacity-40"
                 >
                   <Crosshair size={12} />
                   Pusatkan
@@ -146,7 +146,7 @@ function Chip({
       onClick={onClick}
       aria-pressed={selected}
       className={`flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold transition active:scale-95 ${
-        selected ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-300'
+        selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'bg-[#1E2E16] text-slate-300'
       }`}
     >
       {swatch && (

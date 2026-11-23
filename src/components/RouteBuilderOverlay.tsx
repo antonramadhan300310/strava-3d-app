@@ -143,7 +143,7 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
                 ? 'bg-rose-500/95 text-white'
                 : builder.info
                   ? 'bg-emerald-500/95 text-white'
-                  : 'bg-slate-900/90 text-slate-100'
+                  : 'bg-[#151B1D]/90 text-slate-100'
             }`}
             role="status"
           >
@@ -151,7 +151,7 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
           </p>
         )}
 
-        <div className="mx-auto flex w-full max-w-md items-center justify-between gap-2 rounded-2xl border border-white/10 bg-slate-900/90 p-2 shadow-2xl backdrop-blur">
+        <div className="mx-auto flex w-full max-w-md items-center justify-between gap-2 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-2 shadow-2xl backdrop-blur">
           <div className="flex flex-1 gap-1" role="group" aria-label="Profil aktivitas">
             {PROFILES.map((profile) => {
               const selected = builder.activityType === profile.key;
@@ -162,7 +162,7 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
                   onClick={() => builder.changeActivityType(profile.key)}
                   aria-pressed={selected}
                   className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] font-semibold transition active:scale-95 ${
-                    selected ? 'bg-orange-500 text-white' : 'text-slate-300 active:bg-slate-800'
+                    selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'text-slate-300 active:bg-[#1E2E16]'
                   }`}
                 >
                   {PROFILE_ICONS[profile.key]}
@@ -208,15 +208,15 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
       </div>
 
       {showSave && (
-        <div className="absolute inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-950/60 px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] backdrop-blur-sm sm:items-center sm:pb-4">
-          <div className="w-full max-w-sm rounded-2xl bg-slate-900 p-4 shadow-2xl">
+        <div className="absolute inset-0 z-50 flex items-end justify-center overflow-y-auto bg-[#0D1112]/60 px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] backdrop-blur-sm sm:items-center sm:pb-4">
+          <div className="w-full max-w-sm rounded-2xl bg-[#151B1D] p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-100">Simpan Rute</h2>
               <button
                 type="button"
                 onClick={() => setShowSave(false)}
                 aria-label="Tutup"
-                className="rounded-full p-1 text-slate-400 active:bg-slate-800"
+                className="rounded-full p-1 text-slate-400 active:bg-[#1E2E16]"
               >
                 <X size={18} />
               </button>
@@ -230,7 +230,7 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               autoFocus
-              className="mb-3 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-orange-500"
+              className="mb-3 w-full rounded-xl border border-[#2A3538] bg-[#1E2E16] px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-[#B9F51E]"
               placeholder="Rute pagi"
             />
 
@@ -240,7 +240,7 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
               type="button"
               onClick={() => void confirmSave()}
               disabled={saving}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-semibold text-[#0D1112] transition active:scale-[0.98] disabled:opacity-60"
             >
               {saving && <Loader2 size={16} className="animate-spin" />}
               {saving ? 'Menyimpan…' : 'Simpan ke Supabase'}
@@ -275,7 +275,7 @@ function MetricsCard({
   const minutes = Math.round((durationSeconds % 3600) / 60);
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/90 px-4 py-2.5 text-slate-100 shadow-2xl backdrop-blur">
+    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/90 px-4 py-2.5 text-slate-100 shadow-2xl backdrop-blur">
       <div className="flex items-center justify-between">
         <Metric label="Jarak" value={`${(distanceMeters / 1000).toFixed(2)} km`} />
         <Metric label="Elevasi" value={`${Math.round(elevationGainMeters)} m`} />
@@ -284,7 +284,7 @@ function MetricsCard({
       <button
         type="button"
         onClick={onInfo}
-        className="mt-1.5 flex items-center gap-1 rounded-full border border-white/10 bg-slate-800/80 px-2.5 py-1 text-[10px] font-semibold text-orange-300 transition active:scale-95"
+        className="mt-1.5 flex items-center gap-1 rounded-full border border-white/10 bg-[#1E2E16]/80 px-2.5 py-1 text-[10px] font-semibold text-[#B9F51E] transition active:scale-95"
       >
         <Info size={12} />
         Info Medan
@@ -322,8 +322,8 @@ function ActionButton({
       disabled={disabled}
       className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-3 text-xs font-semibold shadow-xl backdrop-blur transition active:scale-[0.98] disabled:opacity-40 ${
         primary
-          ? 'bg-orange-500 text-white'
-          : 'border border-white/15 bg-slate-900/85 text-slate-100'
+          ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+          : 'border border-white/15 bg-[#151B1D]/85 text-slate-100'
       }`}
     >
       {children}

@@ -14,9 +14,9 @@ const SPORT_STYLES: Record<
   { bubble: string; legend: string; text: string; icon: React.ReactNode }
 > = {
   cycling: {
-    bubble: 'bg-orange-500/90',
-    legend: 'bg-orange-500',
-    text: 'text-orange-300',
+    bubble: 'bg-[#B9F51E]/90',
+    legend: 'bg-[#B9F51E] hover:bg-[#A5E012]',
+    text: 'text-[#B9F51E]',
     icon: <Bike size={14} />,
   },
   run: {
@@ -108,13 +108,13 @@ export default function BubbleCalendar({ activities, onOpen }: Props) {
   };
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-slate-900/80 p-3 shadow-lg">
+    <section className="rounded-2xl border border-white/10 bg-[#151B1D]/80 p-3 shadow-lg">
       <div className="mb-2 flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={() => shiftMonth(-1)}
           aria-label="Bulan sebelumnya"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-300 active:scale-95"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1E2E16] text-slate-300 active:scale-95"
         >
           <ChevronLeft size={16} />
         </button>
@@ -123,7 +123,7 @@ export default function BubbleCalendar({ activities, onOpen }: Props) {
           type="button"
           onClick={() => shiftMonth(1)}
           aria-label="Bulan berikutnya"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-300 active:scale-95"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1E2E16] text-slate-300 active:scale-95"
         >
           <ChevronRight size={16} />
         </button>
@@ -153,7 +153,7 @@ export default function BubbleCalendar({ activities, onOpen }: Props) {
               <span
                 key={dateKey}
                 className={`flex h-11 items-center justify-center text-[10px] tabular-nums ${
-                  dateKey === todayKey ? 'font-bold text-orange-300' : 'text-slate-600'
+                  dateKey === todayKey ? 'font-bold text-[#B9F51E]' : 'text-slate-600'
                 }`}
               >
                 {dayNumber}
@@ -176,9 +176,9 @@ export default function BubbleCalendar({ activities, onOpen }: Props) {
                   SPORT_STYLES[bubble.primarySport].bubble
                 } ${
                   isSelected
-                    ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-slate-900'
+                    ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-[#0D1112]'
                     : bubble.hasMultiple
-                      ? 'ring-2 ring-white/60 ring-offset-2 ring-offset-slate-900'
+                      ? 'ring-2 ring-white/60 ring-offset-2 ring-offset-[#0D1112]'
                       : ''
                 }`}
                 style={{ width: size, height: size }}
@@ -210,7 +210,7 @@ export default function BubbleCalendar({ activities, onOpen }: Props) {
       )}
 
       {selectedDay && (
-        <div className="mt-2 rounded-xl bg-slate-800/50 p-2">
+        <div className="mt-2 rounded-xl bg-[#1E2E16]/50 p-2">
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <p className="text-[10px] font-semibold capitalize text-slate-200">
               {formatSelectedDate(selectedDay.dateKey)}
@@ -245,7 +245,7 @@ function DayActivityCard({
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-center gap-2 rounded-lg bg-slate-900/70 px-2 py-1.5 text-left active:scale-[0.99] active:bg-slate-800"
+      className="flex w-full items-center gap-2 rounded-lg bg-[#151B1D]/70 px-2 py-1.5 text-left active:scale-[0.99] active:bg-[#1E2E16]"
     >
       <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/5 ${style.text}`}>
         {style.icon}

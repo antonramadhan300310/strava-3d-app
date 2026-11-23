@@ -13,7 +13,7 @@ type Props = {
 const CATEGORY_TONES: Record<string, string> = {
   Ringan: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
   Sedang: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
-  Tinggi: 'border-orange-400/30 bg-orange-400/10 text-orange-300',
+  Tinggi: 'border-[#B9F51E]/30 bg-[#B9F51E]/10 text-[#B9F51E]',
   'Sangat Tinggi': 'border-rose-400/30 bg-rose-400/10 text-rose-300',
 };
 
@@ -28,7 +28,7 @@ export default function ActivityRpeCard({ rpe, durationSeconds, onChange }: Prop
   };
 
   return (
-    <section className="mt-2.5 rounded-xl border border-white/10 bg-slate-800/60 p-2.5">
+    <section className="mt-2.5 rounded-xl border border-white/10 bg-[#1E2E16]/60 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">
           <Gauge size={11} />
@@ -38,7 +38,7 @@ export default function ActivityRpeCard({ rpe, durationSeconds, onChange }: Prop
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="flex items-center gap-1 rounded-full bg-slate-700/60 px-2 py-0.5 text-[10px] font-semibold text-slate-200 active:scale-95"
+            className="flex items-center gap-1 rounded-full bg-[#2A3538]/60 px-2 py-0.5 text-[10px] font-semibold text-slate-200 active:scale-95"
           >
             <Pencil size={10} />
             Ubah
@@ -106,8 +106,8 @@ export default function ActivityRpeCard({ rpe, durationSeconds, onChange }: Prop
                       onClick={() => select(entry.value)}
                       className={`rounded-lg py-1.5 text-xs font-bold transition active:scale-95 ${
                         selected
-                          ? 'bg-orange-500 text-white'
-                          : 'bg-slate-700/60 text-slate-200 active:bg-slate-600'
+                          ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+                          : 'bg-[#2A3538]/60 text-slate-200 active:bg-slate-600'
                       }`}
                     >
                       {entry.value}

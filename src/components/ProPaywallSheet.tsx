@@ -29,7 +29,7 @@ export default function ProPaywallSheet({ open, onClose, reason }: Props) {
   const whatsappUrl = buildProWhatsAppUrl(email, plan);
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-[#0D1112]/80 backdrop-blur-sm">
       <button
         type="button"
         aria-label="Tutup penawaran Pro"
@@ -37,16 +37,16 @@ export default function ProPaywallSheet({ open, onClose, reason }: Props) {
         className="absolute inset-0 h-full w-full cursor-default"
       />
 
-      <div className="relative flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#111827] shadow-2xl sm:mb-4 sm:rounded-2xl">
-        <header className="shrink-0 border-b border-white/10 bg-gradient-to-br from-orange-500/15 via-[#111827] to-[#111827] px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] sm:pt-3">
+      <div className="relative flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#151B1D] shadow-2xl sm:mb-4 sm:rounded-2xl">
+        <header className="shrink-0 border-b border-white/10 bg-gradient-to-br from-[#B9F51E]/10 via-[#151B1D] to-[#151B1D] px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] sm:pt-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow-lg shadow-orange-500/30">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112] shadow-lg shadow-[#B9F51E]/30">
                 <Crown size={20} />
               </span>
               <div className="min-w-0">
                 <h2 className="text-base font-bold leading-tight text-slate-100">
-                  Tracker 3D Pro
+                  ALLMOVA PRO
                 </h2>
                 <p className="text-[11px] text-slate-400">
                   {reason ?? 'Buka semua fitur analisis dan sinematik.'}
@@ -57,13 +57,13 @@ export default function ProPaywallSheet({ open, onClose, reason }: Props) {
               type="button"
               onClick={onClose}
               aria-label="Tutup"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 active:bg-slate-800"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 active:bg-[#1E2E16]"
             >
               <X size={18} />
             </button>
           </div>
 
-          <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-orange-400/20 bg-orange-500/10 px-2.5 py-1.5 text-[10px] font-medium text-orange-200">
+          <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-[#B9F51E]/20 bg-[#B9F51E]/10 px-2.5 py-1.5 text-[10px] font-medium text-[#B9F51E]">
             <Sparkles size={12} />
             {isPro
               ? 'Akun kamu sudah Pro. Perpanjang kapan saja lewat WhatsApp.'
@@ -104,16 +104,16 @@ export default function ProPaywallSheet({ open, onClose, reason }: Props) {
                   onClick={() => setPlanKey(entry.key)}
                   className={`flex items-center gap-3 rounded-xl border p-3 text-left transition active:scale-[0.99] ${
                     selected
-                      ? 'border-orange-500/60 bg-orange-500/10'
-                      : 'border-white/10 bg-slate-900/70'
+                      ? 'border-[#B9F51E]/60 bg-[#B9F51E]/10'
+                      : 'border-white/10 bg-[#151B1D]/70'
                   }`}
                 >
                   <span
                     className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-                      selected ? 'border-orange-400 bg-orange-500' : 'border-slate-600'
+                      selected ? 'border-[#B9F51E] bg-[#B9F51E]' : 'border-slate-600'
                     }`}
                   >
-                    {selected && <Check size={10} strokeWidth={3} className="text-white" />}
+                    {selected && <Check size={10} strokeWidth={3} className="text-[#0D1112]" />}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-1.5">
@@ -129,7 +129,7 @@ export default function ProPaywallSheet({ open, onClose, reason }: Props) {
                     <span className="mt-0.5 block text-[10px] text-slate-400">{entry.note}</span>
                   </span>
                   <span className="shrink-0 text-right">
-                    <span className="block text-[13px] font-bold tabular-nums text-orange-300">
+                    <span className="block text-[13px] font-bold tabular-nums text-[#B9F51E]">
                       {entry.price}
                     </span>
                     <span className="block text-[9px] text-slate-500">{entry.period}</span>
@@ -140,13 +140,13 @@ export default function ProPaywallSheet({ open, onClose, reason }: Props) {
           </div>
         </div>
 
-        <footer className="shrink-0 border-t border-white/10 bg-[#111827] px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+        <footer className="shrink-0 border-t border-white/10 bg-[#151B1D] px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
           {ADMIN_WHATSAPP ? (
             <a
               href={whatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-bold text-white shadow-lg shadow-orange-500/25 transition active:scale-[0.99]"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] shadow-lg shadow-[#B9F51E]/25 transition active:scale-[0.99]"
             >
               <MessageCircle size={18} />
               Aktifkan Pro via WhatsApp
@@ -155,7 +155,7 @@ export default function ProPaywallSheet({ open, onClose, reason }: Props) {
             <button
               type="button"
               disabled
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500/60 py-3 text-sm font-bold text-white/80"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E]/60 py-3 text-sm font-bold text-[#0D1112]/80"
             >
               <MessageCircle size={18} />
               Aktifkan Pro via WhatsApp

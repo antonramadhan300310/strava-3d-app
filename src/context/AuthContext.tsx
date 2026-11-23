@@ -59,7 +59,7 @@ function fallbackName(user: User): string {
   const meta = user.user_metadata?.display_name;
   if (typeof meta === 'string' && meta.trim().length > 0) return meta.trim();
   const email = user.email ?? '';
-  return email.split('@')[0] || 'Atlet Tracker 3D';
+  return email.split('@')[0] || 'Atlet ALLMOVA';
 }
 
 function fallbackProfile(user: User): AthleteProfile {

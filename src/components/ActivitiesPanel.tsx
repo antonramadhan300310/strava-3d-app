@@ -36,6 +36,7 @@ import {
 import type { ActivityType } from '@/lib/valhalla';
 import PersonalGoalsStrip from './PersonalGoalsStrip';
 import ProPaywallSheet from './ProPaywallSheet';
+import AllmovaLogo from './AllmovaLogo';
 import TrainingLogView from './TrainingLogView';
 import AthleteProfileSheet from './AthleteProfileSheet';
 
@@ -134,11 +135,12 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
   };
 
   return (
-    <section className="absolute inset-0 z-10 flex flex-col bg-slate-950 pb-[calc(env(safe-area-inset-bottom)+4.5rem)]">
+    <section className="absolute inset-0 z-10 flex flex-col bg-[#0D1112] pb-[calc(env(safe-area-inset-bottom)+4.5rem)]">
       <header className="px-4 pb-2 pt-[calc(env(safe-area-inset-top)+1rem)]">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-lg font-semibold text-slate-100">Aktivitas</h1>
+            <AllmovaLogo variant="compact" className="h-6 w-auto" />
+            <h1 className="mt-1 text-lg font-semibold text-slate-100">Aktivitas</h1>
             <p className="text-[11px] text-slate-400">
               {activities.counts.all} tersimpan di Supabase
             </p>
@@ -150,7 +152,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
               disabled={activities.loading}
               aria-label="Muat ulang daftar aktivitas"
               aria-busy={activities.loading}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-lg backdrop-blur transition active:scale-95 disabled:opacity-50"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-[#151B1D]/85 text-slate-100 shadow-lg backdrop-blur transition active:scale-95 disabled:opacity-50"
             >
               <RefreshCw size={18} className={activities.loading ? 'animate-spin' : undefined} />
             </button>
@@ -158,7 +160,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
               type="button"
               onClick={() => setProfileOpen(true)}
               aria-label="Buka profil atlet"
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-orange-400/40 bg-orange-500/15 text-orange-300 shadow-lg backdrop-blur transition active:scale-95"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-[#B9F51E]/40 bg-[#B9F51E]/15 text-[#B9F51E] shadow-lg backdrop-blur transition active:scale-95"
             >
               <UserRound size={19} />
             </button>
@@ -166,7 +168,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
         </div>
 
         <div
-          className="mt-3 flex gap-1 rounded-xl bg-slate-900/80 p-1"
+          className="mt-3 flex gap-1 rounded-xl bg-[#151B1D]/80 p-1"
           role="tablist"
           aria-label="Mode daftar aktivitas"
         >
@@ -183,14 +185,14 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
                 }
                 className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-semibold transition active:scale-95 ${
                   viewMode === key
-                    ? 'bg-orange-500 text-white'
-                    : 'text-slate-300 active:bg-slate-800'
+                    ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+                    : 'text-slate-300 active:bg-[#1E2E16]'
                 }`}
               >
                 {icon}
                 {label}
                 {locked && (
-                  <span className="rounded-full bg-amber-400/20 px-1 py-0.5 text-[8px] font-bold text-amber-300">
+                  <span className="rounded-full bg-[#B9F51E] px-1 py-0.5 text-[8px] font-bold text-[#0D1112]">
                     👑 PRO
                   </span>
                 )}
@@ -200,7 +202,7 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
         </div>
 
         {viewMode === 'history' && (
-          <div className="mt-2 flex gap-1 rounded-xl bg-slate-900/80 p-1" role="tablist" aria-label="Filter aktivitas">
+          <div className="mt-2 flex gap-1 rounded-xl bg-[#151B1D]/80 p-1" role="tablist" aria-label="Filter aktivitas">
             {ACTIVITY_FILTERS.map(({ key, label }) => (
               <FilterTab
                 key={key}
@@ -311,8 +313,8 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
       </div>
 
       {pendingDelete && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#0D1112]/75 px-6 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#151B1D] p-4 shadow-2xl">
             <h2 className="mb-1 text-sm font-semibold text-slate-100">Hapus aktivitas?</h2>
             <p className="mb-4 text-xs text-slate-400">
               &ldquo;{pendingDelete.title}&rdquo; akan dihapus permanen dari Supabase. Tindakan ini
@@ -369,17 +371,17 @@ function HeatmapShortcutCard({
   onOpen: () => void;
 }) {
   return (
-    <section className="mb-3 overflow-hidden rounded-2xl border border-orange-500/25 bg-gradient-to-br from-slate-900 via-slate-900 to-orange-950/50 p-3 shadow-xl">
+    <section className="mb-3 overflow-hidden rounded-2xl border border-[#B9F51E]/25 bg-gradient-to-br from-[#151B1D] via-[#151B1D] to-[#1E2E16]/50 p-3 shadow-xl">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500/20 text-orange-400">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#B9F51E]/20 text-[#B9F51E]">
             <Flame size={18} />
           </span>
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-100">
               Heatmap Jelajah
               {locked && (
-                <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+                <span className="rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-1.5 py-0.5 text-[9px] font-bold text-[#0D1112]">
                   👑 PRO
                 </span>
               )}
@@ -388,7 +390,7 @@ function HeatmapShortcutCard({
           </div>
         </div>
         <div className="text-right">
-          <p className="text-lg font-bold leading-none tabular-nums text-orange-400">
+          <p className="text-lg font-bold leading-none tabular-nums text-[#B9F51E]">
             {(meters / 1000).toFixed(1)}
           </p>
           <p className="text-[9px] uppercase tracking-wide text-slate-400">km jelajah</p>
@@ -398,7 +400,7 @@ function HeatmapShortcutCard({
       <button
         type="button"
         onClick={onOpen}
-        className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white shadow transition active:scale-[0.98]"
+        className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-2 text-xs font-semibold text-[#0D1112] shadow transition active:scale-[0.98]"
       >
         <Flame size={14} />
         Buka Heatmap Jelajah
@@ -426,13 +428,13 @@ function FilterTab({
       aria-selected={selected}
       onClick={onClick}
       className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-semibold transition active:scale-95 ${
-        selected ? 'bg-orange-500 text-white' : 'text-slate-300 active:bg-slate-800'
+        selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'text-slate-300 active:bg-[#1E2E16]'
       }`}
     >
       {label}
       <span
         className={`rounded-full px-1.5 text-[9px] tabular-nums ${
-          selected ? 'bg-white/25 text-white' : 'bg-slate-800 text-slate-400'
+          selected ? 'bg-white/25 text-white' : 'bg-[#1E2E16] text-slate-400'
         }`}
       >
         {count}
@@ -459,13 +461,13 @@ function ActivityCard({
   onDelete: () => void;
 }) {
   return (
-    <li className="rounded-2xl border border-white/10 bg-slate-900/80 shadow-lg">
+    <li className="rounded-2xl border border-white/10 bg-[#151B1D]/80 shadow-lg">
       <button
         type="button"
         onClick={onOpen}
-        className="flex w-full items-start gap-3 p-3 text-left active:bg-slate-800/60"
+        className="flex w-full items-start gap-3 p-3 text-left active:bg-[#1E2E16]/60"
       >
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/15 text-orange-400">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#B9F51E]/15 text-[#B9F51E]">
           {ACTIVITY_ICONS[activity.activityType]}
         </span>
 
@@ -525,11 +527,11 @@ function LockedProCard({
   onOpen: () => void;
 }) {
   return (
-    <section className="mb-3 rounded-2xl border border-amber-300/25 bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 p-3 shadow-xl">
+    <section className="mb-3 rounded-2xl border border-amber-300/25 bg-gradient-to-br from-[#151B1D] via-[#151B1D] to-amber-950/30 p-3 shadow-xl">
       <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-100">
         <Lock size={14} className="text-amber-300" />
         {title}
-        <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+        <span className="rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-1.5 py-0.5 text-[9px] font-bold text-[#0D1112]">
           👑 PRO
         </span>
       </p>
@@ -537,7 +539,7 @@ function LockedProCard({
       <button
         type="button"
         onClick={onOpen}
-        className="mt-2 w-full rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white shadow transition active:scale-[0.98]"
+        className="mt-2 w-full rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-2 text-xs font-semibold text-[#0D1112] shadow transition active:scale-[0.98]"
       >
         Upgrade ke Pro
       </button>
@@ -547,7 +549,7 @@ function LockedProCard({
 
 function CardMetric({ label, value }: { label: string; value: string }) {
   return (
-    <span className="flex flex-col rounded-lg bg-slate-800/60 px-1 py-1 text-center">
+    <span className="flex flex-col rounded-lg bg-[#1E2E16]/60 px-1 py-1 text-center">
       <span className="text-[9px] uppercase tracking-wide text-slate-400">{label}</span>
       <span className="text-[11px] font-semibold tabular-nums text-slate-100">{value}</span>
     </span>
@@ -573,7 +575,7 @@ function CardAction({
       onClick={onClick}
       disabled={busy}
       className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-1.5 text-[11px] font-semibold transition active:scale-95 disabled:opacity-50 ${
-        danger ? 'text-rose-400 active:bg-rose-500/10' : 'text-slate-200 active:bg-slate-800'
+        danger ? 'text-rose-400 active:bg-rose-500/10' : 'text-slate-200 active:bg-[#1E2E16]'
       }`}
     >
       {children}

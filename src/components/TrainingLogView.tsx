@@ -28,9 +28,9 @@ export default function TrainingLogView({ activities, goals, onOpen }: Props) {
 
   return (
     <div className="flex flex-col gap-2.5">
-      <section className="rounded-2xl border border-orange-500/25 bg-gradient-to-br from-slate-900 via-slate-900 to-orange-950/40 p-3 shadow-xl">
+      <section className="rounded-2xl border border-[#B9F51E]/25 bg-gradient-to-br from-[#151B1D] via-[#151B1D] to-[#1E2E16]/40 p-3 shadow-xl">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1 rounded-full border border-orange-400/40 bg-orange-500/15 px-2.5 py-1 text-[11px] font-bold text-orange-300">
+          <span className="flex items-center gap-1 rounded-full border border-[#B9F51E]/40 bg-[#B9F51E]/15 px-2.5 py-1 text-[11px] font-bold text-[#B9F51E]">
             🔥 {streak} Minggu Beruntun
           </span>
           <span className="shrink-0 text-[9px] uppercase tracking-wide text-slate-400">
@@ -59,7 +59,7 @@ export default function TrainingLogView({ activities, goals, onOpen }: Props) {
 
 function RecapStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-slate-800/60 px-1 py-1.5 text-center">
+    <div className="rounded-lg bg-[#1E2E16]/60 px-1 py-1.5 text-center">
       <p className="text-[9px] uppercase tracking-wide text-slate-400">{label}</p>
       <p className="text-[11px] font-bold tabular-nums text-slate-100">{value}</p>
     </div>

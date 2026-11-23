@@ -24,12 +24,13 @@ import {
 
 /** Temporary render target; cleared before a new export and on close. */
 const TEMP_FILE = 'flyover_export.mp4';
-const DOCUMENTS_FOLDER = 'Tracker3D';
+const DOCUMENTS_FOLDER = 'ALLMOVA';
 
 type Stage = 'quality' | 'rendering' | 'done' | 'error';
 
 type Props = {
   activity: ActivityRecord;
+  isPro: boolean;
   captureFrame: (progress: number) => Promise<FlyoverFrameCapture | null>;
   onClose: () => void;
   onNotice: (message: string) => void;
@@ -37,6 +38,7 @@ type Props = {
 
 export default function FlyoverExportSheet({
   activity,
+  isPro,
   captureFrame,
   onClose,
   onNotice,
@@ -113,6 +115,7 @@ export default function FlyoverExportSheet({
           fps: quality,
           durationSeconds,
           hud: buildFlyoverExportHud(activity),
+          watermark: isPro,
           captureFrame,
           signal: controller.signal,
           onProgress: (value) => {
@@ -167,7 +170,7 @@ export default function FlyoverExportSheet({
         abortRef.current = null;
       }
     },
-    [activity, captureFrame, durationSeconds, onClose, removeTempFile],
+    [activity, captureFrame, durationSeconds, isPro, onClose, removeTempFile],
   );
 
   const cancel = useCallback(() => {
@@ -179,7 +182,7 @@ export default function FlyoverExportSheet({
     setSaving(true);
 
     try {
-      const fileName = `Tracker3D-Flyover-${fileTimestamp()}.mp4`;
+      const fileName = `ALLMOVA-Flyover-${fileTimestamp()}.mp4`;
 
       if (Capacitor.isNativePlatform()) {
         try {
@@ -239,7 +242,7 @@ export default function FlyoverExportSheet({
 
       const blob = blobRef.current;
       if (!blob) throw new Error('Berkas video tidak tersedia.');
-      const file = new File([blob], `Tracker3D-Flyover-${fileTimestamp()}.mp4`, {
+      const file = new File([blob], `ALLMOVA-Flyover-${fileTimestamp()}.mp4`, {
         type: 'video/mp4',
       });
       if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
@@ -266,14 +269,14 @@ export default function FlyoverExportSheet({
   const quality = qualities[fps];
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4">
-      <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 p-5 text-slate-100 shadow-2xl">
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#0D1112]/80 px-4">
+      <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#151B1D]/95 p-5 text-slate-100 shadow-2xl">
         {stage === 'quality' && (
           <>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <p className="flex items-center gap-2 text-sm font-bold">
-                  <Video size={16} className="text-orange-400" />
+                  <Video size={16} className="text-[#B9F51E]" />
                   Export MP4 (Beta)
                 </p>
                 <p className="mt-1 text-[11px] text-slate-400">
@@ -284,7 +287,7 @@ export default function FlyoverExportSheet({
                 type="button"
                 onClick={close}
                 aria-label="Tutup pilihan export"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-300 active:scale-95"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1E2E16] text-slate-300 active:scale-95"
               >
                 <X size={16} />
               </button>
@@ -296,7 +299,7 @@ export default function FlyoverExportSheet({
               </p>
             ) : (
               <div className="flex flex-col gap-2">
-                <div className="rounded-2xl border border-white/10 bg-slate-800/40 p-3">
+                <div className="rounded-2xl border border-white/10 bg-[#1E2E16]/40 p-3">
                   <p className="text-[11px] font-semibold text-slate-200">
                     Durasi otomatis: {durationSeconds} detik • rute{' '}
                     {distanceKm.toFixed(1)} km
@@ -315,7 +318,7 @@ export default function FlyoverExportSheet({
                       key={value}
                       type="button"
                       onClick={() => void start(option.fps)}
-                      className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-800/70 px-4 py-3 text-left transition active:scale-[0.98]"
+                      className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#1E2E16]/70 px-4 py-3 text-left transition active:scale-[0.98]"
                     >
                       <span className="min-w-0">
                         <span className="block text-sm font-bold">{option.label}</span>
@@ -323,7 +326,7 @@ export default function FlyoverExportSheet({
                           {option.hint}
                         </span>
                       </span>
-                      <span className="shrink-0 rounded-full bg-orange-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-orange-300">
+                      <span className="shrink-0 rounded-full bg-[#B9F51E]/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#B9F51E]">
                         720p
                       </span>
                     </button>
@@ -336,16 +339,16 @@ export default function FlyoverExportSheet({
 
         {stage === 'rendering' && (
           <div className="flex flex-col items-center gap-3 py-4 text-center">
-            <Loader2 size={28} className="animate-spin text-orange-400" />
+            <Loader2 size={28} className="animate-spin text-[#B9F51E]" />
             <p className="text-3xl font-black tabular-nums">
               {Math.round(progress * 100)}%
             </p>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Merender video • {quality.qualityLabel}
             </p>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-[#1E2E16]">
               <div
-                className="h-full rounded-full bg-orange-500 transition-[width] duration-150"
+                className="h-full rounded-full bg-[#B9F51E] hover:bg-[#A5E012] transition-[width] duration-150"
                 style={{ width: `${Math.max(2, progress * 100)}%` }}
               />
             </div>
@@ -355,7 +358,7 @@ export default function FlyoverExportSheet({
             <button
               type="button"
               onClick={cancel}
-              className="mt-1 flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-slate-800 px-5 py-2.5 text-sm font-bold text-slate-100 active:scale-[0.98]"
+              className="mt-1 flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#1E2E16] px-5 py-2.5 text-sm font-bold text-slate-100 active:scale-[0.98]"
             >
               <X size={16} />
               Batal
@@ -379,7 +382,7 @@ export default function FlyoverExportSheet({
                 type="button"
                 onClick={close}
                 aria-label="Tutup dan bersihkan file sementara"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-300 active:scale-95"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1E2E16] text-slate-300 active:scale-95"
               >
                 <X size={16} />
               </button>
@@ -390,7 +393,7 @@ export default function FlyoverExportSheet({
                 type="button"
                 onClick={() => void save()}
                 disabled={saved || saving}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-orange-500 py-3 text-sm font-bold text-white shadow-xl transition active:scale-[0.98] disabled:bg-emerald-600 disabled:opacity-100"
+                className="flex items-center justify-center gap-2 rounded-2xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] shadow-xl transition active:scale-[0.98] disabled:bg-emerald-600 disabled:opacity-100"
               >
                 {saving ? (
                   <Loader2 size={18} className="animate-spin" />
@@ -406,7 +409,7 @@ export default function FlyoverExportSheet({
                 type="button"
                 onClick={() => void share()}
                 disabled={sharing}
-                className="flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-slate-800 py-3 text-sm font-bold text-slate-100 transition active:scale-[0.98] disabled:opacity-70"
+                className="flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#1E2E16] py-3 text-sm font-bold text-slate-100 transition active:scale-[0.98] disabled:opacity-70"
               >
                 {sharing ? (
                   <Loader2 size={18} className="animate-spin" />
@@ -432,7 +435,7 @@ export default function FlyoverExportSheet({
             <button
               type="button"
               onClick={close}
-              className="mt-4 flex w-full items-center justify-center rounded-2xl bg-slate-800 py-3 text-sm font-bold text-slate-100 active:scale-[0.98]"
+              className="mt-4 flex w-full items-center justify-center rounded-2xl bg-[#1E2E16] py-3 text-sm font-bold text-slate-100 active:scale-[0.98]"
             >
               Tutup
             </button>

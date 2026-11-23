@@ -4,7 +4,6 @@ import { useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
-  Bike,
   CheckCircle2,
   Eye,
   EyeOff,
@@ -16,6 +15,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import AllmovaLogo from '@/components/AllmovaLogo';
 import { translateAuthError } from '@/lib/authErrors';
 
 type Mode = 'login' | 'signup' | 'forgot';
@@ -203,10 +203,10 @@ export default function AuthScreen() {
   };
 
   return (
-    <main className="relative flex h-dvh w-full flex-col overflow-y-auto bg-[#0b0f19] text-slate-100">
+    <main className="relative flex h-dvh w-full flex-col overflow-y-auto bg-[#0D1112] text-slate-100">
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-orange-500/20 blur-3xl"
+        className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-[#B9F51E]/20 blur-3xl"
       />
       <div
         aria-hidden
@@ -215,19 +215,14 @@ export default function AuthScreen() {
 
       <div className="relative mx-auto flex w-full max-w-md flex-1 flex-col px-5 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] pt-[calc(env(safe-area-inset-top)+2.25rem)]">
         <header className="flex flex-col items-center text-center">
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-orange-500/30 bg-orange-500/15 text-orange-400 shadow-[0_0_40px_-12px_rgba(249,115,22,0.7)]">
-            <Bike size={28} />
-          </span>
-          <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.28em] text-orange-400">
-            Tracker 3D
-          </p>
+          <AllmovaLogo variant="full" className="h-24 w-auto" />
           <h1 className="mt-1 text-2xl font-bold tracking-tight">{heading}</h1>
           <p className="mt-1 max-w-[19rem] text-xs leading-relaxed text-slate-400">{subheading}</p>
         </header>
 
         <form
           onSubmit={onSubmit}
-          className="mt-6 flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#111827]/95 p-4 shadow-2xl backdrop-blur"
+          className="mt-6 flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#151B1D]/95 p-4 shadow-2xl backdrop-blur"
         >
           {canGoBack && (
             <button
@@ -396,7 +391,7 @@ export default function AuthScreen() {
           <button
             type="submit"
             disabled={busy || !isConfigured}
-            className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-bold text-white shadow-lg shadow-orange-500/20 transition active:scale-[0.99] disabled:opacity-60"
+            className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] py-3 text-sm font-bold text-[#0D1112] shadow-lg shadow-[#B9F51E]/20 transition active:scale-[0.99] disabled:opacity-60"
           >
             {busy ? (
               <Loader2 size={18} className="animate-spin" />
@@ -416,7 +411,7 @@ export default function AuthScreen() {
             <button
               type="button"
               onClick={() => switchMode('forgot')}
-              className="text-center text-[11px] font-semibold text-orange-400 active:text-orange-300"
+              className="text-center text-[11px] font-semibold text-[#B9F51E] active:text-[#B9F51E]"
             >
               Lupa Password?
             </button>
@@ -441,7 +436,7 @@ export default function AuthScreen() {
               <button
                 type="button"
                 onClick={() => switchMode('signup')}
-                className="font-semibold text-orange-400 active:text-orange-300"
+                className="font-semibold text-[#B9F51E] active:text-[#B9F51E]"
               >
                 Daftar sekarang
               </button>
@@ -452,7 +447,7 @@ export default function AuthScreen() {
               <button
                 type="button"
                 onClick={() => switchMode('login')}
-                className="font-semibold text-orange-400 active:text-orange-300"
+                className="font-semibold text-[#B9F51E] active:text-[#B9F51E]"
               >
                 Masuk
               </button>
@@ -469,7 +464,7 @@ export default function AuthScreen() {
 }
 
 const inputClass =
-  'w-full rounded-xl border border-slate-700 bg-slate-800/80 px-3 py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-orange-500';
+  'w-full rounded-xl border border-[#2A3538] bg-[#1E2E16]/80 px-3 py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-[#B9F51E]';
 
 function Field({
   label,
@@ -500,7 +495,7 @@ function VisibilityToggle({ visible, onToggle }: { visible: boolean; onToggle: (
       onClick={onToggle}
       aria-label={visible ? 'Sembunyikan password' : 'Tampilkan password'}
       aria-pressed={visible}
-      className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 active:bg-slate-700/60"
+      className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 active:bg-[#2A3538]/60"
     >
       {visible ? <EyeOff size={17} /> : <Eye size={17} />}
     </button>

@@ -21,7 +21,7 @@ export default function BottomNav({
   lockedTabs?: TabKey[];
 }) {
   return (
-    <nav className="absolute inset-x-0 bottom-0 z-20 border-t border-white/10 bg-slate-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+    <nav className="absolute inset-x-0 bottom-0 z-20 border-t border-white/10 bg-[#0D1112]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
       <ul className="mx-auto flex max-w-md items-stretch">
         {TABS.map(({ key, label, icon: Icon }) => {
           const isActive = key === active;
@@ -34,13 +34,13 @@ export default function BottomNav({
                 aria-current={isActive ? 'page' : undefined}
                 aria-label={locked ? `${label} (khusus Pro)` : label}
                 className={`flex w-full flex-col items-center gap-1 py-3 text-[11px] font-medium transition ${
-                  isActive ? 'text-orange-400' : 'text-slate-400 active:text-slate-200'
+                  isActive ? 'text-[#B9F51E]' : 'text-slate-400 active:text-slate-200'
                 }`}
               >
                 <span className="relative">
                   <Icon size={22} strokeWidth={isActive ? 2.4 : 2} />
                   {locked && (
-                    <span className="absolute -right-3 -top-1.5 rounded-full bg-orange-500 px-1 text-[7px] font-bold leading-tight text-white">
+                    <span className="absolute -right-3 -top-1.5 rounded-full bg-[#B9F51E] hover:bg-[#A5E012] px-1 text-[7px] font-bold leading-tight text-[#0D1112]">
                       PRO
                     </span>
                   )}

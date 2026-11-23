@@ -39,7 +39,7 @@ const REVEAL_GLOW_LAYER_ID = 'flyover-reveal-glow';
 const REVEAL_LAYER_ID = 'flyover-reveal-line';
 const ENDPOINTS_SOURCE_ID = 'flyover-endpoints';
 const ENDPOINTS_LAYER_ID = 'flyover-endpoints-layer';
-const BASE_COLOR = '#f97316';
+const BASE_COLOR = '#B9F51E';
 const REVEAL_COLOR = '#fde047';
 
 /** Keeps the marker in the lower third so the 3D panorama ahead stays visible. */
@@ -80,7 +80,7 @@ export type FlyoverMapHandle = {
    */
   flyToStart: () => Promise<void>;
   /**
-   * Frames the whole route at poster pitch, draws the full orange line with
+   * Frames the whole route at poster pitch, draws the full Active Lime line with
    * start/finish markers, captures it, then restores the camera and reveal.
    */
   captureFullRouteFrame: () => Promise<HTMLCanvasElement | null>;
@@ -359,7 +359,7 @@ const FlyoverMap = forwardRef<FlyoverMapHandle, Props>(function FlyoverMap(
             pathRef.current.coordinates[0][0],
             pathRef.current.coordinates[0][1],
           ]);
-          // The poster needs the whole line lit, in the same orange as the map.
+          // The poster needs the whole line lit, in the same Active Lime as the map.
           setRevealProgress(map, 1, BASE_COLOR);
           showEndpoints(map, pathRef.current);
 
@@ -737,7 +737,7 @@ function installLayers(map: maplibregl.Map, path: FlyoverPath) {
       type: 'line',
       source: BASE_SOURCE_ID,
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#0f172a', 'line-width': 8, 'line-opacity': 0.5 },
+      paint: { 'line-color': '#0D1112', 'line-width': 8, 'line-opacity': 0.5 },
     });
   }
   if (!map.getLayer(BASE_LAYER_ID)) {

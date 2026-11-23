@@ -27,6 +27,7 @@ import FlyoverMap, { type FlyoverMapHandle, type FlyoverMapStyle } from '@/compo
 import ElevationChart from '@/components/ElevationChart';
 import FlyoverExportSheet from '@/components/FlyoverExportSheet';
 import ShareCardModal from '@/components/ShareCardModal';
+import ShareActivitySheet from '@/components/ShareActivitySheet';
 import ActivityWeatherCard from '@/components/ActivityWeatherCard';
 import ActivityRpeCard from '@/components/ActivityRpeCard';
 import VirtualPowerCard from '@/components/VirtualPowerCard';
@@ -110,6 +111,7 @@ export default function ActivityDetail({
   const mapRef = useRef<FlyoverMapHandle | null>(null);
   const [cleanMode, setCleanMode] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [shareActivityOpen, setShareActivityOpen] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallReason, setPaywallReason] = useState<string | undefined>(undefined);
   const [mapStyle, setMapStyle] = useState<FlyoverMapStyle>('outdoor');
@@ -353,12 +355,12 @@ export default function ActivityDetail({
 
   if (!path) {
     return (
-      <section className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-slate-950 px-8 text-center">
+      <section className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-[#0D1112] px-8 text-center">
         <p className="text-sm text-slate-400">Aktivitas ini tidak memiliki cukup titik rute.</p>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-xl bg-orange-500 px-5 py-2.5 text-sm font-semibold text-white"
+          className="rounded-xl bg-[#B9F51E] hover:bg-[#A5E012] px-5 py-2.5 text-sm font-semibold text-[#0D1112]"
         >
           Kembali
         </button>
@@ -367,7 +369,7 @@ export default function ActivityDetail({
   }
 
   return (
-    <section className="absolute inset-0 z-30 bg-slate-950">
+    <section className="absolute inset-0 z-30 bg-[#0D1112]">
       <FlyoverMap ref={mapRef} path={path} provider={provider} activityType={activity.activityType} />
 
       {/* In clean mode a tap anywhere on the map brings the controls back. */}
@@ -381,7 +383,7 @@ export default function ActivityDetail({
       )}
 
       <div
-        className={`pointer-events-none absolute inset-x-0 top-0 flex items-start gap-2 bg-gradient-to-b from-slate-950/90 to-transparent px-3 pb-8 pr-16 pt-[calc(env(safe-area-inset-top)+0.75rem)] transition-opacity duration-300 ${
+        className={`pointer-events-none absolute inset-x-0 top-0 flex items-start gap-2 bg-gradient-to-b from-[#0D1112]/90 to-transparent px-3 pb-8 pr-16 pt-[calc(env(safe-area-inset-top)+0.75rem)] transition-opacity duration-300 ${
           cleanMode ? 'invisible opacity-0' : 'visible opacity-100'
         }`}
       >
@@ -389,7 +391,7 @@ export default function ActivityDetail({
           type="button"
           onClick={onClose}
           aria-label="Tutup detail aktivitas"
-          className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-xl backdrop-blur active:scale-95"
+          className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-[#151B1D]/85 text-slate-100 shadow-xl backdrop-blur active:scale-95"
         >
           <ArrowLeft size={20} />
         </button>
@@ -400,6 +402,15 @@ export default function ActivityDetail({
             {formatActivityType(activity.activityType)}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShareActivityOpen(true)}
+          aria-label="Bagikan ringkasan aktivitas"
+          className="pointer-events-auto flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-[#B9F51E]/40 bg-[#B9F51E]/15 px-3 text-[11px] font-bold text-[#B9F51E] shadow-xl backdrop-blur active:scale-95"
+        >
+          <Share2 size={16} />
+          Bagikan
+        </button>
       </div>
 
       {/* Quick actions sit under the telemetry HUD so nothing overlaps it. */}
@@ -414,7 +425,7 @@ export default function ActivityDetail({
           aria-label={
             mapStyle === 'outdoor' ? 'Ganti ke gaya satelit' : 'Ganti ke gaya outdoor'
           }
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-slate-100 shadow-xl backdrop-blur active:scale-95"
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-[#151B1D]/85 text-slate-100 shadow-xl backdrop-blur active:scale-95"
         >
           <Layers size={18} />
         </button>
@@ -426,7 +437,7 @@ export default function ActivityDetail({
             aria-label="Rapikan rute ke jalan"
             aria-busy={snapping}
             title="Rapikan ke Jalan"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-slate-900/85 text-orange-300 shadow-xl backdrop-blur active:scale-95 disabled:opacity-60"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-[#151B1D]/85 text-[#B9F51E] shadow-xl backdrop-blur active:scale-95 disabled:opacity-60"
           >
             {snapping ? <Loader2 size={18} className="animate-spin" /> : <Wand2 size={18} />}
           </button>
@@ -438,14 +449,14 @@ export default function ActivityDetail({
           }
           aria-label="Export MP4 (Beta)"
           title="Export MP4 (Beta)"
-          className="flex h-10 items-center gap-1.5 rounded-full border border-white/15 bg-slate-900/85 px-3 text-[11px] font-bold text-slate-100 shadow-xl backdrop-blur active:scale-95"
+          className="flex h-10 items-center gap-1.5 rounded-full border border-white/15 bg-[#151B1D]/85 px-3 text-[11px] font-bold text-slate-100 shadow-xl backdrop-blur active:scale-95"
         >
-          <Video size={16} className="text-orange-300" />
+          <Video size={16} className="text-[#B9F51E]" />
           Export MP4
           {isPro ? (
-            <span className="text-[9px] font-semibold text-orange-300">(Beta)</span>
+            <span className="text-[9px] font-semibold text-[#B9F51E]">(Beta)</span>
           ) : (
-            <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+            <span className="rounded-full bg-[#B9F51E] px-1.5 py-0.5 text-[9px] font-bold text-[#0D1112]">
               👑 PRO
             </span>
           )}
@@ -459,8 +470,8 @@ export default function ActivityDetail({
         aria-pressed={cleanMode}
         className={`absolute right-3 top-[calc(env(safe-area-inset-top)+0.75rem)] z-40 flex items-center justify-center rounded-full border shadow-xl backdrop-blur transition active:scale-95 ${
           cleanMode
-            ? 'h-9 w-9 border-white/20 bg-slate-950/35 text-slate-200/70'
-            : 'h-10 w-10 border-white/15 bg-slate-900/85 text-slate-100'
+            ? 'h-9 w-9 border-white/20 bg-[#0D1112]/35 text-slate-200/70'
+            : 'h-10 w-10 border-white/15 bg-[#151B1D]/85 text-slate-100'
         }`}
       >
         {cleanMode ? <EyeOff size={18} /> : <Eye size={20} />}
@@ -480,7 +491,7 @@ export default function ActivityDetail({
         }`}
         aria-hidden={cleanMode}
       >
-        <div className="mx-auto flex w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900/92 shadow-2xl backdrop-blur">
+        <div className="mx-auto flex w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#151B1D]/92 shadow-2xl backdrop-blur">
           <div
             className="flex gap-1 border-b border-white/10 p-1.5"
             role="tablist"
@@ -505,13 +516,13 @@ export default function ActivityDetail({
                   }
                   className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-semibold transition active:scale-95 ${
                     detailTab === key
-                      ? 'bg-orange-500 text-white'
-                      : 'text-slate-300 active:bg-slate-800'
+                      ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]'
+                      : 'text-slate-300 active:bg-[#1E2E16]'
                   }`}
                 >
                   {label}
                   {locked && (
-                    <span className="rounded-full bg-amber-400/20 px-1 py-0.5 text-[8px] font-bold text-amber-300">
+                    <span className="rounded-full bg-[#B9F51E] px-1 py-0.5 text-[8px] font-bold text-[#0D1112]">
                       👑
                     </span>
                   )}
@@ -653,7 +664,7 @@ export default function ActivityDetail({
                 type="button"
                 onClick={requestPlayToggle}
                 disabled={introPending}
-                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-orange-500 py-3.5 text-base font-bold text-white shadow-2xl transition active:scale-[0.98] disabled:opacity-70"
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#B9F51E] hover:bg-[#A5E012] py-3.5 text-base font-bold text-[#0D1112] shadow-2xl transition active:scale-[0.98] disabled:opacity-70"
               >
                 {introPending ? (
                   <Loader2 size={20} className="animate-spin" />
@@ -680,19 +691,19 @@ export default function ActivityDetail({
                 type="button"
                 onClick={() => setShareOpen(true)}
                 aria-label="Bagikan atau unduh kartu aktivitas"
-                className="flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-slate-900/92 px-4 text-sm font-bold text-slate-100 shadow-2xl backdrop-blur transition active:scale-[0.98]"
+                className="flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#151B1D]/92 px-4 text-sm font-bold text-slate-100 shadow-2xl backdrop-blur transition active:scale-[0.98]"
               >
                 <Share2 size={18} />
                 Share
               </button>
             </div>
 
-            <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/92 px-2.5 py-2 shadow-2xl backdrop-blur">
+            <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-[#151B1D]/92 px-2.5 py-2 shadow-2xl backdrop-blur">
               <button
                 type="button"
                 onClick={requestPlayToggle}
                 aria-label={playback.isPlaying ? 'Pause' : 'Play'}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-100 active:scale-95"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#1E2E16] text-slate-100 active:scale-95"
               >
                 {playback.isPlaying ? <Pause size={18} /> : <Play size={18} />}
               </button>
@@ -709,7 +720,7 @@ export default function ActivityDetail({
                     playback.pause();
                     playback.seek(Number(event.target.value) / 1000);
                   }}
-                  className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-slate-700 accent-orange-500"
+                  className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#2A3538] accent-[#B9F51E]"
                 />
                 <span className="text-center text-[10px] font-medium tabular-nums text-slate-400">
                   {Math.round(playback.progress * 100)}%
@@ -720,7 +731,7 @@ export default function ActivityDetail({
                 type="button"
                 onClick={playback.cycleSpeed}
                 aria-label={`Kecepatan ${playback.speed}x, ketuk untuk mengubah`}
-                className="flex h-11 shrink-0 items-center justify-center rounded-full bg-slate-800 px-3 text-xs font-bold tabular-nums text-orange-300 active:scale-95"
+                className="flex h-11 shrink-0 items-center justify-center rounded-full bg-[#1E2E16] px-3 text-xs font-bold tabular-nums text-[#B9F51E] active:scale-95"
               >
                 {playback.speed}x
               </button>
@@ -729,7 +740,7 @@ export default function ActivityDetail({
                 type="button"
                 onClick={playback.restart}
                 aria-label="Ulangi flyover"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-100 active:scale-95"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#1E2E16] text-slate-100 active:scale-95"
               >
                 <RotateCcw size={18} />
               </button>
@@ -738,7 +749,7 @@ export default function ActivityDetail({
                 type="button"
                 onClick={onClose}
                 aria-label="Kembali ke daftar aktivitas"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-100 active:scale-95"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#1E2E16] text-slate-100 active:scale-95"
               >
                 <ArrowLeft size={18} />
               </button>
@@ -756,9 +767,18 @@ export default function ActivityDetail({
         />
       )}
 
+      {shareActivityOpen && (
+        <ShareActivitySheet
+          activity={activity}
+          onClose={() => setShareActivityOpen(false)}
+          onNotice={onNotice}
+        />
+      )}
+
       {exportOpen && (
         <FlyoverExportSheet
           activity={activity}
+          isPro={isPro}
           captureFrame={captureExportFrame}
           onClose={closeExport}
           onNotice={onNotice}
@@ -811,7 +831,7 @@ function MatchedRoutesCard({
     : null;
 
   return (
-    <section className="mt-2 rounded-xl border border-orange-500/25 bg-gradient-to-br from-slate-900 to-orange-950/30 p-2.5">
+    <section className="mt-2 rounded-xl border border-[#B9F51E]/25 bg-gradient-to-br from-[#151B1D] to-[#1E2E16]/30 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-semibold text-slate-100">
           Riwayat di Rute Ini ({matches.length}x latihan)
@@ -838,15 +858,15 @@ function MatchedRoutesCard({
               key={String(match.activity.id)}
               className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${
                 match.isCurrent
-                  ? 'bg-orange-500/10 ring-1 ring-orange-400/30'
-                  : 'bg-slate-800/50'
+                  ? 'bg-[#B9F51E]/10 ring-1 ring-[#B9F51E]/30'
+                  : 'bg-[#1E2E16]/50'
               }`}
             >
               <span
                 className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
                   match.rank === 1
                     ? 'bg-amber-400 text-slate-950'
-                    : 'bg-slate-700 text-slate-200'
+                    : 'bg-[#2A3538] text-slate-200'
                 }`}
               >
                 {match.rank === 1 ? <Trophy size={11} /> : match.rank}
@@ -856,7 +876,7 @@ function MatchedRoutesCard({
                 <span className="flex items-center gap-1 text-[10px] font-medium text-slate-200">
                   <span className="truncate">{shortDate(match.activity.createdAt)}</span>
                   {match.isCurrent && (
-                    <span className="rounded-full bg-orange-500/20 px-1 text-[8px] font-bold text-orange-300">
+                    <span className="rounded-full bg-[#B9F51E]/20 px-1 text-[8px] font-bold text-[#B9F51E]">
                       INI
                     </span>
                   )}
@@ -914,9 +934,9 @@ function SplitsTab({ splits, isFoot }: { splits: KmSplit[]; isFoot: boolean }) {
         {splits.map((split, index) => {
           const ratio = fastest > 0 ? (performance[index] / fastest) * 100 : 0;
           return (
-            <div key={`${split.kmLabel}-${index}`} className="relative overflow-hidden rounded-lg bg-slate-800/60">
+            <div key={`${split.kmLabel}-${index}`} className="relative overflow-hidden rounded-lg bg-[#1E2E16]/60">
               <div
-                className="absolute inset-y-0 left-0 bg-orange-500/20"
+                className="absolute inset-y-0 left-0 bg-[#B9F51E]/20"
                 style={{ width: `${Math.max(4, ratio)}%` }}
               />
               <div className={`relative grid ${grid} items-center gap-1 px-2 py-1.5 text-[11px]`}>
@@ -994,7 +1014,7 @@ function PRTab({
       <div>
         <p className="text-[11px] font-semibold text-slate-100">Rekor di Aktivitas Ini</p>
         {heldPRs.length > 0 ? (
-          <div className="mt-1.5 rounded-xl border border-amber-300/30 bg-gradient-to-br from-amber-500/15 to-slate-900 p-2.5">
+          <div className="mt-1.5 rounded-xl border border-amber-300/30 bg-gradient-to-br from-amber-500/15 to-[#151B1D] p-2.5">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-400/20 text-amber-300">
                 <Trophy size={16} />
@@ -1020,7 +1040,7 @@ function PRTab({
             </div>
           </div>
         ) : (
-          <p className="mt-1 rounded-xl bg-slate-800/50 px-2.5 py-2 text-[10px] text-slate-400">
+          <p className="mt-1 rounded-xl bg-[#1E2E16]/50 px-2.5 py-2 text-[10px] text-slate-400">
             Belum memegang rekor. Terus tingkatkan!
           </p>
         )}
@@ -1041,14 +1061,14 @@ function PRTab({
                 className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${
                   held
                     ? 'bg-amber-400/10 ring-1 ring-amber-300/25'
-                    : 'bg-slate-800/50'
+                    : 'bg-[#1E2E16]/50'
                 }`}
               >
                 <span
                   className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
                     held
                       ? 'bg-amber-400/20 text-amber-300'
-                      : 'bg-slate-700/60 text-slate-300'
+                      : 'bg-[#2A3538]/60 text-slate-300'
                   }`}
                 >
                   {held ? (
@@ -1104,12 +1124,12 @@ function TelemetryHud({
   playing: boolean;
 }) {
   return (
-    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/85 px-4 py-2.5 text-slate-100 shadow-2xl backdrop-blur">
+    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/85 px-4 py-2.5 text-slate-100 shadow-2xl backdrop-blur">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
           <span
             className={`h-2 w-2 rounded-full ${
-              playing ? 'animate-pulse bg-orange-400' : 'bg-slate-500'
+              playing ? 'animate-pulse bg-[#B9F51E]' : 'bg-slate-500'
             }`}
           />
           {playing ? 'Flyover berjalan' : 'Flyover siap'}
@@ -1189,7 +1209,7 @@ function SummaryMetric({
   }
 
   return (
-    <div className="flex flex-col items-center rounded-lg bg-slate-800/60 px-1 py-1.5">
+    <div className="flex flex-col items-center rounded-lg bg-[#1E2E16]/60 px-1 py-1.5">
       {content}
     </div>
   );
@@ -1205,11 +1225,11 @@ function LockedProPanel({
   onOpen: () => void;
 }) {
   return (
-    <section className="mt-2 rounded-xl border border-amber-300/25 bg-gradient-to-br from-slate-900 to-amber-950/30 p-2.5">
+    <section className="mt-2 rounded-xl border border-amber-300/25 bg-gradient-to-br from-[#151B1D] to-amber-950/30 p-2.5">
       <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-100">
         <Lock size={12} className="text-amber-300" />
         {title}
-        <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+        <span className="rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-1.5 py-0.5 text-[9px] font-bold text-[#0D1112]">
           👑 PRO
         </span>
       </p>
@@ -1217,7 +1237,7 @@ function LockedProPanel({
       <button
         type="button"
         onClick={onOpen}
-        className="mt-2 w-full rounded-lg bg-orange-500 py-1.5 text-[11px] font-semibold text-white active:scale-[0.98]"
+        className="mt-2 w-full rounded-lg bg-[#B9F51E] hover:bg-[#A5E012] py-1.5 text-[11px] font-semibold text-[#0D1112] active:scale-[0.98]"
       >
         Upgrade ke Pro
       </button>

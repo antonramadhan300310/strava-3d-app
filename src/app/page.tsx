@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 
 const AppShell = dynamic(() => import('@/components/AppShell'), {
   ssr: false,
-  loading: () => <div className="h-dvh w-full bg-slate-950" />,
+  loading: () => <div className="h-dvh w-full bg-[#0D1112]" />,
 });
 
 export default function Home() {
