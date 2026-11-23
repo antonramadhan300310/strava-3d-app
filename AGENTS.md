@@ -38,16 +38,25 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 - `src/lib/heatmapRenderer.ts` — paint for the three heatmap layers: charcoal `casing`
   (+8 px, blur 4), a soft `glow`, and the neon `core` (blur 1). Colour is a `step` on
   `weight`: cyan `#00E5FF` under 2, orange `#FF6D00` 2–4, laser red `#FF1744` from 5.
-- `src/lib/shareCard.ts` — HTML5 Canvas renderer for the share images, three modes:
-  `card` (1080×1350 charcoal card with the GPS route, pins, stats), `route` (1080×1080
-  transparent sticker with route + shadowed stats) and `stats` (same size, no route).
-  `WATERMARK_HEIGHT_RATIO` (12% of canvas height) drives the bottom-right ALLMOVA lockup
-  that every tier gets.
+- `src/lib/shareCard.ts` — HTML5 Canvas renderer for the share images. `SHARE_SIZES` holds the
+  `feed` (1080×1350) and `story` (1080×1920) presets that drive both preview and export, and
+  three modes: `poster` (3D map frame + vignettes, stats, elevation chart), `route`
+  (transparent sticker with route + pins + stats) and `stats` (same, no route). Sticker modes
+  take an optional gallery `photo` (`zoom` 1–3, `offsetX/offsetY` as canvas fractions, so the
+  DOM preview and the export share one set of numbers) and a `statsPosition` toggle.
+  `WATERMARK_HEIGHT_RATIO` (12% of canvas height) drives the bottom-right ALLMOVA lockup that
+  every tier gets — bottom-anchored text must stay above it.
+- `src/lib/sharePoster.ts` — offscreen MapLibre instance (`preserveDrawingBuffer`, pitch 48,
+  route bearing, `applyCleanAllmovaMapStyle`, terrain + hillshade) that captures the tilted
+  basemap; `fitBounds` ignores pitch, so `frameRoute` re-projects the track for a few passes
+  until it sits inside the band left free by the poster typography. Returns `null` on tainted
+  tiles so the poster falls back to the flat charcoal route.
 - `src/lib/shareImage.ts` — writes the PNG to `Directory.Cache`, then hands it to the native
   `saveMediaToGallery` bridge for `Pictures/ALLMOVA`; falls back to Documents, the share
   sheet, or `navigator.share`/download on the web.
-- `src/components/ShareActivitySheet.tsx` — mode tabs, checkerboard preview and the
-  share/save actions.
+- `src/components/ShareActivitySheet.tsx` — size picker, mode tabs, checkerboard preview
+  (the photo is layered in the DOM, only the readability gradient is baked into the canvas),
+  pan/pinch gestures and the share/save actions.
 - `src/lib/riderProfile.ts` — `powerZonePercents` (six lower bounds as % of FTP) feed both
   `computePowerZoneRanges` and the zone histogram, so a custom Z1–Z6 split stays consistent.
 
