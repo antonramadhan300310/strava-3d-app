@@ -126,10 +126,16 @@ export default function ActivityDetail({
     setPaywallOpen(true);
   }, []);
 
-  // A downgraded account must not stay on a locked sub-tab.
+  // A downgraded account must not stay on a locked sub-tab or satellite style.
   useEffect(() => {
     if (!isPro && detailTab !== 'summary') setDetailTab('summary');
   }, [isPro, detailTab]);
+
+  useEffect(() => {
+    if (isPro || mapStyle !== 'satellite') return;
+    mapRef.current?.setMapStyle('outdoor');
+    setMapStyle('outdoor');
+  }, [isPro, mapStyle]);
 
   const [weather, setWeather] = useState<ActivityWeather | null>(() => {
     const embedded = getEmbeddedActivityWeather(activity);
