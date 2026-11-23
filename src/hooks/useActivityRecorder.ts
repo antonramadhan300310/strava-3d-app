@@ -23,7 +23,8 @@ import { clearSession, loadSession, saveSession, type SavedSession } from '@/lib
 import { snapRouteToRoad, type ActivityType } from '@/lib/valhalla';
 import { isSupabaseConfigured, saveRecordedActivity } from '@/lib/supabase';
 import { invalidateHeatmapCache } from '@/lib/heatmapCache';
-import type { LngLat, LngLatEle } from '@/lib/polyline';
+import { fetchActivityWeather } from '@/lib/weatherService';
+import { timestampOf, type LngLat, type LngLatEle } from '@/lib/polyline';
 
 export type SessionPhase = 'idle' | 'recording' | 'paused' | 'finishing';
 
@@ -300,6 +301,17 @@ export function useActivityRecorder() {
     }
 
     try {
+      const first = finishResult.coordinates[0];
+      const startedAtEpoch = (first && timestampOf(first)) ?? startedAtRef.current;
+      const weather = first
+        ? await fetchActivityWeather({
+            latitude: first[1],
+            longitude: first[0],
+            startedAt: new Date(startedAtEpoch > 0 ? startedAtEpoch : Date.now()),
+            timeoutMs: 3000,
+          })
+        : null;
+
       await saveRecordedActivity({
         title,
         activityType: activityRef.current,
@@ -307,6 +319,7 @@ export function useActivityRecorder() {
         elevationGain: finishResult.elevationGainMeters,
         durationSeconds: finishResult.durationSeconds,
         coordinates: finishResult.coordinates,
+        weather,
       });
       invalidateHeatmapCache();
       clearSession();

@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityType } from './valhalla';
 import { timestampOf, type LngLatEle } from './polyline';
 import { toActivityRecord, type ActivityRecord, type ActivityRow } from './activity';
+import type { ActivityWeather } from './weatherService';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -61,21 +62,44 @@ function hasTimestamps(coordinates: LngLatEle[]): boolean {
   return coordinates.length > 0 && coordinates.every((coordinate) => timestampOf(coordinate) !== null);
 }
 
-/** Retries without the fourth element when the spatial column rejects XYZM. */
-async function writeGeometryWithFallback(
-  write: (geometry: ReturnType<typeof toLineStringZGeometry>) => Promise<{ error: { message: string } | null }>,
-  coordinates: LngLatEle[],
-): Promise<void> {
-  const first = await write(toLineStringZGeometry(coordinates));
-  if (!first.error) return;
+type GeoJsonGeometry = ReturnType<typeof toLineStringZGeometry>;
 
-  if (hasTimestamps(coordinates)) {
-    const retry = await write(toLineStringZGeometry(coordinates, false));
-    if (!retry.error) return;
-    throw new Error(retry.error.message);
+type GeoJsonWrite = GeoJsonGeometry | {
+  type: 'Feature';
+  properties: Record<string, unknown>;
+  geometry: GeoJsonGeometry;
+};
+
+type GeometryWriteResult = { error: { message: string } | null; data?: unknown };
+
+function toFeature(geometry: GeoJsonGeometry, properties: Record<string, unknown>): GeoJsonWrite {
+  return { type: 'Feature', properties, geometry };
+}
+
+/**
+ * Tries the richest representation first: a GeoJSON Feature carrying weather
+ * properties, then a plain geometry, then the same geometry without timestamps.
+ * The last two attempts keep the original behaviour when the column is a strict
+ * PostGIS `geometry`.
+ */
+async function writeGeometryWithFallback(
+  write: (geometry: GeoJsonWrite) => Promise<GeometryWriteResult>,
+  coordinates: LngLatEle[],
+  properties?: Record<string, unknown>,
+): Promise<void> {
+  const attempts: GeoJsonWrite[] = [];
+  if (properties) attempts.push(toFeature(toLineStringZGeometry(coordinates), properties));
+  attempts.push(toLineStringZGeometry(coordinates));
+  if (hasTimestamps(coordinates)) attempts.push(toLineStringZGeometry(coordinates, false));
+
+  let lastError: { message: string } | null = null;
+  for (const geometry of attempts) {
+    const result = await write(geometry);
+    if (!result.error) return;
+    lastError = result.error;
   }
 
-  throw new Error(first.error.message);
+  throw new Error(lastError?.message ?? 'Gagal menyimpan geometri aktivitas.');
 }
 
 export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
@@ -102,6 +126,8 @@ export type RecordedActivity = {
   elevationGain: number;
   durationSeconds: number;
   coordinates: LngLatEle[];
+  /** Optional weather snapshot embedded into the GeoJSON properties. */
+  weather?: ActivityWeather | null;
 };
 
 export async function saveRecordedActivity(activity: RecordedActivity): Promise<void> {
@@ -118,6 +144,7 @@ export async function saveRecordedActivity(activity: RecordedActivity): Promise<
         geojson: geometry,
       }),
     activity.coordinates,
+    activity.weather ? { weather: activity.weather } : undefined,
   );
 }
 

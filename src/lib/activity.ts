@@ -1,5 +1,6 @@
 import type { LngLatEle } from './polyline';
 import { normalizeActivityType, type ActivityType } from './valhalla';
+import { isActivityWeather, type ActivityWeather } from './weatherService';
 
 /** Row shape returned by the `activities` table (PostgREST snake_case). */
 export type ActivityRow = {
@@ -14,6 +15,10 @@ export type ActivityRow = {
   created_at: string | null;
 };
 
+export type ActivityGeoJson = {
+  properties?: Record<string, unknown> | null;
+};
+
 export type ActivityRecord = {
   id: string | number;
   title: string;
@@ -24,6 +29,9 @@ export type ActivityRecord = {
   durationSeconds: number;
   coordinates: LngLatEle[];
   createdAt: string;
+  /** Only the GeoJSON properties are retained; geometry lives in `coordinates`. */
+  geojson?: ActivityGeoJson | null;
+  weather?: ActivityWeather | null;
 };
 
 function toActivityType(value: string | null): ActivityType {
@@ -141,9 +149,31 @@ function toFiniteNumber(value: number | null, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function readGeoJsonProperties(value: unknown): Record<string, unknown> | null {
+  let candidate = value;
+  if (typeof candidate === 'string') {
+    const trimmed = candidate.trim();
+    if (!trimmed.startsWith('{')) return null;
+    try {
+      candidate = JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!candidate || typeof candidate !== 'object') return null;
+  const properties = (candidate as { properties?: unknown }).properties;
+  return properties && typeof properties === 'object' && !Array.isArray(properties)
+    ? (properties as Record<string, unknown>)
+    : null;
+}
+
 export function toActivityRecord(row: ActivityRow): ActivityRecord | null {
   const coordinates = parseActivityGeometry(row.geojson);
   if (coordinates.length < 2) return null;
+
+  const properties = readGeoJsonProperties(row.geojson);
+  const weather = properties && isActivityWeather(properties.weather) ? properties.weather : null;
 
   return {
     id: row.id,
@@ -155,6 +185,8 @@ export function toActivityRecord(row: ActivityRow): ActivityRecord | null {
     durationSeconds: toFiniteNumber(row.duration_seconds),
     coordinates,
     createdAt: row.created_at ?? '',
+    geojson: properties ? { properties } : null,
+    weather,
   };
 }
 
