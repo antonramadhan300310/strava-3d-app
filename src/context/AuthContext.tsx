@@ -283,9 +283,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     const supabase = getSupabaseClientOrNull();
     try {
-      await supabase?.auth.signOut();
+      if (supabase) {
+        const { error } = await supabase.auth.signOut();
+        // Local scope clears the persisted session even when the network is down.
+        if (error) await supabase.auth.signOut({ scope: 'local' });
+      }
     } catch {
-      // A failed network call must still leave the device signed out.
+      try {
+        await supabase?.auth.signOut({ scope: 'local' });
+      } catch {
+        // The in-memory state is cleared below regardless.
+      }
     } finally {
       loadedUserIdRef.current = null;
       setActiveUserId(null);
