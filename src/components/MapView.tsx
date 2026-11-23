@@ -6,7 +6,7 @@ import maplibregl, {
   type LineLayerSpecification,
 } from 'maplibre-gl';
 import { Layers, LocateFixed, Mountain, Square } from 'lucide-react';
-import type { LngLat, LngLatEle } from '@/lib/polyline';
+import { toLngLatEle, type LngLat, type LngLatEle } from '@/lib/polyline';
 import { gpsBadgeText, gpsQuality, type GpsQuality } from '@/lib/metrics';
 import { applySky } from '@/lib/mapSky';
 import { MAP_PROVIDER_LABELS, type MapProvider } from '@/lib/mapProvider';
@@ -592,7 +592,7 @@ function applyRoute(map: maplibregl.Map, route: LngLatEle[] | null) {
     properties: {},
     geometry: {
       type: 'LineString',
-      coordinates: route && route.length > 1 ? route : [],
+      coordinates: route && route.length > 1 ? route.map(toLngLatEle) : [],
     },
   });
 }
@@ -605,7 +605,7 @@ function applyTrack(map: maplibregl.Map, track: LngLatEle[] | null) {
     properties: {},
     geometry: {
       type: 'LineString',
-      coordinates: track && track.length > 1 ? track : [],
+      coordinates: track && track.length > 1 ? track.map(toLngLatEle) : [],
     },
   });
 }

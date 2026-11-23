@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityType } from './valhalla';
-import type { LngLatEle } from './polyline';
+import { timestampOf, type LngLatEle } from './polyline';
 import { toActivityRecord, type ActivityRecord, type ActivityRow } from './activity';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
@@ -38,27 +38,61 @@ export type PlannedRoute = {
  * Builds a GeoJSON *Geometry* (not a Feature) so it can be fed straight into
  * the PostGIS trigger's `st_geomfromgeojson` for a `geometry(LineStringZ, 4326)`
  * column. Every coordinate carries a third elevation value, defaulting to 0.
+ *
+ * Recorded tracks also carry the epoch millisecond of each fix as a fourth
+ * element. It is only emitted when every point has one, because mixing 3D and
+ * 4D positions is not valid for the spatial column.
  */
-export function toLineStringZGeometry(coordinates: LngLatEle[]) {
+export function toLineStringZGeometry(coordinates: LngLatEle[], includeTimestamps = true) {
+  const withTime =
+    includeTimestamps && coordinates.every((coordinate) => timestampOf(coordinate) !== null);
+
   return {
     type: 'LineString' as const,
-    coordinates: coordinates.map(([lng, lat, ele]) => [lng, lat, Number.isFinite(ele) ? ele : 0]),
+    coordinates: coordinates.map(([lng, lat, ele, time]) =>
+      withTime
+        ? [lng, lat, Number.isFinite(ele) ? ele : 0, time as number]
+        : [lng, lat, Number.isFinite(ele) ? ele : 0],
+    ),
   };
+}
+
+function hasTimestamps(coordinates: LngLatEle[]): boolean {
+  return coordinates.length > 0 && coordinates.every((coordinate) => timestampOf(coordinate) !== null);
+}
+
+/** Retries without the fourth element when the spatial column rejects XYZM. */
+async function writeGeometryWithFallback(
+  write: (geometry: ReturnType<typeof toLineStringZGeometry>) => Promise<{ error: { message: string } | null }>,
+  coordinates: LngLatEle[],
+): Promise<void> {
+  const first = await write(toLineStringZGeometry(coordinates));
+  if (!first.error) return;
+
+  if (hasTimestamps(coordinates)) {
+    const retry = await write(toLineStringZGeometry(coordinates, false));
+    if (!retry.error) return;
+    throw new Error(retry.error.message);
+  }
+
+  throw new Error(first.error.message);
 }
 
 export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
   const supabase = getClient();
-  const { error } = await supabase.from('activities').insert({
-    title: route.title,
-    activity_type: route.activityType,
-    is_planned_route: true,
-    distance_meters: route.distanceMeters,
-    elevation_gain: route.elevationGain,
-    duration_seconds: route.durationSeconds,
-    geojson: toLineStringZGeometry(route.coordinates),
-  });
-
-  if (error) throw new Error(error.message);
+  await writeGeometryWithFallback(
+    async (geometry) =>
+      supabase.from('activities').insert({
+        title: route.title,
+        activity_type: route.activityType,
+        is_planned_route: true,
+        distance_meters: route.distanceMeters,
+        elevation_gain: route.elevationGain,
+        duration_seconds: route.durationSeconds,
+        geojson: geometry,
+      }),
+    route.coordinates,
+  );
 }
 
 export type RecordedActivity = {
@@ -72,17 +106,19 @@ export type RecordedActivity = {
 
 export async function saveRecordedActivity(activity: RecordedActivity): Promise<void> {
   const supabase = getClient();
-  const { error } = await supabase.from('activities').insert({
-    title: activity.title,
-    activity_type: activity.activityType,
-    is_planned_route: false,
-    distance_meters: activity.distanceMeters,
-    elevation_gain: activity.elevationGain,
-    duration_seconds: activity.durationSeconds,
-    geojson: toLineStringZGeometry(activity.coordinates),
-  });
-
-  if (error) throw new Error(error.message);
+  await writeGeometryWithFallback(
+    async (geometry) =>
+      supabase.from('activities').insert({
+        title: activity.title,
+        activity_type: activity.activityType,
+        is_planned_route: false,
+        distance_meters: activity.distanceMeters,
+        elevation_gain: activity.elevationGain,
+        duration_seconds: activity.durationSeconds,
+        geojson: geometry,
+      }),
+    activity.coordinates,
+  );
 }
 
 const ACTIVITY_COLUMNS =
@@ -126,15 +162,17 @@ export async function updateActivityTrack(
   },
 ): Promise<void> {
   const supabase = getClient();
-  const { error } = await supabase
-    .from('activities')
-    .update({
-      distance_meters: track.distanceMeters,
-      elevation_gain: track.elevationGain,
-      duration_seconds: track.durationSeconds,
-      geojson: toLineStringZGeometry(track.coordinates),
-    })
-    .eq('id', id);
-
-  if (error) throw new Error(error.message);
+  await writeGeometryWithFallback(
+    async (geometry) =>
+      supabase
+        .from('activities')
+        .update({
+          distance_meters: track.distanceMeters,
+          elevation_gain: track.elevationGain,
+          duration_seconds: track.durationSeconds,
+          geojson: geometry,
+        })
+        .eq('id', id),
+    track.coordinates,
+  );
 }

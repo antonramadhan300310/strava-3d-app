@@ -1,5 +1,19 @@
 export type LngLat = [number, number];
-export type LngLatEle = [number, number, number];
+/**
+ * GeoJSON position with elevation. The optional fourth element is the epoch
+ * millisecond of the fix; older rows only carry three elements.
+ */
+export type LngLatEle = [number, number, number, ...number[]];
+
+export function timestampOf(coordinate: readonly number[]): number | null {
+  const value = coordinate[3];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** Drops any extra dimensions so MapLibre only sees lng/lat/ele. */
+export function toLngLatEle(coordinate: readonly number[]): LngLatEle {
+  return [coordinate[0], coordinate[1], Number.isFinite(coordinate[2]) ? coordinate[2] : 0];
+}
 
 /**
  * Decodes a Valhalla `trip.legs[].shape` polyline.

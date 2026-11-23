@@ -172,6 +172,7 @@ export default function AppShell() {
       {openActivity && provider && (
         <ActivityDetail
           activity={openActivity}
+          allActivities={activities.activities}
           provider={provider}
           onClose={closeActivity}
           onNotice={setNotice}

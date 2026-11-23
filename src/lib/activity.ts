@@ -53,17 +53,21 @@ function parseWkbHex(hex: string): LngLatEle[] | null {
   const typeWord = view.getUint32(offset, little);
   offset += 4;
 
-  const isExtended = (typeWord & 0x80000000) !== 0 || (typeWord & 0x40000000) !== 0;
+  const ewkbHasZ = (typeWord & 0x80000000) !== 0;
+  const ewkbHasM = (typeWord & 0x40000000) !== 0;
   const hasSrid = (typeWord & 0x20000000) !== 0;
-  let hasZ = (typeWord & 0x80000000) !== 0;
-
-  // ISO WKB encodes the dimension in the type itself (1002 = LineString Z).
   const isoType = typeWord & 0x0fffffff;
   let baseType = isoType;
-  if (!isExtended && isoType >= 1000) {
+  let hasZ = ewkbHasZ;
+  let hasM = ewkbHasM;
+
+  // ISO WKB encodes the dimension in the type itself (1002 = LineString Z,
+  // 2002 = LineString M, 3002 = LineString ZM).
+  if (!ewkbHasZ && !ewkbHasM && isoType >= 1000) {
     baseType = isoType % 1000;
     const dimension = Math.floor(isoType / 1000);
     hasZ = dimension === 1 || dimension === 3;
+    hasM = dimension === 2 || dimension === 3;
   }
 
   if (baseType !== 2) return null;
@@ -73,7 +77,7 @@ function parseWkbHex(hex: string): LngLatEle[] | null {
   const count = view.getUint32(offset, little);
   offset += 4;
 
-  const stride = hasZ ? 3 : 2;
+  const stride = 2 + (hasZ ? 1 : 0) + (hasM ? 1 : 0);
   if (count === 0 || offset + count * stride * 8 > bytes.length) return null;
 
   const coordinates: LngLatEle[] = [];
@@ -81,9 +85,12 @@ function parseWkbHex(hex: string): LngLatEle[] | null {
     const lng = view.getFloat64(offset, little);
     const lat = view.getFloat64(offset + 8, little);
     const ele = hasZ ? view.getFloat64(offset + 16, little) : 0;
+    const time = hasM ? view.getFloat64(offset + (hasZ ? 24 : 16), little) : null;
     offset += stride * 8;
     if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-    coordinates.push([lng, lat, Number.isFinite(ele) ? ele : 0]);
+    const point: LngLatEle = [lng, lat, Number.isFinite(ele) ? ele : 0];
+    if (time !== null && Number.isFinite(time)) point.push(time);
+    coordinates.push(point);
   }
 
   return coordinates;
@@ -94,8 +101,11 @@ function toCoordinate(value: unknown): LngLatEle | null {
   const lng = Number(value[0]);
   const lat = Number(value[1]);
   const ele = Number(value[2]);
+  const time = value.length > 3 ? Number(value[3]) : null;
   if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-  return [lng, lat, Number.isFinite(ele) ? ele : 0];
+  const point: LngLatEle = [lng, lat, Number.isFinite(ele) ? ele : 0];
+  if (time !== null && Number.isFinite(time)) point.push(time);
+  return point;
 }
 
 function fromGeoJson(value: unknown): LngLatEle[] | null {
