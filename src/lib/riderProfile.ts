@@ -1,3 +1,5 @@
+import { readScopedStorage, writeScopedStorage } from './userStorage';
+
 export type BikeType = 'road' | 'gravel' | 'mtb';
 
 export type RiderProfile = {
@@ -91,7 +93,7 @@ export function sanitizeRiderProfile(value: unknown): RiderProfile {
 export function loadRiderProfile(): RiderProfile {
   if (typeof window === 'undefined') return { ...DEFAULT_RIDER_PROFILE };
   try {
-    const raw = window.localStorage.getItem(RIDER_PROFILE_KEY);
+    const raw = readScopedStorage(RIDER_PROFILE_KEY);
     if (!raw) return { ...DEFAULT_RIDER_PROFILE };
     return sanitizeRiderProfile(JSON.parse(raw));
   } catch {
@@ -101,13 +103,7 @@ export function loadRiderProfile(): RiderProfile {
 
 export function saveRiderProfile(profile: RiderProfile): RiderProfile {
   const sanitized = sanitizeRiderProfile(profile);
-  if (typeof window !== 'undefined') {
-    try {
-      window.localStorage.setItem(RIDER_PROFILE_KEY, JSON.stringify(sanitized));
-    } catch {
-      // A full quota or private mode must not break the profile menu.
-    }
-  }
+  writeScopedStorage(RIDER_PROFILE_KEY, JSON.stringify(sanitized));
   return sanitized;
 }
 

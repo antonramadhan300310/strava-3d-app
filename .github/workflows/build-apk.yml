@@ -33,6 +33,8 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_MAPTILER_KEY: ${{ secrets.NEXT_PUBLIC_MAPTILER_KEY }}
           NEXT_PUBLIC_ORS_API_KEY: ${{ secrets.NEXT_PUBLIC_ORS_API_KEY }}
+          NEXT_PUBLIC_OWNER_EMAIL: ${{ secrets.NEXT_PUBLIC_OWNER_EMAIL }}
+          NEXT_PUBLIC_ADMIN_WHATSAPP: ${{ secrets.NEXT_PUBLIC_ADMIN_WHATSAPP }}
         run: npm run build
 
       - name: Setup Capacitor Android

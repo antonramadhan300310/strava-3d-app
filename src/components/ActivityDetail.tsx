@@ -10,6 +10,7 @@ import {
   Gauge,
   Layers,
   Loader2,
+  Lock,
   Mountain,
   Pause,
   Play,
@@ -30,6 +31,8 @@ import ActivityWeatherCard from '@/components/ActivityWeatherCard';
 import ActivityRpeCard from '@/components/ActivityRpeCard';
 import VirtualPowerCard from '@/components/VirtualPowerCard';
 import AthleteProfileSheet from '@/components/AthleteProfileSheet';
+import ProPaywallSheet from '@/components/ProPaywallSheet';
+import { useAuth } from '@/context/AuthContext';
 import { useFlyoverPlayback } from '@/hooks/useFlyoverPlayback';
 import type { ActivityRecord } from '@/lib/activity';
 import {
@@ -103,9 +106,12 @@ export default function ActivityDetail({
   onNotice,
   onTrackUpdated,
 }: Props) {
+  const { isPro } = useAuth();
   const mapRef = useRef<FlyoverMapHandle | null>(null);
   const [cleanMode, setCleanMode] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [paywallReason, setPaywallReason] = useState<string | undefined>(undefined);
   const [mapStyle, setMapStyle] = useState<FlyoverMapStyle>('outdoor');
   const [snapping, setSnapping] = useState(false);
   const [introPending, setIntroPending] = useState(false);
@@ -114,6 +120,26 @@ export default function ActivityDetail({
   const [profile, setProfile] = useState<RiderProfile>(loadRiderProfile);
   const [profileOpen, setProfileOpen] = useState(false);
   const [rpe, setRpe] = useState<number | null>(() => getActivityRpe(activity));
+
+  const requirePro = useCallback((reason: string) => {
+    setPaywallReason(reason);
+    setPaywallOpen(true);
+  }, []);
+
+  // A downgraded account must not stay on a locked sub-tab or satellite style.
+  useEffect(() => {
+    if (!isPro && detailTab !== 'summary') setDetailTab('summary');
+  }, [isPro, detailTab]);
+
+  useEffect(() => {
+    if (isPro || mapStyle !== 'satellite') return;
+    mapRef.current?.setMapStyle('outdoor');
+    setMapStyle('outdoor');
+  }, [isPro, mapStyle]);
+
+  useEffect(() => {
+    if (!isPro && exportOpen) setExportOpen(false);
+  }, [isPro, exportOpen]);
 
   const [weather, setWeather] = useState<ActivityWeather | null>(() => {
     const embedded = getEmbeddedActivityWeather(activity);
@@ -228,11 +254,23 @@ export default function ActivityDetail({
     playback.play();
   }, [introPending, playback]);
 
+  const requestPlayToggle = useCallback(() => {
+    if (!isPro) {
+      requirePro('3D Flyover khusus Pro.');
+      return;
+    }
+    void handlePlayToggle();
+  }, [isPro, requirePro, handlePlayToggle]);
+
   const toggleMapStyle = useCallback(() => {
     const next: FlyoverMapStyle = mapStyle === 'outdoor' ? 'satellite' : 'outdoor';
+    if (next === 'satellite' && !isPro) {
+      requirePro('Peta satelit HD khusus Pro.');
+      return;
+    }
     mapRef.current?.setMapStyle(next);
     setMapStyle(next);
-  }, [mapStyle]);
+  }, [mapStyle, isPro, requirePro]);
 
   /** Re-snaps an old recording to the road network and saves it back. */
   const snapToRoad = useCallback(async () => {
@@ -395,14 +433,22 @@ export default function ActivityDetail({
         )}
         <button
           type="button"
-          onClick={openExport}
+          onClick={
+            isPro ? openExport : () => requirePro('Export Video MP4 khusus Pro.')
+          }
           aria-label="Export MP4 (Beta)"
           title="Export MP4 (Beta)"
           className="flex h-10 items-center gap-1.5 rounded-full border border-white/15 bg-slate-900/85 px-3 text-[11px] font-bold text-slate-100 shadow-xl backdrop-blur active:scale-95"
         >
           <Video size={16} className="text-orange-300" />
           Export MP4
-          <span className="text-[9px] font-semibold text-orange-300">(Beta)</span>
+          {isPro ? (
+            <span className="text-[9px] font-semibold text-orange-300">(Beta)</span>
+          ) : (
+            <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+              👑 PRO
+            </span>
+          )}
         </button>
       </div>
 
@@ -440,33 +486,49 @@ export default function ActivityDetail({
             role="tablist"
             aria-label="Detail aktivitas"
           >
-            {DETAIL_TABS.map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={detailTab === key}
-                onClick={() => setDetailTab(key)}
-                className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-semibold transition active:scale-95 ${
-                  detailTab === key
-                    ? 'bg-orange-500 text-white'
-                    : 'text-slate-300 active:bg-slate-800'
-                }`}
-              >
-                {label}
-                {key === 'pr' && analytics.heldPRs.length > 0 && (
-                  <span
-                    className={`rounded-full px-1.5 text-[9px] tabular-nums ${
-                      detailTab === key
-                        ? 'bg-white/25 text-white'
-                        : 'bg-amber-400/20 text-amber-300'
-                    }`}
-                  >
-                    {analytics.heldPRs.length}
-                  </span>
-                )}
-              </button>
-            ))}
+            {DETAIL_TABS.map(({ key, label }) => {
+              const locked = key !== 'summary' && !isPro;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={detailTab === key}
+                  onClick={() =>
+                    locked
+                      ? requirePro(
+                          key === 'splits'
+                            ? 'Splits per kilometer khusus Pro.'
+                            : 'Rekor Pribadi (PR) khusus Pro.',
+                        )
+                      : setDetailTab(key)
+                  }
+                  className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-semibold transition active:scale-95 ${
+                    detailTab === key
+                      ? 'bg-orange-500 text-white'
+                      : 'text-slate-300 active:bg-slate-800'
+                  }`}
+                >
+                  {label}
+                  {locked && (
+                    <span className="rounded-full bg-amber-400/20 px-1 py-0.5 text-[8px] font-bold text-amber-300">
+                      👑
+                    </span>
+                  )}
+                  {!locked && key === 'pr' && analytics.heldPRs.length > 0 && (
+                    <span
+                      className={`rounded-full px-1.5 text-[9px] tabular-nums ${
+                        detailTab === key
+                          ? 'bg-white/25 text-white'
+                          : 'bg-amber-400/20 text-amber-300'
+                      }`}
+                    >
+                      {analytics.heldPRs.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <div className="max-h-[46vh] overflow-y-auto overscroll-contain p-3">
@@ -490,12 +552,24 @@ export default function ActivityDetail({
                   {isFoot ? (
                     <>
                       <SummaryMetric icon={<Timer size={12} />} label="Pace" value={summary.averagePace} />
-                      <SummaryMetric icon={<TrendingUp size={12} />} label="GAP" value={summary.gap} />
+                      <SummaryMetric
+                        icon={<TrendingUp size={12} />}
+                        label="GAP"
+                        value={summary.gap}
+                        locked={!isPro}
+                        onClick={() => requirePro('Metrik GAP khusus Pro.')}
+                      />
                     </>
                   ) : (
                     <>
                       <SummaryMetric icon={<Gauge size={12} />} label="Kecepatan" value={summary.averageSpeed} />
-                      <SummaryMetric icon={<Zap size={12} />} label="Est. Power" value={summary.gap} />
+                      <SummaryMetric
+                        icon={<Zap size={12} />}
+                        label="Est. Power"
+                        value={summary.gap}
+                        locked={!isPro}
+                        onClick={() => requirePro('Virtual Power & Zona FTP khusus Pro.')}
+                      />
                     </>
                   )}
                   <SummaryMetric
@@ -507,16 +581,32 @@ export default function ActivityDetail({
 
                 <ActivityWeatherCard weather={weather} loading={weatherLoading} />
 
-                <ActivityRpeCard
-                  rpe={rpe}
-                  durationSeconds={activity.durationSeconds}
-                  onChange={handleRpeChange}
-                />
+                {isPro ? (
+                  <ActivityRpeCard
+                    rpe={rpe}
+                    durationSeconds={activity.durationSeconds}
+                    onChange={handleRpeChange}
+                  />
+                ) : (
+                  <LockedProPanel
+                    title="Perceived Exertion (RPE)"
+                    description="Catat tingkat usaha dan skor beban latihan."
+                    onOpen={() => requirePro('Kartu RPE khusus Pro.')}
+                  />
+                )}
 
-                {powerAnalysis && (
-                  <VirtualPowerCard
-                    analysis={powerAnalysis}
-                    onOpenProfile={() => setProfileOpen(true)}
+                {isPro ? (
+                  powerAnalysis && (
+                    <VirtualPowerCard
+                      analysis={powerAnalysis}
+                      onOpenProfile={() => setProfileOpen(true)}
+                    />
+                  )
+                ) : (
+                  <LockedProPanel
+                    title="Virtual Power & Zona FTP"
+                    description="Estimasi daya dan distribusi zona FTP pribadi."
+                    onOpen={() => requirePro('Virtual Power & Zona FTP khusus Pro.')}
                   />
                 )}
 
@@ -527,9 +617,16 @@ export default function ActivityDetail({
                   />
                 </div>
 
-                {analytics.matched.length >= 2 && (
-                  <MatchedRoutesCard matches={analytics.matched} isFoot={isFoot} />
-                )}
+                {analytics.matched.length >= 2 &&
+                  (isPro ? (
+                    <MatchedRoutesCard matches={analytics.matched} isFoot={isFoot} />
+                  ) : (
+                    <LockedProPanel
+                      title="Matched Activities"
+                      description="Bandingkan waktu kamu di rute yang sama."
+                      onOpen={() => requirePro('Matched Activities khusus Pro.')}
+                    />
+                  ))}
               </div>
             )}
 
@@ -554,12 +651,14 @@ export default function ActivityDetail({
             <div className="mx-auto flex w-full max-w-md gap-2">
               <button
                 type="button"
-                onClick={() => void handlePlayToggle()}
+                onClick={requestPlayToggle}
                 disabled={introPending}
                 className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-orange-500 py-3.5 text-base font-bold text-white shadow-2xl transition active:scale-[0.98] disabled:opacity-70"
               >
                 {introPending ? (
                   <Loader2 size={20} className="animate-spin" />
+                ) : !isPro ? (
+                  <Lock size={18} />
                 ) : playback.isPlaying ? (
                   <Pause size={20} />
                 ) : (
@@ -570,6 +669,11 @@ export default function ActivityDetail({
                   : playback.isPlaying
                     ? 'Pause 3D Flyover'
                     : 'Play 3D Flyover'}
+                {!isPro && (
+                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[9px] font-bold">
+                    👑 PRO
+                  </span>
+                )}
               </button>
 
               <button
@@ -586,7 +690,7 @@ export default function ActivityDetail({
             <div className="mx-auto flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/92 px-2.5 py-2 shadow-2xl backdrop-blur">
               <button
                 type="button"
-                onClick={() => void handlePlayToggle()}
+                onClick={requestPlayToggle}
                 aria-label={playback.isPlaying ? 'Pause' : 'Play'}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-100 active:scale-95"
               >
@@ -666,6 +770,12 @@ export default function ActivityDetail({
         activities={allActivities}
         onClose={() => setProfileOpen(false)}
         onSaved={setProfile}
+      />
+
+      <ProPaywallSheet
+        open={paywallOpen}
+        reason={paywallReason}
+        onClose={() => setPaywallOpen(false)}
       />
     </section>
   );
@@ -1030,18 +1140,87 @@ function SummaryMetric({
   icon,
   label,
   value,
+  locked = false,
+  onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
+  locked?: boolean;
+  onClick?: () => void;
 }) {
-  return (
-    <div className="flex flex-col items-center rounded-lg bg-slate-800/60 px-1 py-1.5">
-      <dt className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-slate-400">
+  const content = (
+    <>
+      <dt
+        className={`flex items-center gap-1 text-[9px] uppercase tracking-wide ${
+          locked ? 'text-amber-300/80' : 'text-slate-400'
+        }`}
+      >
         {icon}
         {label}
       </dt>
-      <dd className="text-[11px] font-semibold tabular-nums text-slate-100">{value}</dd>
+      <dd
+        className={`text-[11px] font-semibold tabular-nums ${
+          locked ? 'text-amber-300' : 'text-slate-100'
+        }`}
+      >
+        {locked ? '👑 PRO' : value}
+      </dd>
+    </>
+  );
+
+  if (locked) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onClick?.();
+          }
+        }}
+        className="flex cursor-pointer flex-col items-center rounded-lg border border-amber-300/30 bg-amber-400/10 px-1 py-1.5 active:scale-95"
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center rounded-lg bg-slate-800/60 px-1 py-1.5">
+      {content}
     </div>
+  );
+}
+
+function LockedProPanel({
+  title,
+  description,
+  onOpen,
+}: {
+  title: string;
+  description: string;
+  onOpen: () => void;
+}) {
+  return (
+    <section className="mt-2 rounded-xl border border-amber-300/25 bg-gradient-to-br from-slate-900 to-amber-950/30 p-2.5">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-100">
+        <Lock size={12} className="text-amber-300" />
+        {title}
+        <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+          👑 PRO
+        </span>
+      </p>
+      <p className="mt-0.5 text-[10px] text-slate-400">{description}</p>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="mt-2 w-full rounded-lg bg-orange-500 py-1.5 text-[11px] font-semibold text-white active:scale-[0.98]"
+      >
+        Upgrade ke Pro
+      </button>
+    </section>
   );
 }

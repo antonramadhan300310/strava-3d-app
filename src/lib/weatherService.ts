@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityRecord } from './activity';
 import { timestampOf, type LngLatEle } from './polyline';
+import { readScopedStorage, writeScopedStorage } from './userStorage';
 
 export type WeatherIconType =
   | 'clear'
@@ -136,7 +137,7 @@ type WeatherCache = Record<string, ActivityWeather>;
 function readCache(): WeatherCache {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = window.localStorage.getItem(WEATHER_CACHE_KEY);
+    const raw = readScopedStorage(WEATHER_CACHE_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
@@ -162,7 +163,7 @@ export function cacheActivityWeather(
   try {
     const cache = readCache();
     cache[String(activityId)] = weather;
-    window.localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(cache));
+    writeScopedStorage(WEATHER_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // Private mode or a full quota must never break the activity screen.
   }

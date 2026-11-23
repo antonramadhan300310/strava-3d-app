@@ -8,6 +8,7 @@ import {
   type PowerZoneKey,
   type RiderProfile,
 } from './riderProfile';
+import { readScopedStorage, writeScopedStorage } from './userStorage';
 import { normalizeActivityType } from './valhalla';
 
 const GRAVITY = 9.80665;
@@ -332,7 +333,7 @@ export function computeRelativeEffort(durationSeconds: number, rpe: number): Rel
 function readRpeMap(): Record<string, number> {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = window.localStorage.getItem(RPE_CACHE_KEY);
+    const raw = readScopedStorage(RPE_CACHE_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
@@ -355,7 +356,7 @@ export function storeActivityRpe(activityId: string | number, rpe: number): void
   try {
     const map = readRpeMap();
     map[String(activityId)] = rpe;
-    window.localStorage.setItem(RPE_CACHE_KEY, JSON.stringify(map));
+    writeScopedStorage(RPE_CACHE_KEY, JSON.stringify(map));
   } catch {
     // Offline or quota errors fall back to the embedded GeoJSON value.
   }

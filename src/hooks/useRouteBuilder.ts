@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { length as turfLength } from '@turf/turf';
+import { useAuth } from '@/context/AuthContext';
 import { calculateElevationGain, fetchRoute, getProfile, type ActivityType } from '@/lib/valhalla';
 import { buildGpx, gpxFileName, parseGpx } from '@/lib/gpx';
 import { exportGpxFile } from '@/lib/exportGpx';
@@ -29,6 +30,7 @@ type ImportedRoute = {
 };
 
 export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
+  const { user } = useAuth();
   const [waypoints, setWaypoints] = useState<LngLat[]>([]);
   const [activityType, setActivityType] = useState<ActivityType>('cycling');
   const [routed, setRouted] = useState<LngLatEle[] | null>(null);
@@ -164,8 +166,10 @@ export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
           'Supabase belum dikonfigurasi. Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY.',
         );
       }
+      if (!user) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
 
       await savePlannedRoute({
+        userId: user.id,
         title,
         activityType,
         distanceMeters: Math.round(metrics.distanceMeters),
@@ -175,7 +179,7 @@ export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
       });
       setInfo(`Rute "${title}" tersimpan.`);
     },
-    [coordinates, metrics, activityType],
+    [coordinates, metrics, activityType, user],
   );
 
   const suggestedTitle = useMemo(() => {

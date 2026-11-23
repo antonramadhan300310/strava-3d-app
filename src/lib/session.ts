@@ -1,5 +1,6 @@
 import { normalizeActivityType, type ActivityType } from './valhalla';
 import type { AcceptedPoint } from './metrics';
+import { readScopedStorage, removeScopedStorage, writeScopedStorage } from './userStorage';
 
 const STORAGE_KEY = 'tracker3d:active-session:v1';
 
@@ -24,18 +25,14 @@ export type SavedSession = {
  */
 export function saveSession(session: Omit<SavedSession, 'version' | 'savedAt'>): void {
   if (typeof window === 'undefined') return;
-  try {
-    const payload: SavedSession = { ...session, version: 1, savedAt: Date.now() };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  } catch {
-    // Storage can be full or blocked (private mode); recording continues.
-  }
+  const payload: SavedSession = { ...session, version: 1, savedAt: Date.now() };
+  writeScopedStorage(STORAGE_KEY, JSON.stringify(payload));
 }
 
 export function loadSession(): SavedSession | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readScopedStorage(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SavedSession>;
     if (parsed.version !== 1 || !Array.isArray(parsed.points) || parsed.points.length === 0) {
@@ -66,10 +63,5 @@ export function loadSession(): SavedSession | null {
 }
 
 export function clearSession(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Nothing to do: an unreadable key is as good as a cleared one.
-  }
+  removeScopedStorage(STORAGE_KEY);
 }

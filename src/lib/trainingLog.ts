@@ -1,4 +1,5 @@
 import type { ActivityRecord } from './activity';
+import { readScopedStorage, writeScopedStorage } from './userStorage';
 import { normalizeActivityType, type ActivityType } from './valhalla';
 
 export const PERSONAL_GOALS_KEY = 'personal_goals_v1';
@@ -498,7 +499,7 @@ function parseGoal(value: unknown): PersonalGoal | null {
 export function loadPersonalGoals(): PersonalGoal[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = window.localStorage.getItem(PERSONAL_GOALS_KEY);
+    const raw = readScopedStorage(PERSONAL_GOALS_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -511,13 +512,7 @@ export function loadPersonalGoals(): PersonalGoal[] {
 }
 
 function persistGoals(goals: PersonalGoal[]): PersonalGoal[] {
-  if (typeof window !== 'undefined') {
-    try {
-      window.localStorage.setItem(PERSONAL_GOALS_KEY, JSON.stringify(goals));
-    } catch {
-      // Quota or private mode: keep the goals for this session.
-    }
-  }
+  writeScopedStorage(PERSONAL_GOALS_KEY, JSON.stringify(goals));
   return goals;
 }
 
