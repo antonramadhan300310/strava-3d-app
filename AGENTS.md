@@ -52,12 +52,16 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   `resetCleanAllmovaMapStyleSnapshots` clears them after `setStyle`.
 - `src/lib/shareCard.ts` — HTML5 Canvas renderer for the share images. `SHARE_SIZES` holds the
   `feed` (1080×1350) and `story` (1080×1920) presets that drive both preview and export, and
-  three modes: `poster` (3D map frame + vignettes, stats, elevation chart), `route`
-  (transparent sticker with route + pins + stats) and `stats` (same, no route). Sticker modes
-  take an optional gallery `photo` (`zoom` 1–3, `offsetX/offsetY` as canvas fractions, so the
-  DOM preview and the export share one set of numbers) and a `statsPosition` toggle.
-  `WATERMARK_HEIGHT_RATIO` (12% of canvas height) drives the bottom-right ALLMOVA lockup that
-  every tier gets — bottom-anchored text must stay above it.
+  two modes: `poster` (3D map frame + vignettes, stats, elevation chart) and `sticker`
+  (transparent, or a gallery photo). Stickers take a `stickerLayout` preset — `compact`
+  (lockup + 1×3 metrics), `grid` (lockup + 2×3 metrics), `vertical-route` and
+  `vertical-clean` (centred lockup over six stacked metrics; the route variant draws the GPS
+  line as a lime accent between the third and fourth metric) — plus an optional `photo`
+  (`zoom` 1–3, `offsetX/offsetY` as canvas fractions, so the DOM preview and the export share
+  one set of numbers) and a `statsPosition` of `top`/`center`/`bottom`.
+  `WATERMARK_WIDTH_RATIO` (18% of canvas width) drives the slim bottom-right ALLMOVA lockup
+  that every tier gets — bottom-anchored text must stay above it. The MP4 exporter reuses
+  `watermarkMetrics()` so the video mark matches the poster.
 - `src/lib/sharePoster.ts` — offscreen MapLibre instance (`preserveDrawingBuffer`, pitch 48,
   route bearing, `applyCleanAllmovaMapStyle`, terrain + hillshade) that captures the tilted
   basemap; `fitBounds` ignores pitch, so `frameRoute` re-projects the track for a few passes

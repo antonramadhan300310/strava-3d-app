@@ -1,6 +1,6 @@
 import { Muxer, StreamTarget } from 'mp4-muxer';
 import { allmovaFontStack, drawAllmovaLogoOnCanvas } from '@/components/AllmovaLogo';
-import { WATERMARK_HEIGHT_RATIO } from './shareCard';
+import { watermarkMetrics } from './shareCard';
 import { formatActivityDate, type ActivityRecord } from './activity';
 import {
   averageSpeedKmh,
@@ -655,24 +655,26 @@ function drawHud(
 }
 
 /**
- * Bottom-right ALLMOVA lockup on every export, free or pro.
+ * Slim ALLMOVA lockup on every export, free or pro.
  *
- * The height tracks the frame so the mark keeps the same relative weight at
- * every export quality instead of shrinking with the width.
+ * The width drives the scale so the mark stays around 18% of the frame at every
+ * export quality. The HUD card hugs the bottom edge, so the lockup sits just
+ * above it instead of running into the stats.
  */
 function drawVideoWatermark(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
 ) {
-  const logoHeight = height * WATERMARK_HEIGHT_RATIO;
-  const scale = logoHeight / 64;
-  const logoWidth = 280 * scale;
-  const margin = Math.round(width * 0.035);
+  const { logoWidth, logoHeight, scale, margin } = watermarkMetrics(width);
+  const hudScale = Math.min(width / FLYOVER_EXPORT_WIDTH, height / FLYOVER_EXPORT_HEIGHT);
+  const hudTop = height - (HUD_MARGIN + CARD_HEIGHT) * hudScale;
+  const gap = Math.round(14 * hudScale);
+
   drawAllmovaLogoOnCanvas(
     context,
     width - logoWidth - margin,
-    height - logoHeight - margin,
+    hudTop - logoHeight - gap,
     scale,
     { variant: 'compact', opacity: 0.94 },
   );

@@ -13,10 +13,13 @@ import { drawRouteEndpointBadge } from './routeEndpoints';
 import { normalizeActivityType, type ActivityType } from './valhalla';
 
 /**
- * `poster` is the framed 3D map poster, `route` a transparent route sticker and
- * `stats` a transparent sticker that only carries the numbers.
+ * `poster` is the framed 3D map poster and `sticker` the transparent sticker
+ * whose four layout presets live in `StickerLayout`.
  */
-export type ShareCardMode = 'poster' | 'route' | 'stats';
+export type ShareCardMode = 'poster' | 'sticker';
+
+/** Layout presets for the transparent sticker. */
+export type StickerLayout = 'compact' | 'grid' | 'vertical-route' | 'vertical-clean';
 
 /** Export ratio shared by the preview and the saved image. */
 export type ShareSizeKey = 'feed' | 'story';
@@ -32,7 +35,7 @@ export const SHARE_SIZE_LABELS: Record<ShareSizeKey, string> = {
 };
 
 /** Where the stat block sits inside a sticker. */
-export type StatsPosition = 'bottom' | 'top';
+export type StatsPosition = 'bottom' | 'center' | 'top';
 
 /**
  * Gallery photo placed behind a sticker. `offsetX`/`offsetY` are fractions of
@@ -53,15 +56,38 @@ export type ShareCardData = {
   date: string;
   badge: string;
   activityType: ActivityType;
+  /** Poster grid: distance, gain, duration and speed/pace. */
   stats: ShareStat[];
+  /** Sticker order: distance, gain, time, speed, max elevation, total duration. */
+  metrics: ShareStat[];
 };
 
 const ACCENT = '#B9F51E';
 const INK = '#0D1112';
 const SHADOW = 'rgba(13,17,18,0.85)';
+const STICKER_SHADOW = 'rgba(13,17,18,0.78)';
+const STICKER_SHADOW_BLUR = 12;
+const STICKER_SHADOW_OFFSET_Y = 2;
 
-/** Watermark lockup height as a share of the canvas height. */
-export const WATERMARK_HEIGHT_RATIO = 0.12;
+/**
+ * Watermark lockup width as a share of the canvas width. Anchoring on the width
+ * keeps the mark slim at every export size instead of growing with the height.
+ */
+export const WATERMARK_WIDTH_RATIO = 0.18;
+
+const LOGO_BOX_WIDTH = 280;
+const LOGO_BOX_HEIGHT = 64;
+
+/** Shared watermark geometry for the poster, the stickers and the MP4 export. */
+export function watermarkMetrics(width: number) {
+  const logoWidth = width * WATERMARK_WIDTH_RATIO;
+  return {
+    logoWidth,
+    logoHeight: (logoWidth * LOGO_BOX_HEIGHT) / LOGO_BOX_WIDTH,
+    scale: logoWidth / LOGO_BOX_WIDTH,
+    margin: Math.round(width * 0.035),
+  };
+}
 
 /** Card safe margins, shared by every block so the layout stays aligned. */
 const MARGIN = 72;
@@ -76,6 +102,8 @@ function font(size: number, weight: number | string = 600): string {
 export function buildShareCardData(activity: ActivityRecord): ShareCardData {
   const speed = averageSpeedKmh(activity.distanceMeters, activity.durationSeconds);
   const usesPace = activity.activityType !== 'cycling';
+  const maxElevation = maxElevationOf(activity);
+  const elapsedSeconds = elapsedSecondsOf(activity);
 
   return {
     title: activity.title,
@@ -90,7 +118,59 @@ export function buildShareCardData(activity: ActivityRecord): ShareCardData {
         ? { label: 'Pace', value: `${formatPace(paceSecondsPerKm(speed))} /km` }
         : { label: 'Kecepatan', value: `${formatSpeed(speed)} km/j` },
     ],
+    metrics: [
+      { label: 'Jarak', value: `${formatDistanceKm(activity.distanceMeters).replace('.', ',')} km` },
+      { label: 'Kenaikan Elev.', value: `${Math.round(activity.elevationGain)} m` },
+      { label: 'Waktu', value: formatCompactDuration(activity.durationSeconds) },
+      usesPace
+        ? { label: 'Pace', value: `${formatPace(paceSecondsPerKm(speed))} /km` }
+        : { label: 'Kecepatan', value: `${formatSpeed(speed)} km/j` },
+      { label: 'Elev Maks', value: `${Math.round(maxElevation)} m` },
+      { label: 'Total Durasi', value: formatCompactDuration(elapsedSeconds) },
+    ],
   };
+}
+
+/** Highest DEM point of the track, falling back to the recorded gain. */
+function maxElevationOf(activity: ActivityRecord): number {
+  let max = -Infinity;
+  for (const point of activity.coordinates) {
+    const elevation = point[2];
+    if (Number.isFinite(elevation) && elevation > max) max = elevation;
+  }
+  if (!Number.isFinite(max) || max <= 0) return activity.elevationGain;
+  return max;
+}
+
+/**
+ * Elapsed wall-clock time from the track timestamps. Some imports omit the time
+ * dimension or carry a span far outside the recording, so anything implausible
+ * falls back to the saved duration.
+ */
+function elapsedSecondsOf(activity: ActivityRecord): number {
+  const times: number[] = [];
+  for (const point of activity.coordinates) {
+    const time = point[3];
+    if (typeof time === 'number' && Number.isFinite(time)) times.push(time);
+  }
+  if (times.length < 2) return activity.durationSeconds;
+
+  const millis = times[0] > 1e11;
+  const span = (times[times.length - 1] - times[0]) / (millis ? 1000 : 1);
+  const duration = activity.durationSeconds;
+  if (!Number.isFinite(span) || span < duration || span > duration * 3) return duration;
+  return span;
+}
+
+/** Compact Indonesian duration, e.g. `44m 50d` or `1j 12m`. */
+function formatCompactDuration(totalSeconds: number): string {
+  const safe = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const seconds = safe % 60;
+  if (hours > 0) return `${hours}j ${String(minutes).padStart(2, '0')}m`;
+  if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, '0')}d`;
+  return `${seconds}d`;
 }
 
 function formatShareDate(iso: string): string {
@@ -114,6 +194,8 @@ export type ShareCardInput = {
   data: ShareCardData;
   coordinates: LngLatEle[];
   size?: ShareSizeKey;
+  /** Sticker preset; `compact` when omitted. */
+  stickerLayout?: StickerLayout;
   /** Gallery photo drawn behind a sticker. */
   photo?: SharePhoto | null;
   /** Readability gradient behind the stats; set whenever a photo is present. */
@@ -132,10 +214,12 @@ export function renderShareCard(input: ShareCardInput): HTMLCanvasElement {
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
 
-  if (input.mode === 'poster') drawPoster(ctx, input, width, height);
-  else drawSticker(ctx, input, width, height);
-
-  drawWatermark(ctx, width, height);
+  if (input.mode === 'poster') {
+    drawPoster(ctx, input, width, height);
+    drawWatermark(ctx, width, height);
+  } else {
+    drawSticker(ctx, input, width, height);
+  }
 
   return canvas;
 }
@@ -265,7 +349,7 @@ function drawPosterStats(
   height: number,
 ) {
   const columnWidth = (width - MARGIN * 2) / 2;
-  const chartTop = elevationChartBottom(height) - ELEVATION_CHART_HEIGHT;
+  const chartTop = elevationChartBottom(width, height) - ELEVATION_CHART_HEIGHT;
   const rowTwo = chartTop - 110;
   const rowOne = rowTwo - 118;
 
@@ -292,18 +376,9 @@ function drawPosterStats(
 const ELEVATION_CHART_HEIGHT = 108;
 
 /** Stats sit above the elevation chart and the watermark, never on top. */
-function stickerStatsBaseline(height: number): number {
-  return (
-    height -
-    height * WATERMARK_HEIGHT_RATIO -
-    Math.round(height * 0.028) -
-    Math.round(height * 0.06)
-  );
-}
-
-function elevationChartBottom(height: number): number {
-  const watermarkTop = height - height * WATERMARK_HEIGHT_RATIO - Math.round(height * 0.028);
-  return watermarkTop - 26;
+function elevationChartBottom(width: number, height: number): number {
+  const { logoHeight, margin } = watermarkMetrics(width);
+  return height - logoHeight - margin - Math.round(height * 0.026);
 }
 
 /** Lime area chart with the min/max labels pinned to the chart ends. */
@@ -317,7 +392,7 @@ function drawElevationProfile(
   if (!profile) return;
 
   const chartHeight = ELEVATION_CHART_HEIGHT;
-  const bottom = elevationChartBottom(height);
+  const bottom = elevationChartBottom(width, height);
   const top = bottom - chartHeight;
   const left = MARGIN;
   const chartWidth = width - MARGIN * 2;
@@ -388,40 +463,59 @@ function elevationProfile(
 
 /* ----------------------------------------------------------------- sticker */
 
+/** Logo lockup width for stickers: slimmer than the poster watermark. */
+const STICKER_LOGO_WIDTH_RATIO = 0.21;
+const STICKER_LOGO_BOX_WIDTH = 280;
+const STICKER_LOGO_BOX_HEIGHT = 64;
+
+type StickerGeometry = {
+  /** 1 at the 1080 px reference width; scales every size below. */
+  unit: number;
+  margin: number;
+  logoScale: number;
+  logoWidth: number;
+  logoHeight: number;
+};
+
+function stickerGeometry(width: number): StickerGeometry {
+  const logoWidth = width * STICKER_LOGO_WIDTH_RATIO;
+  return {
+    unit: width / 1080,
+    margin: MARGIN * (width / 1080),
+    logoScale: logoWidth / STICKER_LOGO_BOX_WIDTH,
+    logoWidth,
+    logoHeight: (logoWidth * STICKER_LOGO_BOX_HEIGHT) / STICKER_LOGO_BOX_WIDTH,
+  };
+}
+
 function drawSticker(
   ctx: CanvasRenderingContext2D,
   input: ShareCardInput,
   width: number,
   height: number,
 ) {
-  const { data, coordinates, mode, photo } = input;
+  const { data, coordinates, photo } = input;
   const position = input.statsPosition ?? 'bottom';
+  const layout = input.stickerLayout ?? 'compact';
 
-  // Both stickers must stay fully transparent unless a gallery photo fills them.
+  // Stickers must stay fully transparent unless a gallery photo fills them.
   ctx.clearRect(0, 0, width, height);
   if (photo) drawPhotoLayer(ctx, photo, width, height);
   if (input.photoBackdrop) drawStatsBackdrop(ctx, width, height, position);
 
-  if (mode === 'route') {
-    const box =
-      position === 'top'
-        ? { x: MARGIN, y: height * 0.3, width: width - MARGIN * 2, height: height * 0.5 }
-        : { x: 100, y: height * 0.07, width: width - 200, height: height * 0.52 };
-    drawRoute(ctx, coordinates, box, {
-      casing: SHADOW,
-      core: ACCENT,
-      halo: 'rgba(185,245,30,0.35)',
-    });
-    drawStickerStats(
+  if (layout === 'compact') drawCompactSticker(ctx, data, width, height, position);
+  else if (layout === 'grid') drawGridSticker(ctx, data, width, height, position);
+  else {
+    drawVerticalSticker(
       ctx,
-      data.stats,
+      data,
+      coordinates,
       width,
-      position === 'top' ? height * 0.22 : stickerStatsBaseline(height),
+      height,
+      position,
+      layout === 'vertical-route',
     );
-    return;
   }
-
-  drawStatsSticker(ctx, data, width, height, position);
 }
 
 /** Photo at cover fit, then zoom and pan around its centre. */
@@ -450,6 +544,16 @@ function drawStatsBackdrop(
   height: number,
   position: StatsPosition,
 ) {
+  if (position === 'center') {
+    const band = ctx.createLinearGradient(0, height * 0.16, 0, height * 0.84);
+    band.addColorStop(0, 'rgba(13,17,18,0)');
+    band.addColorStop(0.5, 'rgba(13,17,18,0.78)');
+    band.addColorStop(1, 'rgba(13,17,18,0)');
+    ctx.fillStyle = band;
+    ctx.fillRect(0, height * 0.16, width, height * 0.68);
+    return;
+  }
+
   const gradient =
     position === 'top'
       ? ctx.createLinearGradient(0, 0, 0, height * 0.52)
@@ -464,42 +568,252 @@ function drawStatsBackdrop(
   else ctx.fillRect(0, height * 0.52, width, height * 0.48);
 }
 
-function drawStatsSticker(
+function stickerShadow(ctx: CanvasRenderingContext2D) {
+  ctx.shadowColor = STICKER_SHADOW;
+  ctx.shadowBlur = STICKER_SHADOW_BLUR;
+  ctx.shadowOffsetY = STICKER_SHADOW_OFFSET_Y;
+}
+
+/** Top of the stat block for the chosen vertical position. */
+function stickerBlockTop(
+  height: number,
+  position: StatsPosition,
+  blockHeight: number,
+): number {
+  const safe = Math.round(height * 0.06);
+  if (position === 'top') return safe + Math.round(height * 0.01);
+  if (position === 'center') return Math.max(safe, Math.round((height - blockHeight) / 2));
+  return Math.round(height - safe - Math.round(height * 0.03) - blockHeight);
+}
+
+/** Sport glyph followed by the slim ALLMOVA lockup; returns the header height. */
+function drawStickerHeader(
+  ctx: CanvasRenderingContext2D,
+  activityType: ActivityType,
+  x: number,
+  top: number,
+  width: number,
+  geometry: StickerGeometry,
+  align: 'left' | 'center',
+): number {
+  const { logoScale, logoWidth, logoHeight, unit } = geometry;
+
+  ctx.save();
+  stickerShadow(ctx);
+  let logoX = x + (width - logoWidth) / 2;
+  if (align === 'left') {
+    const iconSize = 44 * unit;
+    drawSportIcon(ctx, activityType, x + iconSize / 2, top + logoHeight / 2, iconSize, '#FFFFFF');
+    logoX = x + iconSize + 20 * unit;
+  }
+  drawAllmovaLogoOnCanvas(ctx, logoX, top, logoScale, { variant: 'compact' });
+  ctx.restore();
+
+  return logoHeight;
+}
+
+function drawStickerMetric(
+  ctx: CanvasRenderingContext2D,
+  stat: ShareStat,
+  x: number,
+  labelBaseline: number,
+  valueBaseline: number,
+  maxWidth: number,
+  valueSize: number,
+  labelSize: number,
+  align: CanvasTextAlign,
+) {
+  ctx.save();
+  ctx.textAlign = align;
+  stickerShadow(ctx);
+
+  ctx.font = font(labelSize, 700);
+  ctx.fillStyle = 'rgba(255,255,255,0.84)';
+  ctx.fillText(stat.label.toUpperCase(), x, labelBaseline);
+
+  const size = fitFontSize(
+    ctx,
+    stat.value,
+    maxWidth,
+    valueSize,
+    800,
+    Math.round(valueSize * 0.62),
+  );
+  ctx.font = font(size, 800);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText(stat.value, x, valueBaseline);
+  ctx.restore();
+}
+
+/** Preset 1: left aligned lockup with one row of three metrics. */
+function drawCompactSticker(
   ctx: CanvasRenderingContext2D,
   data: ShareCardData,
   width: number,
   height: number,
   position: StatsPosition,
 ) {
-  // With the stats on top the title block owns the lower third, but it must stop
-  // above the watermark lockup instead of running underneath it.
-  const titleBottom =
-    position === 'top'
-      ? height - height * WATERMARK_HEIGHT_RATIO - Math.round(height * 0.075)
-      : height * 0.36;
-  const statsBaseline = position === 'top' ? height * 0.18 : stickerStatsBaseline(height);
+  const geometry = stickerGeometry(width);
+  const u = geometry.unit;
+  const contentWidth = width - geometry.margin * 2;
+  const labelSize = 22 * u;
+  const valueSize = 54 * u;
+  const headerGap = 32 * u;
+  const labelOffset = 34 * u;
+  const valueOffset = 96 * u;
 
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.shadowColor = SHADOW;
-  ctx.shadowBlur = 26;
-  ctx.shadowOffsetY = 4;
+  const blockHeight = geometry.logoHeight + headerGap + valueOffset + 10 * u;
+  const top = stickerBlockTop(height, position, blockHeight);
+  const headerHeight = drawStickerHeader(
+    ctx,
+    data.activityType,
+    geometry.margin,
+    top,
+    contentWidth,
+    geometry,
+    'left',
+  );
 
-  ctx.font = font(64, 800);
-  const titleLines = wrapText(ctx, data.title, width - 240, 2);
-  const titleFirstBaseline = titleBottom - 58 - (titleLines.length - 1) * 76;
-  titleLines.forEach((line, index) => {
-    ctx.fillText(line, width / 2, titleFirstBaseline + index * 76);
+  const metricsTop = top + headerHeight + headerGap;
+  const columns = data.metrics.slice(0, 3);
+  const columnWidth = contentWidth / columns.length;
+
+  columns.forEach((stat, index) => {
+    drawStickerMetric(
+      ctx,
+      stat,
+      geometry.margin + columnWidth * index,
+      metricsTop + labelOffset,
+      metricsTop + valueOffset,
+      columnWidth - 18 * u,
+      valueSize,
+      labelSize,
+      'left',
+    );
   });
+}
 
-  drawSportIcon(ctx, data.activityType, width / 2, titleFirstBaseline - 116, 74);
+/** Preset 2: left aligned lockup with a 2×3 metric grid. */
+function drawGridSticker(
+  ctx: CanvasRenderingContext2D,
+  data: ShareCardData,
+  width: number,
+  height: number,
+  position: StatsPosition,
+) {
+  const geometry = stickerGeometry(width);
+  const u = geometry.unit;
+  const contentWidth = width - geometry.margin * 2;
+  const labelSize = 22 * u;
+  const valueSize = 46 * u;
+  const headerGap = 32 * u;
+  const labelOffset = 32 * u;
+  const valueOffset = 88 * u;
+  const rowGap = 116 * u;
 
-  ctx.font = font(28, 600);
-  ctx.fillStyle = 'rgba(255,255,255,0.82)';
-  ctx.fillText(data.date, width / 2, titleBottom);
-  ctx.restore();
+  const blockHeight = geometry.logoHeight + headerGap + valueOffset + rowGap + 8 * u;
+  const top = stickerBlockTop(height, position, blockHeight);
+  const headerHeight = drawStickerHeader(
+    ctx,
+    data.activityType,
+    geometry.margin,
+    top,
+    contentWidth,
+    geometry,
+    'left',
+  );
 
-  drawStickerStats(ctx, data.stats, width, statsBaseline);
+  const metricsTop = top + headerHeight + headerGap;
+  const columnWidth = contentWidth / 3;
+  const rows = [
+    [0, 1, 4],
+    [2, 3, 5],
+  ];
+
+  rows.forEach((row, rowIndex) => {
+    row.forEach((metricIndex, columnIndex) => {
+      const stat = data.metrics[metricIndex];
+      if (!stat) return;
+      const rowTop = metricsTop + rowIndex * rowGap;
+      drawStickerMetric(
+        ctx,
+        stat,
+        geometry.margin + columnWidth * columnIndex,
+        rowTop + labelOffset,
+        rowTop + valueOffset,
+        columnWidth - 18 * u,
+        valueSize,
+        labelSize,
+        'left',
+      );
+    });
+  });
+}
+
+/** Presets 3 and 4: centred lockup above six stacked metrics. */
+function drawVerticalSticker(
+  ctx: CanvasRenderingContext2D,
+  data: ShareCardData,
+  coordinates: LngLatEle[],
+  width: number,
+  height: number,
+  position: StatsPosition,
+  withRoute: boolean,
+) {
+  const geometry = stickerGeometry(width);
+  const u = geometry.unit;
+  const contentWidth = width - geometry.margin * 2;
+  const labelSize = 22 * u;
+  const valueSize = 44 * u;
+  const logoGap = 40 * u;
+  const labelOffset = 30 * u;
+  const valueOffset = 78 * u;
+  const rowStep = 100 * u;
+  // The route accent needs breathing room between the third and fourth metric.
+  const routeGap = withRoute ? 64 * u : 0;
+
+  const blockHeight =
+    geometry.logoHeight + logoGap + rowStep * 5 + routeGap + valueOffset + 10 * u;
+  const top = stickerBlockTop(height, position, blockHeight);
+  const headerHeight = drawStickerHeader(
+    ctx,
+    data.activityType,
+    geometry.margin,
+    top,
+    contentWidth,
+    geometry,
+    'center',
+  );
+
+  const rowsTop = top + headerHeight + logoGap;
+  const rowTop = (index: number) =>
+    rowsTop + index * rowStep + (withRoute && index >= 3 ? routeGap : 0);
+
+  if (withRoute) {
+    const yMid = (rowTop(2) + valueOffset + rowTop(3) + labelOffset) / 2;
+    drawRoute(
+      ctx,
+      coordinates,
+      { x: geometry.margin, y: yMid - 85 * u, width: contentWidth, height: 170 * u },
+      { casing: SHADOW, core: ACCENT, halo: 'rgba(185,245,30,0.28)' },
+      { stroke: { halo: 18 * u, casing: 12 * u, core: 5.5 * u }, badges: false },
+    );
+  }
+
+  data.metrics.forEach((stat, index) => {
+    const row = rowTop(index);
+    drawStickerMetric(
+      ctx,
+      stat,
+      width / 2,
+      row + labelOffset,
+      row + valueOffset,
+      contentWidth - 40 * u,
+      valueSize,
+      labelSize,
+      'center',
+    );
+  });
 }
 
 /** Neon route with a dark casing so it reads on any photo underneath. */
@@ -508,9 +822,15 @@ function drawRoute(
   coordinates: LngLatEle[],
   box: { x: number; y: number; width: number; height: number },
   colors: { casing: string; core: string; halo: string },
+  options: {
+    stroke?: { halo: number; casing: number; core: number };
+    badges?: boolean;
+  } = {},
 ) {
   const points = projectCoordinates(coordinates, box);
   if (points.length < 2) return;
+
+  const stroke = { halo: 34, casing: 24, core: 13, ...options.stroke };
 
   const trace = () => {
     ctx.beginPath();
@@ -526,19 +846,21 @@ function drawRoute(
 
   trace();
   ctx.strokeStyle = colors.halo;
-  ctx.lineWidth = 34;
+  ctx.lineWidth = stroke.halo;
   ctx.stroke();
 
   trace();
   ctx.strokeStyle = colors.casing;
-  ctx.lineWidth = 24;
+  ctx.lineWidth = stroke.casing;
   ctx.stroke();
 
   trace();
   ctx.strokeStyle = colors.core;
-  ctx.lineWidth = 13;
+  ctx.lineWidth = stroke.core;
   ctx.stroke();
   ctx.restore();
+
+  if (options.badges === false) return;
 
   const start = points[0];
   const end = points[points.length - 1];
@@ -546,54 +868,24 @@ function drawRoute(
   drawRouteEndpointBadge(ctx, 'finish', end.x, end.y, 19);
 }
 
-/** Four stat columns with a heavy shadow so white type survives any photo. */
-function drawStickerStats(
-  ctx: CanvasRenderingContext2D,
-  stats: ShareStat[],
-  width: number,
-  valueBaseline: number,
-) {
-  const columnWidth = (width - 160) / stats.length;
-  const labelBaseline = valueBaseline - 68;
-
-  stats.forEach((stat, index) => {
-    const centerX = 80 + columnWidth * (index + 0.5);
-
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.shadowColor = SHADOW;
-    ctx.shadowBlur = 24;
-    ctx.shadowOffsetY = 4;
-
-    ctx.font = font(fitFontSize(ctx, stat.label.toUpperCase(), columnWidth - 24, 24, 700, 15), 700);
-    ctx.fillStyle = 'rgba(255,255,255,0.86)';
-    ctx.fillText(stat.label.toUpperCase(), centerX, labelBaseline);
-
-    ctx.font = font(fitFontSize(ctx, stat.value, columnWidth - 18, 48, 800, 26), 800);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(stat.value, centerX, valueBaseline);
-    ctx.restore();
-  });
-}
-
-/** Sport glyph for the stats-only sticker, drawn with the lime accent. */
+/** Sport glyph for the sticker header. */
 function drawSportIcon(
   ctx: CanvasRenderingContext2D,
   activityType: ActivityType,
   centerX: number,
   centerY: number,
   size: number,
+  color: string,
 ) {
   ctx.save();
   ctx.translate(centerX - size / 2, centerY - size / 2);
   ctx.scale(size / 64, size / 64);
-  ctx.strokeStyle = ACCENT;
-  ctx.fillStyle = ACCENT;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
   ctx.lineWidth = 4.5;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.shadowColor = SHADOW;
-  ctx.shadowBlur = 18;
+  stickerShadow(ctx);
 
   if (activityType === 'cycling') {
     ctx.beginPath();
@@ -630,21 +922,18 @@ function drawSportIcon(
 }
 
 /**
- * Proportional ALLMOVA lockup in the bottom-right corner.
+ * Slim ALLMOVA lockup in the bottom-right corner of the poster.
  *
  * Every tier gets it, so a Free and a Pro export stay visually consistent and
- * the brand rides along on every share. The height tracks the canvas so a
- * 1080 px sticker and a 1350 px card carry the same relative weight.
+ * the brand rides along on every share. Sizing from the width keeps the mark
+ * proportionate at both the 4:5 and 9:16 ratios.
  */
 function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  const logoHeight = height * WATERMARK_HEIGHT_RATIO;
-  const scale = logoHeight / 64;
-  const logoWidth = 280 * scale;
-  const margin = Math.round(width * 0.035);
+  const { logoWidth, logoHeight, scale, margin } = watermarkMetrics(width);
 
   ctx.save();
   ctx.shadowColor = 'rgba(13,17,18,0.55)';
-  ctx.shadowBlur = 18;
+  ctx.shadowBlur = 14;
   drawAllmovaLogoOnCanvas(
     ctx,
     width - logoWidth - margin,
