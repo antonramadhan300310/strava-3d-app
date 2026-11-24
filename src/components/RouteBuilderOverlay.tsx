@@ -8,6 +8,8 @@ import {
   Info,
   Loader2,
   Mountain,
+  MoveRight,
+  Route,
   Save,
   Trash2,
   Undo2,
@@ -22,6 +24,13 @@ import type { HeatmapState } from '@/hooks/useHeatmap';
 import type { RouteBuilderState } from '@/hooks/useRouteBuilder';
 import type { LngLat } from '@/lib/polyline';
 import { PROFILES, type ActivityType } from '@/lib/valhalla';
+import {
+  formatDuration,
+  formatPace,
+  formatSpeed,
+  sportMetricLabels,
+  type ElevationSample,
+} from '@/lib/routePlannerEngine';
 
 const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
   cycling: <Bike size={18} />,
@@ -125,6 +134,10 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
               distanceMeters={builder.metrics.distanceMeters}
               elevationGainMeters={builder.metrics.elevationGainMeters}
               durationSeconds={builder.metrics.durationSeconds}
+              speedKmh={builder.metrics.estimate.speedKmh}
+              paceSecondsPerKm={builder.metrics.estimate.paceSecondsPerKm}
+              elevationProfile={builder.metrics.elevationProfile}
+              sportMode={builder.activityType}
               onInfo={() => setShowTerrain(true)}
             />
           </div>
@@ -150,6 +163,27 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
             {status}
           </p>
         )}
+
+        <div
+          className="mx-auto flex w-full max-w-md items-center gap-1 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-1 shadow-2xl backdrop-blur"
+          role="group"
+          aria-label="Mode perencanaan rute"
+        >
+          <RoutingModeButton
+            active={builder.routingMode === 'snap'}
+            label="Ikuti Jalur"
+            onClick={() => builder.changeRoutingMode('snap')}
+          >
+            <Route size={16} />
+          </RoutingModeButton>
+          <RoutingModeButton
+            active={builder.routingMode === 'offtrail'}
+            label="Garis Lurus (Off-Trail)"
+            onClick={() => builder.changeRoutingMode('offtrail')}
+          >
+            <MoveRight size={16} />
+          </RoutingModeButton>
+        </div>
 
         <div className="mx-auto flex w-full max-w-md items-center justify-between gap-2 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-2 shadow-2xl backdrop-blur">
           <div className="flex flex-1 gap-1" role="group" aria-label="Profil aktivitas">
@@ -264,23 +298,34 @@ function MetricsCard({
   distanceMeters,
   elevationGainMeters,
   durationSeconds,
+  speedKmh,
+  paceSecondsPerKm,
+  elevationProfile,
+  sportMode,
   onInfo,
 }: {
   distanceMeters: number;
   elevationGainMeters: number;
   durationSeconds: number;
+  speedKmh: number;
+  paceSecondsPerKm: number;
+  elevationProfile: ElevationSample[];
+  sportMode: ActivityType;
   onInfo: () => void;
 }) {
-  const hours = Math.floor(durationSeconds / 3600);
-  const minutes = Math.round((durationSeconds % 3600) / 60);
+  const labels = sportMetricLabels(sportMode);
+  const secondaryValue =
+    sportMode === 'cycling' ? formatSpeed(speedKmh) : formatPace(paceSecondsPerKm);
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/90 px-4 py-2.5 text-slate-100 shadow-2xl backdrop-blur">
-      <div className="flex items-center justify-between">
+    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/90 px-3 py-2.5 text-slate-100 shadow-2xl backdrop-blur">
+      <div className="grid grid-cols-4 gap-1">
         <Metric label="Jarak" value={`${(distanceMeters / 1000).toFixed(2)} km`} />
-        <Metric label="Elevasi" value={`${Math.round(elevationGainMeters)} m`} />
-        <Metric label="Estimasi" value={hours > 0 ? `${hours}j ${minutes}m` : `${minutes} mnt`} />
+        <Metric label="Tanjakan" value={`+${Math.round(elevationGainMeters)} m`} accent />
+        <Metric label={labels.duration} value={formatDuration(durationSeconds)} accent />
+        <Metric label={labels.secondary} value={secondaryValue} />
       </div>
+      <ElevationSparkline profile={elevationProfile} />
       <button
         type="button"
         onClick={onInfo}
@@ -293,11 +338,94 @@ function MetricsCard({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+/** Active Lime profile line drawn under the sport metrics. */
+function ElevationSparkline({ profile }: { profile: ElevationSample[] }) {
+  if (profile.length < 2) return null;
+
+  const total = profile[profile.length - 1].distanceMeters;
+  if (!(total > 0)) return null;
+
+  const heights = profile.map((sample) => sample.elevationMeters);
+  const min = Math.min(...heights);
+  const max = Math.max(...heights);
+  const range = Math.max(max - min, 1);
+
+  const points = profile
+    .map((sample) => {
+      const x = (sample.distanceMeters / total) * 100;
+      const y = 28 - ((sample.elevationMeters - min) / range) * 24;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(' ');
+
   return (
-    <div className="flex flex-col items-center">
-      <span className="text-[10px] uppercase tracking-wide text-slate-400">{label}</span>
-      <span className="text-sm font-semibold">{value}</span>
+    <div className="mt-1.5 h-8 w-full">
+      <svg
+        viewBox="0 0 100 30"
+        preserveAspectRatio="none"
+        className="h-full w-full"
+        aria-hidden="true"
+      >
+        <polyline
+          points={`0,29 ${points} 100,29`}
+          fill="rgba(185,245,30,0.12)"
+          stroke="none"
+        />
+        <polyline
+          points={points}
+          fill="none"
+          stroke="#B9F51E"
+          strokeWidth={1.6}
+          vectorEffect="non-scaling-stroke"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function RoutingModeButton({
+  active,
+  label,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[10px] font-semibold transition active:scale-[0.98] ${
+        active ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'text-slate-300 active:bg-[#1E2E16]'
+      }`}
+    >
+      {children}
+      {label}
+    </button>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col items-center">
+      <span className="truncate text-[9px] uppercase tracking-wide text-slate-400">{label}</span>
+      <span className={`truncate text-[13px] font-semibold ${accent ? 'text-[#B9F51E]' : ''}`}>
+        {value}
+      </span>
     </div>
   );
 }

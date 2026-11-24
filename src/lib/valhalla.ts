@@ -16,14 +16,28 @@ export type ProfileDefinition = {
 };
 
 export const PROFILES: ProfileDefinition[] = [
-  { key: 'cycling', label: 'Cycling', costing: 'bicycle' },
-  { key: 'run', label: 'Run', costing: 'pedestrian' },
+  {
+    key: 'cycling',
+    label: 'Cycling',
+    costing: 'bicycle',
+    costingOptions: {
+      bicycle: { bicycle_type: 'Road', use_roads: 0.4, avoid_bad_surfaces: 0.3 },
+    },
+  },
+  {
+    key: 'run',
+    label: 'Run',
+    costing: 'pedestrian',
+    costingOptions: {
+      pedestrian: { walkway_factor: 0.8, use_trails: 0.7 },
+    },
+  },
   {
     key: 'walking',
     label: 'Walking',
     costing: 'pedestrian',
     costingOptions: {
-      pedestrian: { walking_speed: 4.8, walkway_factor: 0.7 },
+      pedestrian: { walkway_factor: 0.7 },
     },
   },
   {
@@ -31,7 +45,12 @@ export const PROFILES: ProfileDefinition[] = [
     label: 'Hike',
     costing: 'pedestrian',
     costingOptions: {
-      pedestrian: { walkway_factor: 0.8, max_hiking_difficulty: 3 },
+      pedestrian: {
+        use_tracks: 1.0,
+        use_trails: 1.0,
+        max_hiking_difficulty: 4,
+        walkway_factor: 0.6,
+      },
     },
   },
 ];

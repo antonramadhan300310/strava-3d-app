@@ -57,8 +57,40 @@ function escapeXml(value: string): string {
     .replace(/'/g, '&apos;');
 }
 
+export type GpxMetadata = {
+  sportType?: string;
+  distanceMeters?: number;
+  elevationGainMeters?: number;
+  durationSeconds?: number;
+};
+
+function metadataExtension(metadata: GpxMetadata | undefined): string {
+  if (!metadata?.sportType) return '';
+  const rows = [
+    `<allmova:sport_type>${escapeXml(metadata.sportType)}</allmova:sport_type>`,
+  ];
+  if (Number.isFinite(metadata.distanceMeters)) {
+    rows.push(`<allmova:distance_meters>${Math.round(metadata.distanceMeters as number)}</allmova:distance_meters>`);
+  }
+  if (Number.isFinite(metadata.elevationGainMeters)) {
+    rows.push(
+      `<allmova:elevation_gain_meters>${Math.round(metadata.elevationGainMeters as number)}</allmova:elevation_gain_meters>`,
+    );
+  }
+  if (Number.isFinite(metadata.durationSeconds)) {
+    rows.push(
+      `<allmova:duration_seconds>${Math.round(metadata.durationSeconds as number)}</allmova:duration_seconds>`,
+    );
+  }
+  return `    <extensions>\n      ${rows.join('\n      ')}\n    </extensions>\n`;
+}
+
 /** Builds a GPX 1.1 track document with one `<trkseg>`. */
-export function buildGpx(name: string, coordinates: LngLatEle[]): string {
+export function buildGpx(
+  name: string,
+  coordinates: LngLatEle[],
+  metadata?: GpxMetadata,
+): string {
   const points = coordinates
     .map(
       ([lon, lat, ele]) =>
@@ -66,18 +98,23 @@ export function buildGpx(name: string, coordinates: LngLatEle[]): string {
         `<ele>${ele.toFixed(1)}</ele></trkpt>`,
     )
     .join('\n');
+  const extension = metadataExtension(metadata);
+  const type = metadata?.sportType
+    ? `    <type>${escapeXml(metadata.sportType)}</type>\n`
+    : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="Personal 3D Activity Tracker"
   xmlns="http://www.topografix.com/GPX/1/1"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:allmova="https://allmova.app/gpx/1"
   xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
   <metadata>
     <name>${escapeXml(name)}</name>
   </metadata>
   <trk>
     <name>${escapeXml(name)}</name>
-    <trkseg>
+${type}${extension}    <trkseg>
 ${points}
     </trkseg>
   </trk>
