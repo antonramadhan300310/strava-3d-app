@@ -50,6 +50,16 @@ import {
   sanitizeRiderProfile,
   type RiderProfile,
 } from '@/lib/riderProfile';
+import { translateAuthError } from '@/lib/authErrors';
+import {
+  addBrowserFinishedListener,
+  addOAuthUrlListener,
+  closeInAppBrowser,
+  completeGoogleOAuth,
+  isNativePlatform,
+  isOAuthCallbackUrl,
+  startGoogleOAuth,
+} from '@/lib/googleAuth';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unconfigured';
 export type SimulatedTier = 'pro' | 'free';
@@ -86,6 +96,12 @@ type AuthContextValue = {
   ownerSimulatedTier: SimulatedTier;
   setOwnerSimulatedTier: (tier: SimulatedTier) => void;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  /** True while the native OAuth tab is open (or the web redirect is starting). */
+  googleSignInPending: boolean;
+  /** Indonesian copy for a failed or cancelled Google login. */
+  googleAuthError: string | null;
+  clearGoogleAuthError: () => void;
   signUp: (displayName: string, email: string, password: string) => Promise<SignUpResult>;
   requestPasswordReset: (email: string) => Promise<void>;
   resetPasswordWithOtp: (email: string, token: string, newPassword: string) => Promise<void>;
@@ -295,11 +311,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ownerSimulatedTier, setOwnerSimulatedTier] = useState<SimulatedTier>('pro');
   const [trialExpiredNotice, setTrialExpiredNotice] = useState(false);
   const [sessionKicked, setSessionKicked] = useState(false);
+  const [googleSignInPending, setGoogleSignInPending] = useState(false);
+  const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
   const loadedUserIdRef = useRef<string | null>(null);
   const authEventSeenRef = useRef(false);
   const latestSyncRef = useRef<SubscriptionSyncResult | null>(null);
   const claimedAtRef = useRef(0);
   const kickedRef = useRef(false);
+  const oauthCallbackHandledRef = useRef(false);
+  const oauthLastCallbackRef = useRef<string | null>(null);
+  const oauthCancelTimerRef = useRef<number | null>(null);
 
   const applySyncResult = useCallback((userId: string, result: SubscriptionSyncResult) => {
     latestSyncRef.current = result;
@@ -412,6 +433,81 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       listener.subscription.unsubscribe();
     };
   }, [applySyncResult]);
+
+  // Native OAuth return path. The listener lives at the app root so a deep link
+  // that launches the app cold still lands on a session.
+  useEffect(() => {
+    if (!isNativePlatform()) return;
+
+    let alive = true;
+    const cleanups: (() => void)[] = [];
+
+    const clearCancelTimer = () => {
+      if (oauthCancelTimerRef.current === null) return;
+      window.clearTimeout(oauthCancelTimerRef.current);
+      oauthCancelTimerRef.current = null;
+    };
+
+    void (async () => {
+      const removeUrlListener = await addOAuthUrlListener((url) => {
+        if (!isOAuthCallbackUrl(url)) return;
+        if (oauthLastCallbackRef.current === url) return;
+        oauthLastCallbackRef.current = url;
+        oauthCallbackHandledRef.current = true;
+        clearCancelTimer();
+
+        void (async () => {
+          // A Custom Tab does not close itself once the deep link takes over.
+          await closeInAppBrowser();
+          const supabase = getSupabaseClientOrNull();
+          if (!supabase) {
+            setGoogleAuthError('Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.');
+            setGoogleSignInPending(false);
+            return;
+          }
+          try {
+            // SIGNED_IN then drives the device claim, profile load and trial.
+            await completeGoogleOAuth(supabase, url);
+            setGoogleAuthError(null);
+          } catch (cause) {
+            setGoogleAuthError(translateAuthError(cause));
+          } finally {
+            setGoogleSignInPending(false);
+          }
+        })();
+      });
+
+      if (!alive) {
+        removeUrlListener();
+        return;
+      }
+      cleanups.push(removeUrlListener);
+
+      const removeBrowserListener = await addBrowserFinishedListener(() => {
+        setGoogleSignInPending(false);
+        if (oauthCallbackHandledRef.current) return;
+        // The tab can close a moment before the deep link lands: wait, then report.
+        clearCancelTimer();
+        oauthCancelTimerRef.current = window.setTimeout(() => {
+          oauthCancelTimerRef.current = null;
+          if (oauthCallbackHandledRef.current) return;
+          setGoogleAuthError('Login Google dibatalkan. Coba lagi.');
+        }, 1500);
+      });
+
+      if (!alive) {
+        removeBrowserListener();
+        return;
+      }
+      cleanups.push(removeBrowserListener);
+    })();
+
+    return () => {
+      alive = false;
+      cleanups.forEach((remove) => remove());
+      clearCancelTimer();
+    };
+  }, []);
 
   // Loading is keyed on the user id, so token refreshes do not refetch the profile.
   useEffect(() => {
@@ -526,6 +622,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   }, []);
 
+  /**
+   * Google SSO. Native opens the Supabase URL in a Custom Tab and finishes in
+   * the `appUrlOpen` listener; the web lets Supabase redirect the page.
+   */
+  const signInWithGoogle = useCallback(async () => {
+    const supabase = getSupabaseClientOrNull();
+    if (!supabase) throw new Error('Server ALLMOVA belum dikonfigurasi.');
+    oauthCallbackHandledRef.current = false;
+    oauthLastCallbackRef.current = null;
+    setGoogleAuthError(null);
+    setGoogleSignInPending(true);
+    try {
+      await startGoogleOAuth(supabase);
+    } catch (cause) {
+      setGoogleSignInPending(false);
+      throw cause;
+    }
+  }, []);
+
+  const clearGoogleAuthError = useCallback(() => {
+    setGoogleAuthError(null);
+  }, []);
+
   const signUp = useCallback(
     async (displayName: string, email: string, password: string): Promise<SignUpResult> => {
       const supabase = getSupabaseClientOrNull();
@@ -589,6 +708,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       setOwnerSimulatedTier('pro');
       setTrialExpiredNotice(false);
+      setGoogleSignInPending(false);
+      setGoogleAuthError(null);
       setStatus('unauthenticated');
     }
   }, []);
@@ -778,6 +899,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ownerSimulatedTier,
       setOwnerSimulatedTier,
       signIn,
+      signInWithGoogle,
+      googleSignInPending,
+      googleAuthError,
+      clearGoogleAuthError,
       signUp,
       requestPasswordReset,
       resetPasswordWithOtp,
@@ -801,6 +926,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       dismissSessionKicked,
       ownerSimulatedTier,
       signIn,
+      signInWithGoogle,
+      googleSignInPending,
+      googleAuthError,
+      clearGoogleAuthError,
       signUp,
       requestPasswordReset,
       resetPasswordWithOtp,

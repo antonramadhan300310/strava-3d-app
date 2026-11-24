@@ -35,6 +35,22 @@ const TRANSLATIONS: { match: RegExp; message: string }[] = [
     match: /failed to fetch|networkerror|network error|fetch failed/i,
     message: 'Tidak dapat terhubung ke server. Periksa koneksi internet',
   },
+  {
+    match: /provider is not enabled|unsupported provider|missing oauth secret/i,
+    message: 'Login Google belum diaktifkan di server ALLMOVA. Hubungi admin aplikasi',
+  },
+  {
+    match: /redirect_uri_mismatch|redirect url.*not allowed|url not allowed/i,
+    message: 'Redirect URL login Google belum terdaftar. Hubungi admin aplikasi',
+  },
+  {
+    match: /access_denied|user (denied|cancelled|canceled)|login google dibatalkan/i,
+    message: 'Login Google dibatalkan',
+  },
+  {
+    match: /code verifier|invalid request.*code|pkce/i,
+    message: 'Sesi login Google kedaluwarsa. Coba masuk lagi',
+  },
 ];
 
 /** Turns raw authentication errors into short Indonesian copy. */
