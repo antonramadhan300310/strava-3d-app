@@ -228,35 +228,32 @@ grant execute on function public.sync_subscription_and_device() to authenticated
 -- ---------------------------------------------------------------------------
 alter table public.profiles enable row level security;
 
-do $$
-begin
-  create policy profiles_select_own on public.profiles
-    for select using (auth.uid() = id);
-exception when duplicate_object then null;
-end $$;
+drop policy if exists profiles_select_own on public.profiles;
+create policy profiles_select_own on public.profiles
+  for select using (auth.uid() = id);
 
-do $$
-begin
-  create policy profiles_insert_own on public.profiles
-    for insert with check (auth.uid() = id);
-exception when duplicate_object then null;
-end $$;
+drop policy if exists profiles_insert_own on public.profiles;
+create policy profiles_insert_own on public.profiles
+  for insert with check (auth.uid() = id);
 
-do $$
-begin
-  create policy profiles_update_own on public.profiles
-    for update using (auth.uid() = id) with check (auth.uid() = id);
-exception when duplicate_object then null;
-end $$;
+drop policy if exists profiles_update_own on public.profiles;
+create policy profiles_update_own on public.profiles
+  for update using (auth.uid() = id) with check (auth.uid() = id);
 
 -- Realtime needs the full row to detect a takeover in `active_device_id`.
 alter table public.profiles replica identity full;
 
 do $$
 begin
-  alter publication supabase_realtime add table public.profiles;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'profiles'
+  ) then
+    alter publication supabase_realtime add table public.profiles;
+  end if;
 exception
-  when duplicate_object then null;
   when undefined_object then null;
 end $$;
 
