@@ -701,7 +701,9 @@ function applyHeatmap(
   const linesSource = map.getSource(HEATMAP_LINES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
   if (!linesSource) return;
 
-  const lines = heatmap?.lines ?? EMPTY_HEATMAP_LINES;
+  // Hidden or signed-out means the source itself is emptied, not merely hidden:
+  // the previous account's geometry must not linger in the WebGL buffers.
+  const lines = heatmap?.visible ? heatmap.lines ?? EMPTY_HEATMAP_LINES : EMPTY_HEATMAP_LINES;
 
   if (!appliedRef || appliedRef.current.lines !== lines) {
     linesSource.setData(lines);

@@ -106,6 +106,7 @@ async function writeGeometryWithFallback(
 }
 
 export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
+  if (!route.userId) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
   const supabase = getClient();
   // Rich properties ride inside the GeoJSON Feature so the sport profile,
   // climb and Naismith-style estimate survive the round-trip even when the
@@ -150,6 +151,7 @@ export type RecordedActivity = {
 };
 
 export async function saveRecordedActivity(activity: RecordedActivity): Promise<void> {
+  if (!activity.userId) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
   const supabase = getClient();
   const properties: Record<string, unknown> = {};
   if (activity.weather) properties.weather = activity.weather;
@@ -173,31 +175,43 @@ export async function saveRecordedActivity(activity: RecordedActivity): Promise<
 }
 
 const ACTIVITY_COLUMNS =
-  'id,title,activity_type,is_planned_route,distance_meters,elevation_gain,duration_seconds,geojson,created_at';
+  'id,user_id,title,activity_type,is_planned_route,distance_meters,elevation_gain,duration_seconds,geojson,created_at';
 
 /**
- * Loads every saved activity, newest first.
+ * Loads the signed-in account's saved activities, newest first.
  *
- * Rows whose geometry cannot be decoded are dropped instead of breaking the
- * whole feed, because a single malformed row should not hide the rest.
+ * Without an account id the function returns an empty list instead of running
+ * an unscoped query. Rows whose geometry cannot be decoded are dropped instead
+ * of breaking the whole feed, because a single malformed row should not hide
+ * the rest.
  */
-export async function fetchActivities(userId?: string): Promise<ActivityRecord[]> {
+export async function fetchActivities(userId: string): Promise<ActivityRecord[]> {
+  if (!userId) return [];
+
   const supabase = getClient();
-  const base = supabase.from('activities').select(ACTIVITY_COLUMNS);
-  const query = userId ? base.eq('user_id', userId) : base;
-  const { data, error } = await query.order('created_at', { ascending: false });
+  const { data, error } = await supabase
+    .from('activities')
+    .select(ACTIVITY_COLUMNS)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
   if (!Array.isArray(data)) return [];
 
   return (data as ActivityRow[])
     .map(toActivityRecord)
-    .filter((record): record is ActivityRecord => record !== null);
+    .filter((record): record is ActivityRecord => record !== null)
+    .filter((record) => !record.userId || record.userId === userId);
 }
 
-export async function deleteActivity(id: string | number): Promise<void> {
+export async function deleteActivity(id: string | number, userId: string): Promise<void> {
+  if (!userId) return;
   const supabase = getClient();
-  const { error } = await supabase.from('activities').delete().eq('id', id);
+  const { error } = await supabase
+    .from('activities')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId);
   if (error) throw new Error(error.message);
 }
 
@@ -210,7 +224,9 @@ export async function updateActivityTrack(
     durationSeconds: number;
     coordinates: LngLatEle[];
   },
+  userId: string,
 ): Promise<void> {
+  if (!userId) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
   const supabase = getClient();
   await writeGeometryWithFallback(
     async (geometry) =>
@@ -222,7 +238,8 @@ export async function updateActivityTrack(
           duration_seconds: track.durationSeconds,
           geojson: geometry,
         })
-        .eq('id', id),
+        .eq('id', id)
+        .eq('user_id', userId),
     track.coordinates,
   );
 }
@@ -235,11 +252,17 @@ export async function updateActivityProperties(
   id: string | number,
   coordinates: LngLatEle[],
   properties: Record<string, unknown>,
+  userId: string,
 ): Promise<void> {
+  if (!userId) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
   const supabase = getClient();
   await writeGeometryWithFallback(
     async (geometry) =>
-      supabase.from('activities').update({ geojson: geometry }).eq('id', id),
+      supabase
+        .from('activities')
+        .update({ geojson: geometry })
+        .eq('id', id)
+        .eq('user_id', userId),
     coordinates,
     properties,
   );

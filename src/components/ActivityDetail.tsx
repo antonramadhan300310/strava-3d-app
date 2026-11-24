@@ -106,7 +106,7 @@ export default function ActivityDetail({
   onNotice,
   onTrackUpdated,
 }: Props) {
-  const { isPro } = useAuth();
+  const { isPro, user } = useAuth();
   const mapRef = useRef<FlyoverMapHandle | null>(null);
   const [cleanMode, setCleanMode] = useState(false);
   const [shareActivityOpen, setShareActivityOpen] = useState(false);
@@ -269,7 +269,7 @@ export default function ActivityDetail({
 
   /** Re-snaps an old recording to the road network and saves it back. */
   const snapToRoad = useCallback(async () => {
-    if (snapping) return;
+    if (snapping || !user) return;
     setSnapping(true);
     try {
       const result = await snapRouteToRoad(activity.coordinates, activity.activityType);
@@ -278,12 +278,16 @@ export default function ActivityDetail({
         return;
       }
 
-      await updateActivityTrack(activity.id, {
-        distanceMeters: result.distanceMeters,
-        elevationGain: result.elevationGainMeters,
-        durationSeconds: activity.durationSeconds,
-        coordinates: result.coordinates,
-      });
+      await updateActivityTrack(
+        activity.id,
+        {
+          distanceMeters: result.distanceMeters,
+          elevationGain: result.elevationGainMeters,
+          durationSeconds: activity.durationSeconds,
+          coordinates: result.coordinates,
+        },
+        user.id,
+      );
 
       onTrackUpdated({
         ...activity,
@@ -297,7 +301,7 @@ export default function ActivityDetail({
     } finally {
       setSnapping(false);
     }
-  }, [activity, onNotice, onTrackUpdated, snapping]);
+  }, [activity, onNotice, onTrackUpdated, snapping, user]);
 
   const analytics = useMemo(() => {
     const gap = computeGAP(activity);
@@ -322,12 +326,18 @@ export default function ActivityDetail({
     (next: number) => {
       setRpe(next);
       storeActivityRpe(activity.id, next);
+      if (!user) return;
       const properties = { ...(activity.geojson?.properties ?? {}), rpe: next };
-      void updateActivityProperties(activity.id, activity.coordinates, properties).catch(() => {
+      void updateActivityProperties(
+        activity.id,
+        activity.coordinates,
+        properties,
+        user.id,
+      ).catch(() => {
         // The device cache keeps the value until the next successful sync.
       });
     },
-    [activity],
+    [activity, user],
   );
 
   const summary = useMemo(() => {
