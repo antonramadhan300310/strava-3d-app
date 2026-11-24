@@ -89,6 +89,17 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 - `TrialExpiredModal` / `SessionKickedModal` are mounted by `AccountGuardModals` above the auth
   gate. The trial flag `allmova_trial_expired_notified_${userId}` is written when the modal is
   shown, not when it is dismissed.
+- `src/lib/googleAuth.ts` — Google SSO bridge. Native (`Capacitor.isNativePlatform()`):
+  `signInWithOAuth({ provider: 'google', options: { redirectTo: 'com.allmova.app://login-callback',
+  skipBrowserRedirect: true } })` then `Browser.open({ url: data.url })`; web: the same call with
+  `redirectTo: window.location.origin`. `AuthProvider` owns the root `App.addListener('appUrlOpen')`
+  listener, closes the Custom Tab, then finishes the login from `?code=` (PKCE →
+  `exchangeCodeForSession`) or `#access_token`/`#refresh_token` (implicit → `setSession`). The
+  resulting `SIGNED_IN` reuses the normal device-claim and trial path. `browserFinished` clears the
+  spinner and, after a 1.5 s grace, reports a cancellation. The deep link lives in
+  `AndroidManifest.xml` as a VIEW/BROWSABLE intent-filter (`scheme=com.allmova.app`,
+  `host=login-callback`); the Supabase dashboard must allowlist the same URL and Google needs
+  `<SUPABASE_URL>/auth/v1/callback` as its redirect URI.
 
 ## Native Android & OTA
 
