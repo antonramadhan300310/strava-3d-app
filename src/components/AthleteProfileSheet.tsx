@@ -29,6 +29,7 @@ import {
   type BikeType,
   type RiderProfile,
 } from '@/lib/riderProfile';
+import { isLifetimePro } from '@/lib/subscription';
 import ProPaywallSheet from './ProPaywallSheet';
 
 type Props = {
@@ -60,6 +61,8 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     profile: account,
     isPro,
     isOwner,
+    trialDaysLeft,
+    refreshSubscription,
     ownerSimulatedTier,
     setOwnerSimulatedTier,
     signOut,
@@ -113,6 +116,12 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     if (!open) setIsEditing(false);
   }, [open]);
 
+  // Opening the Athlete Profile re-checks tier, expiry and the active device.
+  useEffect(() => {
+    if (!open) return;
+    void refreshSubscription();
+  }, [open, refreshSubscription]);
+
   useEffect(() => {
     if (!open || isEditing) return;
     resetForm();
@@ -137,6 +146,9 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
       sessions: recorded.length,
     };
   }, [activities]);
+
+  const lifetimePro = account ? isLifetimePro(account) : false;
+  const trialBadge = !lifetimePro && trialDaysLeft !== null;
 
   const ftpValue = Number(ftp);
   const effectiveFtp =
@@ -288,15 +300,20 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Identitas
               </p>
-              <span
-                className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${
-                  isPro
-                    ? 'border-[#B9F51E]/40 bg-[#B9F51E] text-[#0D1112]'
-                    : 'border-slate-600 bg-[#1E2E16] text-slate-300'
-                }`}
-              >
-                {isPro ? '👑 AKUN PRO' : 'AKUN FREE'}
-              </span>
+              {lifetimePro ? (
+                <span className="rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-2 py-0.5 text-[9px] font-bold text-[#0D1112]">
+                  👑 PRO
+                </span>
+              ) : trialBadge ? (
+                <span className="flex items-center gap-1 rounded-full border border-[#B9F51E] bg-[#B9F51E]/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#B9F51E]">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#B9F51E]" />
+                  PRO TRIAL • Sisa {trialDaysLeft} Hari
+                </span>
+              ) : (
+                <span className="rounded-full border border-slate-600 bg-[#1E2E16] px-2 py-0.5 text-[9px] font-bold text-slate-300">
+                  AKUN FREE
+                </span>
+              )}
             </div>
 
             {isEditing ? (
@@ -348,7 +365,16 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                 : 'Tersimpan Lokal (Offline)'}
             </p>
 
-            {isPro ? (
+            {trialBadge ? (
+              <p className="mt-1 text-[10px] text-[#B9F51E]/80">
+                Trial Pro aktif hingga{' '}
+                {new Date(account?.proExpiresAt ?? '').toLocaleDateString('id-ID', {
+                  day: '2-digit',
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </p>
+            ) : isPro ? (
               account?.proExpiresAt && (
                 <p className="mt-1 text-[10px] text-amber-300/80">
                   Pro aktif hingga{' '}

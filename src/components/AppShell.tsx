@@ -14,6 +14,7 @@ import ActivitiesPanel from '@/components/ActivitiesPanel';
 import ActivityDetail from '@/components/ActivityDetail';
 import MapProviderModal from '@/components/MapProviderModal';
 import OtaUpdateManager from '@/components/OtaUpdateManager';
+import AccountGuardModals from '@/components/AccountGuardModals';
 import { useActivityRecorder } from '@/hooks/useActivityRecorder';
 import { useActivities } from '@/hooks/useActivities';
 import { useHeatmap } from '@/hooks/useHeatmap';
@@ -28,6 +29,7 @@ export default function AppShell() {
     <AuthProvider>
       <OtaUpdateManager />
       <AuthGate />
+      <AccountGuardModals />
     </AuthProvider>
   );
 }
