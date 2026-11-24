@@ -8,7 +8,6 @@ import {
   Map as MapIcon,
   RotateCcw,
   Share2,
-  Sparkles,
   Sticker,
   Trash2,
   X,
@@ -25,6 +24,7 @@ import {
   type ShareCardMode,
   type ShareSizeKey,
   type StatsPosition,
+  type StickerLayout,
 } from '@/lib/shareCard';
 import { captureSharePosterMap } from '@/lib/sharePoster';
 import { saveCardImage, shareCardImage, type SaveImageOutcome } from '@/lib/shareImage';
@@ -60,17 +60,24 @@ const MODES: {
     hint: 'Peta 3D miring dengan rute tebal, pin start/finish, statistik, grafik elevasi, dan watermark ALLMOVA.',
   },
   {
-    key: 'route',
-    label: 'Stiker + Rute',
+    key: 'sticker',
+    label: 'Stiker Transparan',
     icon: <Sticker size={14} />,
-    hint: 'Latar transparan atau foto galeri berisi jalur rute tebal, pin start/finish, dan statistik.',
+    hint: 'Latar transparan atau foto galeri. Pilih tata letak, lalu geser blok statistik ke area foto yang kosong.',
   },
-  {
-    key: 'stats',
-    label: 'Stiker Tanpa Rute',
-    icon: <Sparkles size={14} />,
-    hint: 'Latar transparan atau foto galeri tanpa rute: hanya nama aktivitas, ikon olahraga, dan statistik.',
-  },
+];
+
+const STICKER_LAYOUTS: { key: StickerLayout; label: string }[] = [
+  { key: 'compact', label: '1×3 Ringkas' },
+  { key: 'grid', label: '2×3 Lengkap' },
+  { key: 'vertical-route', label: 'Vertikal + Rute' },
+  { key: 'vertical-clean', label: 'Vertikal Bersih' },
+];
+
+const STATS_POSITIONS: { key: StatsPosition; label: string }[] = [
+  { key: 'top', label: 'Atas' },
+  { key: 'center', label: 'Tengah' },
+  { key: 'bottom', label: 'Bawah' },
 ];
 
 const SAVE_NOTICES: Record<SaveImageOutcome['location'], string> = {
@@ -101,6 +108,7 @@ export default function ShareActivitySheet({ activity, provider, onClose, onNoti
   const [error, setError] = useState<string | null>(null);
   const [photo, setPhoto] = useState<PhotoState | null>(null);
   const [statsPosition, setStatsPosition] = useState<StatsPosition>('bottom');
+  const [stickerLayout, setStickerLayout] = useState<StickerLayout>('compact');
 
   const previewRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -125,6 +133,7 @@ export default function ShareActivitySheet({ activity, provider, onClose, onNoti
   const activeMode = MODES.find((option) => option.key === mode) ?? MODES[0];
   const photoActive = photo !== null;
   const showPhotoControls = mode !== 'poster';
+  const showStickerLayouts = mode === 'sticker';
 
   const getPosterFrame = useCallback(
     async (key: ShareSizeKey): Promise<HTMLCanvasElement | null> => {
@@ -158,6 +167,7 @@ export default function ShareActivitySheet({ activity, provider, onClose, onNoti
             data,
             coordinates: activity.coordinates,
             size: sizeKey,
+            stickerLayout,
             mapImage,
             // The DOM preview layers the photo itself; only the readability
             // gradient is baked in, so dragging never re-renders the canvas.
@@ -188,6 +198,7 @@ export default function ShareActivitySheet({ activity, provider, onClose, onNoti
     photoActive,
     showPhotoControls,
     statsPosition,
+    stickerLayout,
   ]);
 
   useEffect(() => {
@@ -203,6 +214,7 @@ export default function ShareActivitySheet({ activity, provider, onClose, onNoti
       data,
       coordinates: activity.coordinates,
       size: sizeKey,
+      stickerLayout,
       mapImage,
       photo: showPhotoControls ? photo : null,
       photoBackdrop: showPhotoControls && photoActive,
@@ -218,6 +230,7 @@ export default function ShareActivitySheet({ activity, provider, onClose, onNoti
     showPhotoControls,
     sizeKey,
     statsPosition,
+    stickerLayout,
   ]);
 
   const handleShare = useCallback(async () => {
@@ -434,6 +447,29 @@ export default function ShareActivitySheet({ activity, provider, onClose, onNoti
             );
           })}
         </div>
+
+        {showStickerLayouts && (
+          <div className="mx-auto mt-2 grid w-full max-w-sm grid-cols-2 gap-1 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-1">
+            {STICKER_LAYOUTS.map((option) => {
+              const selected = option.key === stickerLayout;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setStickerLayout(option.key)}
+                  aria-pressed={selected}
+                  className={`rounded-xl px-2 py-2 text-[10px] font-bold leading-tight transition ${
+                    selected
+                      ? 'bg-[#B9F51E] text-[#0D1112] shadow-lg'
+                      : 'text-slate-300 active:bg-[#1E2E16]'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-3 pt-3">
@@ -568,21 +604,21 @@ export default function ShareActivitySheet({ activity, provider, onClose, onNoti
                 Posisi Teks
               </span>
               <div className="flex gap-1 rounded-full border border-white/10 bg-[#0D1112]/80 p-1">
-                {(['bottom', 'top'] as StatsPosition[]).map((position) => {
-                  const selected = statsPosition === position;
+                {STATS_POSITIONS.map((option) => {
+                  const selected = statsPosition === option.key;
                   return (
                     <button
-                      key={position}
+                      key={option.key}
                       type="button"
-                      onClick={() => setStatsPosition(position)}
+                      onClick={() => setStatsPosition(option.key)}
                       aria-pressed={selected}
-                      className={`rounded-full px-3 py-1 text-[10px] font-bold transition ${
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-bold transition ${
                         selected
                           ? 'bg-[#B9F51E] text-[#0D1112]'
                           : 'text-slate-300 active:bg-[#1E2E16]'
                       }`}
                     >
-                      {position === 'bottom' ? 'Teks: Bawah' : 'Teks: Atas'}
+                      {option.label}
                     </button>
                   );
                 })}
