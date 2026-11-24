@@ -75,6 +75,20 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   pan/pinch gestures and the share/save actions.
 - `src/lib/riderProfile.ts` — `powerZonePercents` (six lower bounds as % of FTP) feed both
   `computePowerZoneRanges` and the zone histogram, so a custom Z1–Z6 split stays consistent.
+- `src/lib/subscriptionAndDeviceGuard.ts` — device UUID (`allmova_device_id`), trusted clock
+  (`allmova_last_server_ms` = newest `server_now`, so a rolled-back phone clock cannot extend
+  a trial), cached `active_device_id`, per-account plan snapshot, and the two RPC wrappers.
+  Every network call resolves to `null` instead of throwing: offline recording always wins.
+- `AuthContext` calls `sync_subscription_and_device` on launch, on foreground and from the
+  athlete profile; an expired trial downgrades to `free` locally even offline.
+  `claim_active_device` only runs on a *real* sign-in — Supabase also emits `SIGNED_IN` when
+  it restores a stored session, and claiming there would overwrite the device that logged in
+  later and defeat last-login-wins. Realtime `postgres_changes` + sync results feed
+  `handleForeignDevice`, which signs out with `scope: 'local'` only when the server returns a
+  non-empty id that differs from this device (never offline, never during a claim, 12 s grace).
+- `TrialExpiredModal` / `SessionKickedModal` are mounted by `AccountGuardModals` above the auth
+  gate. The trial flag `allmova_trial_expired_notified_${userId}` is written when the modal is
+  shown, not when it is dismissed.
 
 ## Native Android & OTA
 
