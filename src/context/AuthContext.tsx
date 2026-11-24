@@ -16,11 +16,28 @@ import {
   PROFILE_COLUMNS,
   isOwnerEmail,
   isProfilePro,
+  isTrialExpired,
   toAthleteProfile,
+  trialDaysLeft as trialDaysLeftOf,
+  withTrustedTier,
   type AthleteProfile,
+  type PlanTier,
   type ProfileRow,
   type ProfileUpdate,
 } from '@/lib/subscription';
+import {
+  cachedActiveDeviceId,
+  claimActiveDevice,
+  getDeviceId,
+  getTrustedCurrentTimeMs,
+  isDeviceClaimInProgress,
+  readSubscriptionSnapshot,
+  setCachedActiveDeviceId,
+  subscribeToProfileChanges,
+  syncSubscriptionAndDevice,
+  writeSubscriptionSnapshot,
+  type SubscriptionSyncResult,
+} from '@/lib/subscriptionAndDeviceGuard';
 import {
   USER_STORAGE_KEYS,
   migrateLegacyStorage,
@@ -57,6 +74,15 @@ type AuthContextValue = {
   profile: AthleteProfile | null;
   isPro: boolean;
   isOwner: boolean;
+  tier: PlanTier;
+  /** Whole days left in the Pro trial, or null when not on a trial. */
+  trialDaysLeft: number | null;
+  /** True while the one-time "trial ended" popup should be visible. */
+  trialExpiredNotice: boolean;
+  dismissTrialExpiredNotice: () => void;
+  /** True when another device took over the account and the session was cleared. */
+  sessionKicked: boolean;
+  dismissSessionKicked: () => void;
   ownerSimulatedTier: SimulatedTier;
   setOwnerSimulatedTier: (tier: SimulatedTier) => void;
   signIn: (email: string, password: string) => Promise<void>;
@@ -65,11 +91,17 @@ type AuthContextValue = {
   resetPasswordWithOtp: (email: string, token: string, newPassword: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  refreshSubscription: () => Promise<void>;
   updateProfile: (patch: ProfileUpdate) => Promise<void>;
   saveAthleteProfile: (input: SaveAthleteProfileInput) => Promise<SaveAthleteProfileResult>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+const TRIAL_NOTICE_PREFIX = 'allmova_trial_expired_notified_';
+
+/** A freshly claimed device must not be kicked by a stale realtime echo. */
+const CLAIM_GRACE_MS = 12_000;
 
 function fallbackName(user: User): string {
   const meta = user.user_metadata?.display_name;
@@ -99,17 +131,24 @@ function readLocalRiderProfile(): RiderProfile | null {
   }
 }
 
+/** Offline fallback: cached plan fields still enforce trial expiry without signal. */
 function fallbackProfile(user: User): AthleteProfile {
   const local = readLocalRiderProfile();
-  return {
-    id: user.id,
-    email: user.email ?? null,
-    displayName: local?.displayName ?? fallbackName(user),
-    planTier: 'free',
-    proExpiresAt: null,
-    riderProfile: local,
-    personalGoals: null,
-  };
+  const snapshot = readSubscriptionSnapshot(user.id);
+  return withTrustedTier(
+    {
+      id: user.id,
+      email: user.email ?? null,
+      displayName: local?.displayName ?? fallbackName(user),
+      tier: snapshot?.tier ?? 'free',
+      proExpiresAt: snapshot?.proExpiresAt ?? null,
+      isOwner: snapshot?.isOwner ?? false,
+      activeDeviceId: snapshot?.activeDeviceId ?? null,
+      riderProfile: local,
+      personalGoals: null,
+    },
+    getTrustedCurrentTimeMs(),
+  );
 }
 
 /** A cloud profile is the source of truth for a fresh device. */
@@ -122,6 +161,42 @@ function seedLocalCache(profile: AthleteProfile): void {
   }
   if (!readScopedStorage(USER_STORAGE_KEYS.displayName)) {
     writeScopedStorage(USER_STORAGE_KEYS.displayName, profile.displayName);
+  }
+}
+
+/** Overlays a server RPC result onto a profile, then applies the trusted clock. */
+function mergeSyncResult(
+  profile: AthleteProfile,
+  result: SubscriptionSyncResult,
+  now: number,
+): AthleteProfile {
+  return withTrustedTier(
+    {
+      ...profile,
+      tier: result.tier,
+      proExpiresAt: result.proExpiresAt,
+      isOwner: result.isOwner,
+      activeDeviceId: result.activeDeviceId ?? profile.activeDeviceId,
+    },
+    now,
+  );
+}
+
+function isTrialNoticeSeen(userId: string): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    return window.localStorage.getItem(`${TRIAL_NOTICE_PREFIX}${userId}`) === 'true';
+  } catch {
+    return true;
+  }
+}
+
+function markTrialNoticeSeen(userId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`${TRIAL_NOTICE_PREFIX}${userId}`, 'true');
+  } catch {
+    // A blocked write only means the popup may repeat; never break the app.
   }
 }
 
@@ -180,9 +255,11 @@ async function fetchProfile(
             };
       }
 
-      return profile;
+      return withTrustedTier(profile, getTrustedCurrentTimeMs());
     }
 
+    // A missing row is created without plan fields: the database trigger starts
+    // the 14-day Pro trial, and the client is not allowed to write the tier.
     const { data: created } = await supabase
       .from('profiles')
       .upsert(
@@ -190,8 +267,6 @@ async function fetchProfile(
           id: user.id,
           email: user.email ?? null,
           display_name: fallback.displayName,
-          plan_tier: 'free',
-          pro_expires_at: null,
           rider_profile: readLocalRiderProfile() ?? migration?.riderProfile ?? null,
           personal_goals: migration?.personalGoals ?? null,
         },
@@ -201,7 +276,10 @@ async function fetchProfile(
       .maybeSingle();
 
     return created
-      ? toAthleteProfile(created as ProfileRow, user.email ?? null, fallback.displayName)
+      ? withTrustedTier(
+          toAthleteProfile(created as ProfileRow, user.email ?? null, fallback.displayName),
+          getTrustedCurrentTimeMs(),
+        )
       : fallback;
   } catch {
     return fallback;
@@ -215,8 +293,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isSupabaseConfigured ? 'loading' : 'unconfigured',
   );
   const [ownerSimulatedTier, setOwnerSimulatedTier] = useState<SimulatedTier>('pro');
+  const [trialExpiredNotice, setTrialExpiredNotice] = useState(false);
+  const [sessionKicked, setSessionKicked] = useState(false);
   const loadedUserIdRef = useRef<string | null>(null);
   const authEventSeenRef = useRef(false);
+  const latestSyncRef = useRef<SubscriptionSyncResult | null>(null);
+  const claimedAtRef = useRef(0);
+  const kickedRef = useRef(false);
+
+  const applySyncResult = useCallback((userId: string, result: SubscriptionSyncResult) => {
+    latestSyncRef.current = result;
+    setProfile((previous) => {
+      if (!previous || previous.id !== userId) return previous;
+      const next = mergeSyncResult(previous, result, getTrustedCurrentTimeMs());
+      writeSubscriptionSnapshot(userId, next);
+      return next;
+    });
+  }, []);
+
+  const handleForeignDevice = useCallback(async (activeDeviceId: string | null) => {
+    if (!activeDeviceId || activeDeviceId === getDeviceId()) return;
+    // Offline, a failed or timed-out call, or an in-flight login claim must never
+    // end the session: recording in the mountains comes first.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (isDeviceClaimInProgress() || kickedRef.current) return;
+    if (Date.now() - claimedAtRef.current < CLAIM_GRACE_MS) return;
+
+    kickedRef.current = true;
+    setCachedActiveDeviceId(null);
+    const supabase = getSupabaseClientOrNull();
+    try {
+      // Local scope: clears this session without clearing the new device's id.
+      await supabase?.auth.signOut({ scope: 'local' });
+    } catch {
+      // The in-memory state below is cleared regardless.
+    }
+
+    loadedUserIdRef.current = null;
+    setActiveUserId(null);
+    setProfile(null);
+    setSession(null);
+    setOwnerSimulatedTier('pro');
+    setTrialExpiredNotice(false);
+    setStatus('unauthenticated');
+    setSessionKicked(true);
+  }, []);
+
+  const syncSubscription = useCallback(async () => {
+    const user = session?.user;
+    if (!user) return;
+
+    const result = await syncSubscriptionAndDevice();
+    if (!result) {
+      // Offline: still apply the trusted-clock auto-downgrade locally.
+      setProfile((previous) =>
+        previous ? withTrustedTier(previous, getTrustedCurrentTimeMs()) : previous,
+      );
+      return;
+    }
+
+    applySyncResult(user.id, result);
+    await handleForeignDevice(result.activeDeviceId);
+  }, [session, applySyncResult, handleForeignDevice]);
 
   useEffect(() => {
     const supabase = getSupabaseClientOrNull();
@@ -243,9 +381,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(next);
       if (event === 'SIGNED_OUT' || !next) {
         loadedUserIdRef.current = null;
+        latestSyncRef.current = null;
         setActiveUserId(null);
         setProfile(null);
         setStatus('unauthenticated');
+        return;
+      }
+
+      // `Last login wins`: a real sign-in claims this device. Supabase also
+      // emits SIGNED_IN when it restores a stored session on launch, so an
+      // existing claim is skipped: re-claiming on every boot would silently
+      // overwrite the device that logged in later.
+      if (event === 'SIGNED_IN' && next.user) {
+        const alreadyClaimed = cachedActiveDeviceId() === getDeviceId();
+        if (alreadyClaimed) return;
+
+        void (async () => {
+          const result = await claimActiveDevice();
+          if (!alive || !result) return;
+          claimedAtRef.current = Date.now();
+          applySyncResult(next.user.id, result);
+        })();
       }
     });
 
@@ -253,7 +409,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       alive = false;
       listener.subscription.unsubscribe();
     };
-  }, []);
+  }, [applySyncResult]);
 
   // Loading is keyed on the user id, so token refreshes do not refetch the profile.
   useEffect(() => {
@@ -273,7 +429,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((next) => {
         if (loadedUserIdRef.current !== user.id) return;
         seedLocalCache(next);
-        setProfile(next);
+        const synced = latestSyncRef.current
+          ? mergeSyncResult(next, latestSyncRef.current, getTrustedCurrentTimeMs())
+          : withTrustedTier(next, getTrustedCurrentTimeMs());
+        writeSubscriptionSnapshot(user.id, synced);
+        setProfile(synced);
         setStatus('authenticated');
       })
       .catch(() => {
@@ -282,6 +442,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus('authenticated');
       });
   }, [session]);
+
+  // Sync on launch, when the app returns to the foreground and when it reconnects.
+  useEffect(() => {
+    const user = session?.user;
+    if (!user) return;
+
+    void syncSubscription();
+
+    const onForeground = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void syncSubscription();
+    };
+
+    document.addEventListener('visibilitychange', onForeground);
+    window.addEventListener('focus', onForeground);
+    window.addEventListener('online', onForeground);
+    return () => {
+      document.removeEventListener('visibilitychange', onForeground);
+      window.removeEventListener('focus', onForeground);
+      window.removeEventListener('online', onForeground);
+    };
+  }, [session, syncSubscription]);
+
+  // Realtime takeover detection, plus live tier changes from an admin activation.
+  useEffect(() => {
+    const user = session?.user;
+    if (!user) return;
+
+    return subscribeToProfileChanges(user.id, (row) => {
+      const next = withTrustedTier(
+        toAthleteProfile(row, user.email ?? null, fallbackName(user)),
+        getTrustedCurrentTimeMs(),
+      );
+      setProfile((previous) => {
+        if (!previous || previous.id !== user.id) return previous;
+        const merged: AthleteProfile = {
+          ...next,
+          riderProfile: previous.riderProfile,
+          personalGoals: previous.personalGoals,
+          displayName: previous.displayName,
+        };
+        writeSubscriptionSnapshot(user.id, merged);
+        return merged;
+      });
+
+      if (row.active_device_id) void handleForeignDevice(row.active_device_id);
+    });
+  }, [session, handleForeignDevice]);
+
+  // The one-time trial popup, gated per account in localStorage.
+  useEffect(() => {
+    const user = session?.user;
+    if (!user || !profile || status !== 'authenticated') return;
+    if (isOwnerEmail(user.email)) return;
+    if (!isTrialExpired(profile, getTrustedCurrentTimeMs())) return;
+    if (isTrialNoticeSeen(user.id)) return;
+    // Marked as soon as it is shown, so the popup appears exactly once even if
+    // the app is closed while it is still on screen.
+    markTrialNoticeSeen(user.id);
+    setTrialExpiredNotice(true);
+  }, [profile, session, status]);
+
+  const dismissTrialExpiredNotice = useCallback(() => {
+    const userId = session?.user?.id;
+    if (userId) markTrialNoticeSeen(userId);
+    setTrialExpiredNotice(false);
+  }, [session]);
+
+  const dismissSessionKicked = useCallback(() => {
+    setSessionKicked(false);
+  }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const supabase = getSupabaseClientOrNull();
@@ -348,10 +579,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       loadedUserIdRef.current = null;
+      latestSyncRef.current = null;
+      kickedRef.current = false;
+      setCachedActiveDeviceId(null);
       setActiveUserId(null);
       setProfile(null);
       setSession(null);
       setOwnerSimulatedTier('pro');
+      setTrialExpiredNotice(false);
       setStatus('unauthenticated');
     }
   }, []);
@@ -359,8 +594,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshProfile = useCallback(async () => {
     const user = session?.user;
     if (!user) return;
-    setProfile(await fetchProfile(user, null));
-  }, [session]);
+
+    await syncSubscription();
+    if (loadedUserIdRef.current !== user.id) return;
+
+    const next = await fetchProfile(user, null);
+    const synced = latestSyncRef.current
+      ? mergeSyncResult(next, latestSyncRef.current, getTrustedCurrentTimeMs())
+      : withTrustedTier(next, getTrustedCurrentTimeMs());
+    writeSubscriptionSnapshot(user.id, synced);
+    setProfile(synced);
+  }, [session, syncSubscription]);
 
   const updateProfile = useCallback(
     async (patch: ProfileUpdate) => {
@@ -368,8 +612,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const user = session?.user;
       if (!supabase || !user) return;
 
-      // Only send the changed fields: a fallback (offline) profile must never
-      // overwrite the real plan_tier or expiry in the cloud.
+      // Only send the editable fields: a fallback (offline) profile must never
+      // overwrite the server-owned tier, expiry or device columns.
       const { data, error } = await supabase
         .from('profiles')
         .update(patch)
@@ -381,10 +625,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (data) {
         setProfile(
-          toAthleteProfile(
-            data as ProfileRow,
-            user.email ?? null,
-            profile?.displayName ?? fallbackName(user),
+          withTrustedTier(
+            toAthleteProfile(
+              data as ProfileRow,
+              user.email ?? null,
+              profile?.displayName ?? fallbackName(user),
+            ),
+            getTrustedCurrentTimeMs(),
           ),
         );
         return;
@@ -397,8 +644,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             id: user.id,
             email: user.email ?? null,
             display_name: profile?.displayName ?? fallbackName(user),
-            plan_tier: 'free',
-            pro_expires_at: null,
             ...patch,
           },
           { onConflict: 'id' },
@@ -410,10 +655,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (created) {
         setProfile(
-          toAthleteProfile(
-            created as ProfileRow,
-            user.email ?? null,
-            profile?.displayName ?? fallbackName(user),
+          withTrustedTier(
+            toAthleteProfile(
+              created as ProfileRow,
+              user.email ?? null,
+              profile?.displayName ?? fallbackName(user),
+            ),
+            getTrustedCurrentTimeMs(),
           ),
         );
         return;
@@ -424,11 +672,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ? {
               ...previous,
               displayName: patch.display_name ?? previous.displayName,
-              planTier: patch.plan_tier ?? previous.planTier,
-              proExpiresAt:
-                patch.pro_expires_at !== undefined
-                  ? patch.pro_expires_at
-                  : previous.proExpiresAt,
               riderProfile:
                 patch.rider_profile !== undefined ? patch.rider_profile : previous.riderProfile,
               personalGoals:
@@ -481,7 +724,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (data) {
           setProfile(
-            toAthleteProfile(data as ProfileRow, user.email ?? null, saved.displayName),
+            withTrustedTier(
+              toAthleteProfile(data as ProfileRow, user.email ?? null, saved.displayName),
+              getTrustedCurrentTimeMs(),
+            ),
           );
           return { profile: saved, synced: true };
         }
@@ -506,9 +752,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [session],
   );
 
-  const isOwner = isOwnerEmail(session?.user?.email);
-  const planIsPro = profile ? isProfilePro(profile) : false;
+  const isOwner = isOwnerEmail(session?.user?.email) || profile?.isOwner === true;
+  const trustedNow = getTrustedCurrentTimeMs();
+  const planIsPro = profile ? isProfilePro(profile, trustedNow) : false;
   const isPro = isOwner ? ownerSimulatedTier === 'pro' : planIsPro;
+  const trialDays = profile ? trialDaysLeftOf(profile, trustedNow) : null;
+  const tier: PlanTier = profile?.tier ?? 'free';
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -518,6 +767,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       isPro,
       isOwner,
+      tier,
+      trialDaysLeft: trialDays,
+      trialExpiredNotice,
+      dismissTrialExpiredNotice,
+      sessionKicked,
+      dismissSessionKicked,
       ownerSimulatedTier,
       setOwnerSimulatedTier,
       signIn,
@@ -526,6 +781,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetPasswordWithOtp,
       signOut,
       refreshProfile,
+      refreshSubscription: syncSubscription,
       updateProfile,
       saveAthleteProfile,
     }),
@@ -535,6 +791,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       isPro,
       isOwner,
+      tier,
+      trialDays,
+      trialExpiredNotice,
+      dismissTrialExpiredNotice,
+      sessionKicked,
+      dismissSessionKicked,
       ownerSimulatedTier,
       signIn,
       signUp,
@@ -542,6 +804,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetPasswordWithOtp,
       signOut,
       refreshProfile,
+      syncSubscription,
       updateProfile,
       saveAthleteProfile,
     ],
