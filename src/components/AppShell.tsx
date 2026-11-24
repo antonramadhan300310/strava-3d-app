@@ -212,6 +212,7 @@ function TrackerApp() {
           followEnabled={followEnabled}
           showGpsStatus={liveGps}
           activityType={recorder.activityType}
+          sportMode={isRoutes ? builder.activityType : recorder.activityType}
           heatmap={heatmapLayers}
         />
       )}

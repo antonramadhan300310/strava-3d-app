@@ -34,6 +34,8 @@ export type PlannedRoute = {
   elevationGain: number;
   durationSeconds: number;
   coordinates: LngLatEle[];
+  routingMode?: 'snap' | 'offtrail';
+  elevationProfile?: { distanceMeters: number; elevationMeters: number }[];
 };
 
 /**
@@ -105,6 +107,17 @@ async function writeGeometryWithFallback(
 
 export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
   const supabase = getClient();
+  // Rich properties ride inside the GeoJSON Feature so the sport profile,
+  // climb and Naismith-style estimate survive the round-trip even when the
+  // `activities` table has no dedicated columns for them.
+  const properties = {
+    sport_type: route.activityType,
+    routing_mode: route.routingMode ?? null,
+    elevation_gain_meters: route.elevationGain,
+    estimated_duration_seconds: route.durationSeconds,
+    elevation_profile: route.elevationProfile ?? null,
+  };
+
   await writeGeometryWithFallback(
     async (geometry) =>
       supabase.from('activities').insert({
@@ -118,6 +131,7 @@ export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
         geojson: geometry,
       }),
     route.coordinates,
+    properties,
   );
 }
 

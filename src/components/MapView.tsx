@@ -25,7 +25,10 @@ import {
   heatmapCorePaint,
   heatmapGlowPaint,
 } from '@/lib/heatmapRenderer';
-import { applyCleanAllmovaMapStyle } from '@/lib/mapStyleSanitizer';
+import {
+  applyCleanAllmovaMapStyle,
+  resetCleanAllmovaMapStyleSnapshots,
+} from '@/lib/mapStyleSanitizer';
 import { updateRouteEndpointMarkers } from '@/lib/routeEndpoints';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -82,6 +85,8 @@ type Props = {
   showGpsStatus?: boolean;
   /** Drives the live activity badge icon. */
   activityType?: ActivityType;
+  /** Selects the basemap treatment (Hike highlights trails and relief). */
+  sportMode?: ActivityType;
   /** Personal heatmap drawn beneath the active route line and waypoint markers. */
   heatmap?: HeatmapLayers | null;
 };
@@ -128,6 +133,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     followEnabled = false,
     showGpsStatus = false,
     activityType = 'cycling',
+    sportMode = activityType,
     heatmap = null,
   },
   ref,
@@ -152,6 +158,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   const [mapStyle, setMapStyle] = useState<BaseMapStyle>('outdoor');
   const mapStyleRef = useRef<BaseMapStyle>('outdoor');
   const [is3D, setIs3D] = useState(true);
+  const sportModeRef = useRef(sportMode);
   const is3DRef = useRef(is3D);
   const [locating, setLocating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -164,6 +171,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   clickRef.current = onMapClick;
   positionRef.current = livePosition;
   is3DRef.current = is3D;
+  sportModeRef.current = sportMode;
   mapStyleRef.current = mapStyle;
   providerRef.current = provider;
   heatmapRef.current = heatmap;
@@ -259,10 +267,16 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
 
     map.on('style.load', () => {
       if (is3DRef.current) applySky(map);
-      applyCleanAllmovaMapStyle(map, { isSatellite: mapStyleRef.current === 'satellite' });
+      // setStyle rebuilt every base layer, so the saved originals are stale.
+      resetCleanAllmovaMapStyleSnapshots(map);
       installTerrain(map, providerRef.current, {
         source: TERRAIN_SOURCE_ID,
         hillshade: HILLSHADE_LAYER_ID,
+      });
+      // Runs after terrain so Hike can raise the existing hillshade layer.
+      applyCleanAllmovaMapStyle(map, {
+        isSatellite: mapStyleRef.current === 'satellite',
+        sportMode: sportModeRef.current,
       });
       ensureRouteLayers();
       routeEndpointMarkersRef.current = updateRouteEndpointMarkers(
@@ -413,6 +427,16 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   useEffect(() => {
     if (mapRef.current) applyRoute(mapRef.current, route);
   }, [route]);
+
+  // Switching sport repaints the same basemap instead of reloading the style.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    applyCleanAllmovaMapStyle(map, {
+      isSatellite: mapStyleRef.current === 'satellite',
+      sportMode,
+    });
+  }, [sportMode]);
 
   useEffect(() => {
     const map = mapRef.current;

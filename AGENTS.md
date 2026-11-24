@@ -28,6 +28,13 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   `activities`). The map stays mounted across tabs; `active` only toggles its interactivity.
 - `src/lib/flyover.ts` — turf-based route maths: `buildFlyoverPath`, `pointAt`,
   `elevationAt`, `bearingAt` (look-ahead heading), `lerpBearing` (shortest-path smoothing).
+- `src/lib/routePlannerEngine.ts` — `planRoute(waypoints, sportMode, routingMode)`.
+  `snap` posts per-sport `costing`/`costing_options` to Valhalla, decodes its shape at
+  precision 6, then falls back to OSRM and finally to a densified straight geodesic.
+  `offtrail` skips the routers entirely. Elevation comes from Open-Meteo (≤80 samples,
+  zeroes offline); `elevationGainOf` smooths before summing so DEM steps do not inflate
+  the climb. `estimateSportMetrics` holds the speed/pace/Naismith formulas and feeds both
+  the Routes summary card and the duration saved with a route.
 - `src/hooks/useFlyoverPlayback.ts` — `requestAnimationFrame` driver. Map updates go through
   `onFrame` every frame; React state (HUD, scrubber) is throttled to ~16 Hz.
 - `src/components/FlyoverMap.tsx` — imperative `applyFrame` handle; owns the map, marker,
@@ -38,6 +45,11 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 - `src/lib/heatmapRenderer.ts` — paint for the three heatmap layers: charcoal `casing`
   (+8 px, blur 4), a soft `glow`, and the neon `core` (blur 1). Colour is a `step` on
   `weight`: cyan `#00E5FF` under 2, orange `#FF6D00` 2–4, laser red `#FF1744` from 5.
+- `src/lib/mapStyleSanitizer.ts` — neutralises the basemap for cycling/run/walking;
+  `sportMode: 'hike'` additionally paints path/footway/track/steps amber (`#D97706`,
+  dashed, 2.6 px), keeps peak/camp/spring labels, and turns up hillshade/contours.
+  Originals are snapshotted per map so switching sport restores the neutral style;
+  `resetCleanAllmovaMapStyleSnapshots` clears them after `setStyle`.
 - `src/lib/shareCard.ts` — HTML5 Canvas renderer for the share images. `SHARE_SIZES` holds the
   `feed` (1080×1350) and `story` (1080×1920) presets that drive both preview and export, and
   three modes: `poster` (3D map frame + vignettes, stats, elevation chart), `route`
@@ -102,5 +114,7 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 - MapLibre only accepts a `zoom` expression as the input of a top-level `step`/`interpolate`.
   Adding pixels to an interpolated width has to be folded into each stop (see `neonWidth()` in
   `heatmapRenderer.ts`); wrapping it in `['+', ...]` fails with a layer paint error.
+- The same rule applies to `scaleLineWidth()` in `mapStyleSanitizer.ts`: it scales the output
+  stops of a top-level `interpolate`/`step` instead of wrapping the expression in `['*', ...]`.
 - `ShareActivitySheet` and the video exporter both draw the watermark unconditionally — there
   is no Pro gate to re-add.
