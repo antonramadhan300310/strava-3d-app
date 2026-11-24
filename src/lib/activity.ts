@@ -5,6 +5,7 @@ import { isActivityWeather, type ActivityWeather } from './weatherService';
 /** Row shape returned by the `activities` table (PostgREST snake_case). */
 export type ActivityRow = {
   id: string | number;
+  user_id?: string | null;
   title: string | null;
   activity_type: string | null;
   is_planned_route: boolean | null;
@@ -21,6 +22,8 @@ export type ActivityGeoJson = {
 
 export type ActivityRecord = {
   id: string | number;
+  /** Owner id from `activities.user_id`; absent on legacy rows. */
+  userId?: string | null;
   title: string;
   activityType: ActivityType;
   isPlannedRoute: boolean;
@@ -177,6 +180,7 @@ export function toActivityRecord(row: ActivityRow): ActivityRecord | null {
 
   return {
     id: row.id,
+    userId: typeof row.user_id === 'string' ? row.user_id : null,
     title: row.title?.trim() || 'Aktivitas tanpa judul',
     activityType: toActivityType(row.activity_type),
     isPlannedRoute: row.is_planned_route === true,

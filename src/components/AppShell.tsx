@@ -18,6 +18,7 @@ import AccountGuardModals from '@/components/AccountGuardModals';
 import { useActivityRecorder } from '@/hooks/useActivityRecorder';
 import { useActivities } from '@/hooks/useActivities';
 import { useHeatmap } from '@/hooks/useHeatmap';
+import { useOfflineActivitySync } from '@/hooks/useOfflineActivitySync';
 import { useRouteBuilder } from '@/hooks/useRouteBuilder';
 import type { ActivityRecord } from '@/lib/activity';
 import { readMapProvider, writeMapProvider, type MapProvider } from '@/lib/mapProvider';
@@ -39,7 +40,9 @@ function AuthGate() {
 
   if (status === 'loading') return <SplashScreen />;
   if (status !== 'authenticated' || !user) return <AuthScreen />;
-  return <TrackerApp />;
+  // Keying on the account id remounts every screen (and the MapLibre map) when
+  // the session switches, so no in-memory track can survive into the new login.
+  return <TrackerApp key={user.id} />;
 }
 
 function SplashScreen() {
@@ -53,7 +56,7 @@ function SplashScreen() {
 }
 
 function TrackerApp() {
-  const { isPro } = useAuth();
+  const { isPro, user } = useAuth();
   const [tab, setTab] = useState<TabKey>(isPro ? 'routes' : 'record');
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallReason, setPaywallReason] = useState<string | undefined>(undefined);
@@ -68,7 +71,10 @@ function TrackerApp() {
   const builder = useRouteBuilder(mapRef);
   const recorder = useActivityRecorder();
   const activities = useActivities();
-  const heatmap = useHeatmap(activities.activities);
+  const heatmap = useHeatmap(activities.activities, () =>
+    setNotice('Belum ada riwayat rute untuk ditampilkan di Heatmap.'),
+  );
+  useOfflineActivitySync(user?.id ?? null, activities.refresh);
   const isRoutes = tab === 'routes' && isPro;
   const isRecord = tab === 'record';
   const isActivities = tab === 'activities';

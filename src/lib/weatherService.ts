@@ -345,17 +345,20 @@ async function persistActivityWeather(
   weather: ActivityWeather,
   supabaseClient: SupabaseClient,
 ): Promise<void> {
+  if (!activity.userId) return;
   try {
     const first = await supabaseClient
       .from('activities')
       .update({ geojson: toWeatherFeature(activity.coordinates, weather, true) })
-      .eq('id', activity.id);
+      .eq('id', activity.id)
+      .eq('user_id', activity.userId);
     if (!first.error) return;
 
     await supabaseClient
       .from('activities')
       .update({ geojson: toWeatherFeature(activity.coordinates, weather, false) })
-      .eq('id', activity.id);
+      .eq('id', activity.id)
+      .eq('user_id', activity.userId);
   } catch {
     // Silent by design: the card already has data from the cache.
   }

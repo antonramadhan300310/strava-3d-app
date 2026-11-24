@@ -1,11 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseActivityGeometry, type ActivityRecord } from './activity';
 import type { LngLat } from './polyline';
-import { readScopedStorage, removeScopedStorage, writeScopedStorage } from './userStorage';
+import {
+  readUserStorage,
+  removeUserStorage,
+  USER_STORAGE_KEYS,
+  writeUserStorage,
+} from './userStorage';
 import { normalizeActivityType, type ActivityType } from './valhalla';
 
-/** localStorage key holding the simplified heatmap history. */
-export const HEATMAP_CACHE_KEY = 'tracker3d_personal_heatmap_v1';
+/** localStorage key holding the simplified heatmap history, suffixed per account. */
+export const HEATMAP_CACHE_KEY = USER_STORAGE_KEYS.heatmap;
 
 /** ~13 m in degrees: keeps every street corner while dropping GPS noise. */
 export const SIMPLIFY_TOLERANCE = 0.00012;
@@ -17,13 +22,15 @@ const MAX_POINTS_PER_ACTIVITY = 150;
 const COORD_PRECISION = 5;
 
 /** Only the columns the heatmap needs, so the one-off read stays small. */
-const HEATMAP_COLUMNS = 'id,activity_type,created_at,distance_meters,geojson';
+const HEATMAP_COLUMNS = 'id,user_id,activity_type,created_at,distance_meters,geojson';
 
 export type HeatmapCoord = [number, number];
 
 /** Lightweight, cache-friendly projection of an activity. */
 export type HeatmapActivity = {
   id: string | number;
+  /** Owner id, so a stale entry can never be drawn for another account. */
+  userId?: string | null;
   type: ActivityType;
   date: string;
   distance: number;
@@ -174,6 +181,7 @@ export function toHeatmapActivity(record: ActivityRecord): HeatmapActivity | nul
 
   return {
     id: record.id,
+    userId: record.userId ?? null,
     type: normalizeActivityType(record.activityType),
     date: record.createdAt,
     distance: record.distanceMeters,
@@ -203,6 +211,7 @@ function parseCachedEntry(value: unknown): HeatmapActivity | null {
 
   return {
     id,
+    userId: typeof entry.userId === 'string' ? entry.userId : null,
     type: normalizeActivityType(entry.type),
     date: typeof entry.date === 'string' ? entry.date : '',
     distance: Number.isFinite(Number(entry.distance)) ? Number(entry.distance) : 0,
@@ -211,38 +220,38 @@ function parseCachedEntry(value: unknown): HeatmapActivity | null {
 }
 
 /** Returns `null` when nothing is cached yet, so a miss is distinguishable. */
-export function readHeatmapCache(): HeatmapActivity[] | null {
-  if (typeof window === 'undefined') return null;
+export function readHeatmapCache(userId: string | null): HeatmapActivity[] | null {
+  if (!userId) return null;
   try {
-    const raw = readScopedStorage(HEATMAP_CACHE_KEY);
+    const raw = readUserStorage(HEATMAP_CACHE_KEY, userId);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
     return parsed
       .map(parseCachedEntry)
-      .filter((entry): entry is HeatmapActivity => entry !== null);
+      .filter((entry): entry is HeatmapActivity => entry !== null)
+      .filter((entry) => !entry.userId || entry.userId === userId);
   } catch {
     return null;
   }
 }
 
-export function writeHeatmapCache(items: HeatmapActivity[]): void {
-  if (typeof window === 'undefined') return;
+export function writeHeatmapCache(userId: string | null, items: HeatmapActivity[]): void {
+  if (!userId) return;
   try {
-    writeScopedStorage(HEATMAP_CACHE_KEY, JSON.stringify(items));
+    writeUserStorage(
+      HEATMAP_CACHE_KEY,
+      userId,
+      JSON.stringify(items.map((item) => ({ ...item, userId }))),
+    );
   } catch {
     // Quota or private mode: the heatmap still works for this session.
   }
 }
 
 /** Drops the cache so the next open rebuilds it from fresh data. */
-export function invalidateHeatmapCache(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    removeScopedStorage(HEATMAP_CACHE_KEY);
-  } catch {
-    // Nothing to do if storage is unavailable.
-  }
+export function invalidateHeatmapCache(userId: string | null): void {
+  removeUserStorage(HEATMAP_CACHE_KEY, userId);
 }
 
 function fromRows(rows: unknown[]): HeatmapActivity[] {
@@ -251,6 +260,7 @@ function fromRows(rows: unknown[]): HeatmapActivity[] {
     if (!row || typeof row !== 'object') continue;
     const record = row as {
       id?: unknown;
+      user_id?: string | null;
       activity_type?: string | null;
       created_at?: string | null;
       distance_meters?: number | null;
@@ -263,6 +273,7 @@ function fromRows(rows: unknown[]): HeatmapActivity[] {
 
     items.push({
       id: record.id,
+      userId: typeof record.user_id === 'string' ? record.user_id : null,
       type: normalizeActivityType(record.activity_type),
       date: record.created_at ?? '',
       distance:
@@ -281,20 +292,27 @@ function fromRows(rows: unknown[]): HeatmapActivity[] {
  * Activities already in app state are reused as-is, so toggling the heatmap or
  * changing its filters never hits the database. Only a cold start (no state,
  * no cache) fetches the minimal columns once and then writes the cache.
+ *
+ * Without an account id there is no owner to read for, so the function returns
+ * an empty list instead of running an unscoped query.
  */
 export async function getCachedHeatmapActivities(
   supabaseClient: SupabaseClient | null,
+  userId: string | null,
   existingActivities?: ActivityRecord[],
 ): Promise<HeatmapActivity[]> {
+  if (!userId) return [];
+
   if (existingActivities && existingActivities.length > 0) {
     const items = existingActivities
+      .filter((record) => !record.userId || record.userId === userId)
       .map(toHeatmapActivity)
       .filter((entry): entry is HeatmapActivity => entry !== null);
-    writeHeatmapCache(items);
+    writeHeatmapCache(userId, items);
     return items;
   }
 
-  const cached = readHeatmapCache();
+  const cached = readHeatmapCache(userId);
   if (cached) return cached;
 
   if (!supabaseClient) return [];
@@ -302,12 +320,15 @@ export async function getCachedHeatmapActivities(
   const { data, error } = await supabaseClient
     .from('activities')
     .select(HEATMAP_COLUMNS)
+    .eq('user_id', userId)
     .eq('is_planned_route', false);
 
   if (error) throw new Error(error.message);
 
-  const items = fromRows(Array.isArray(data) ? data : []);
-  writeHeatmapCache(items);
+  const items = fromRows(Array.isArray(data) ? data : []).filter(
+    (item) => !item.userId || item.userId === userId,
+  );
+  writeHeatmapCache(userId, items);
   return items;
 }
 
@@ -388,6 +409,7 @@ function splitByWeight(track: HeatmapCoord[], weights: Map<string, number>): Wei
 export function buildHeatmapGeoJSON(
   activities: HeatmapActivity[],
   filters: HeatmapFilters,
+  userId?: string | null,
 ): HeatmapGeoJSON {
   const cutoff = timeCutoff(filters.timeRange);
   const visible: HeatmapActivity[] = [];
@@ -398,6 +420,8 @@ export function buildHeatmapGeoJSON(
   let north = -Infinity;
 
   for (const activity of activities) {
+    // Defence in depth: an entry copied from another account must never draw.
+    if (userId && activity.userId && activity.userId !== userId) continue;
     if (filters.activityType !== 'all' && activity.type !== filters.activityType) continue;
     if (cutoff !== null) {
       const stamp = Date.parse(activity.date);

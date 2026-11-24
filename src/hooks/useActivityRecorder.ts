@@ -24,6 +24,7 @@ import { clearSession, loadSession, saveSession, type SavedSession } from '@/lib
 import { snapRouteToRoad, type ActivityType } from '@/lib/valhalla';
 import { isSupabaseConfigured, saveRecordedActivity } from '@/lib/supabase';
 import { invalidateHeatmapCache } from '@/lib/heatmapCache';
+import { enqueueOfflineActivity } from '@/lib/offlineActivityQueue';
 import { fetchActivityWeather } from '@/lib/weatherService';
 import { timestampOf, type LngLat, type LngLatEle } from '@/lib/polyline';
 import { startNativeTrackingService, stopNativeTrackingService } from '@/lib/nativeTrackingService';
@@ -69,6 +70,19 @@ function formatSavedAt(epochMs: number): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/** A dropped connection is recoverable through the offline queue; a schema error is not. */
+function isNetworkFailure(cause: unknown): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  if (!(cause instanceof Error)) return false;
+  const message = cause.message.toLowerCase();
+  return (
+    cause.name === 'TypeError' ||
+    message.includes('failed to fetch') ||
+    message.includes('network') ||
+    message.includes('fetch')
+  );
 }
 
 export function useActivityRecorder() {
@@ -314,6 +328,19 @@ export function useActivityRecorder() {
     return result;
   }, [flushElapsed, stopWatch, persist, stopBackgroundService]);
 
+  const resetAfterSave = useCallback(() => {
+    stopBackgroundService();
+    clearSession();
+    setPhase('idle');
+    phaseRef.current = 'idle';
+    setPoints([]);
+    pointsRef.current = [];
+    setFinishResult(null);
+    activeMsRef.current = 0;
+    runningSinceRef.current = null;
+    lastFixTimeRef.current = null;
+  }, [stopBackgroundService]);
+
   const saveActivity = useCallback(async (title: string, rpe?: number | null) => {
     if (!finishResult) throw new Error('Belum ada rekaman yang selesai diproses.');
     if (!isSupabaseConfigured) {
@@ -323,46 +350,57 @@ export function useActivityRecorder() {
     }
     if (!user) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
 
-    try {
-      const first = finishResult.coordinates[0];
-      const startedAtEpoch = (first && timestampOf(first)) ?? startedAtRef.current;
-      const weather = first
-        ? await fetchActivityWeather({
-            latitude: first[1],
-            longitude: first[0],
-            startedAt: new Date(startedAtEpoch > 0 ? startedAtEpoch : Date.now()),
-            timeoutMs: 3000,
-          })
-        : null;
+    const first = finishResult.coordinates[0];
+    const startedAtEpoch = (first && timestampOf(first)) ?? startedAtRef.current;
+    const weather = first
+      ? await fetchActivityWeather({
+          latitude: first[1],
+          longitude: first[0],
+          startedAt: new Date(startedAtEpoch > 0 ? startedAtEpoch : Date.now()),
+          timeoutMs: 3000,
+        })
+      : null;
 
-      await saveRecordedActivity({
-        userId: user.id,
-        title,
-        activityType: activityRef.current,
-        distanceMeters: finishResult.distanceMeters,
-        elevationGain: finishResult.elevationGainMeters,
-        durationSeconds: finishResult.durationSeconds,
-        coordinates: finishResult.coordinates,
-        weather,
-        rpe: rpe ?? null,
-      });
-      invalidateHeatmapCache();
-      stopBackgroundService();
-      clearSession();
-      setPhase('idle');
-      phaseRef.current = 'idle';
-      setPoints([]);
-      pointsRef.current = [];
-      setFinishResult(null);
-      activeMsRef.current = 0;
-      runningSinceRef.current = null;
-      lastFixTimeRef.current = null;
+    const payload = {
+      title,
+      activityType: activityRef.current,
+      distanceMeters: finishResult.distanceMeters,
+      elevationGain: finishResult.elevationGainMeters,
+      durationSeconds: finishResult.durationSeconds,
+      coordinates: finishResult.coordinates,
+      weather,
+      rpe: rpe ?? null,
+    };
+
+    const queueForLater = () => {
+      enqueueOfflineActivity(user.id, payload);
+      invalidateHeatmapCache(user.id);
+      resetAfterSave();
+      setNotice(
+        `Aktivitas "${title}" disimpan offline dan akan diunggah otomatis saat online.`,
+      );
+      if (previewRef.current) void beginWatch();
+    };
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      queueForLater();
+      return;
+    }
+
+    try {
+      await saveRecordedActivity({ ...payload, userId: user.id });
+      invalidateHeatmapCache(user.id);
+      resetAfterSave();
       setNotice(`Aktivitas "${title}" tersimpan di Cloud ALLMOVA.`);
       if (previewRef.current) await beginWatch();
     } catch (cause) {
+      if (isNetworkFailure(cause)) {
+        queueForLater();
+        return;
+      }
       throw cause;
     }
-  }, [finishResult, beginWatch, user, stopBackgroundService]);
+  }, [finishResult, beginWatch, user, resetAfterSave]);
 
   const discardFinish = useCallback(() => {
     stopBackgroundService();

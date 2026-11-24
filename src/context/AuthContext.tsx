@@ -369,6 +369,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!alive || authEventSeenRef.current) return;
         const next = data.session ?? null;
         setSession(next);
+        if (next?.user) setActiveUserId(next.user.id);
         if (!next) setStatus('unauthenticated');
       })
       .catch(() => {
@@ -379,6 +380,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!alive) return;
       authEventSeenRef.current = true;
       setSession(next);
+      if (next?.user) setActiveUserId(next.user.id);
       if (event === 'SIGNED_OUT' || !next) {
         loadedUserIdRef.current = null;
         latestSyncRef.current = null;
