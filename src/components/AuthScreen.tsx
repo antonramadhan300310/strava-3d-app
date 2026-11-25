@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import AllmovaLogo from '@/components/AllmovaLogo';
+import PrivacyPolicyLink from '@/components/PrivacyPolicyLink';
+import { consumeAccountDeletedNotice } from '@/lib/accountDeletion';
 import { translateAuthError } from '@/lib/authErrors';
 
 type Mode = 'login' | 'signup' | 'forgot';
@@ -51,6 +53,13 @@ export default function AuthScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+
+  // A permanent deletion lands here; the flag is consumed once so a refresh
+  // does not keep showing a notice for an account that no longer exists.
+  useEffect(() => {
+    const notice = consumeAccountDeletedNotice();
+    if (notice) setInfo(notice);
+  }, []);
 
   const resetMessages = () => {
     setError(null);
@@ -522,9 +531,12 @@ export default function AuthScreen() {
           )}
         </div>
 
-        <p className="mt-auto pt-6 text-center text-[10px] leading-relaxed text-slate-500">
-          Data aktivitas terikat ke akunmu dan hanya bisa dilihat setelah masuk.
-        </p>
+        <div className="mt-auto pt-6 text-center">
+          <p className="text-[10px] leading-relaxed text-slate-500">
+            Data aktivitas terikat ke akunmu dan hanya bisa dilihat setelah masuk.
+          </p>
+          <PrivacyPolicyLink className="mt-2 inline-block text-[10px] font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 active:text-slate-200" />
+        </div>
       </div>
     </main>
   );
