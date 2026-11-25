@@ -50,6 +50,12 @@ import {
   sanitizeRiderProfile,
   type RiderProfile,
 } from '@/lib/riderProfile';
+import {
+  clearLocalAccountData,
+  deleteOwnAccount,
+  markAccountDeleted,
+  purgeSupabaseAuthStorage,
+} from '@/lib/accountDeletion';
 import { translateAuthError } from '@/lib/authErrors';
 import {
   addBrowserFinishedListener,
@@ -106,6 +112,8 @@ type AuthContextValue = {
   requestPasswordReset: (email: string) => Promise<void>;
   resetPasswordWithOtp: (email: string, token: string, newPassword: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Permanently deletes the account (UU PDP) and clears every local cache. */
+  deleteAccount: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshSubscription: () => Promise<void>;
   updateProfile: (patch: ProfileUpdate) => Promise<void>;
@@ -684,6 +692,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const resetAuthState = useCallback(() => {
+    loadedUserIdRef.current = null;
+    latestSyncRef.current = null;
+    kickedRef.current = false;
+    setCachedActiveDeviceId(null);
+    setActiveUserId(null);
+    setProfile(null);
+    setSession(null);
+    setOwnerSimulatedTier('pro');
+    setTrialExpiredNotice(false);
+    setGoogleSignInPending(false);
+    setGoogleAuthError(null);
+    setStatus('unauthenticated');
+  }, []);
+
   const signOut = useCallback(async () => {
     const supabase = getSupabaseClientOrNull();
     try {
@@ -699,20 +722,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // The in-memory state is cleared below regardless.
       }
     } finally {
-      loadedUserIdRef.current = null;
-      latestSyncRef.current = null;
-      kickedRef.current = false;
-      setCachedActiveDeviceId(null);
-      setActiveUserId(null);
-      setProfile(null);
-      setSession(null);
-      setOwnerSimulatedTier('pro');
-      setTrialExpiredNotice(false);
-      setGoogleSignInPending(false);
-      setGoogleAuthError(null);
-      setStatus('unauthenticated');
+      resetAuthState();
     }
-  }, []);
+  }, [resetAuthState]);
+
+  const deleteAccount = useCallback(async () => {
+    const userId = session?.user?.id ?? null;
+
+    // Throws before touching local data when the server refuses, so the user
+    // stays signed in and can retry.
+    await deleteOwnAccount();
+
+    clearLocalAccountData(userId);
+    markAccountDeleted();
+
+    const supabase = getSupabaseClientOrNull();
+    try {
+      await supabase?.auth.signOut();
+    } catch {
+      // The account is already gone server-side; local cleanup below still runs.
+    }
+    purgeSupabaseAuthStorage();
+    resetAuthState();
+  }, [session, resetAuthState]);
 
   const refreshProfile = useCallback(async () => {
     const user = session?.user;
@@ -907,6 +939,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       requestPasswordReset,
       resetPasswordWithOtp,
       signOut,
+      deleteAccount,
       refreshProfile,
       refreshSubscription: syncSubscription,
       updateProfile,
@@ -934,6 +967,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       requestPasswordReset,
       resetPasswordWithOtp,
       signOut,
+      deleteAccount,
       refreshProfile,
       syncSubscription,
       updateProfile,

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Bike,
   Check,
   Cloud,
@@ -13,6 +14,7 @@ import {
   Mail,
   Pencil,
   Save,
+  Trash2,
   UserRound,
   X,
 } from 'lucide-react';
@@ -31,6 +33,7 @@ import {
 } from '@/lib/riderProfile';
 import { isLifetimePro } from '@/lib/subscription';
 import ProPaywallSheet from './ProPaywallSheet';
+import PrivacyPolicyLink from './PrivacyPolicyLink';
 
 type Props = {
   open: boolean;
@@ -55,6 +58,16 @@ function hasStoredProfile(value: unknown): boolean {
   );
 }
 
+function deleteAccountErrorMessage(cause: unknown): string {
+  const raw = cause instanceof Error ? cause.message : '';
+  if (/not_authenticated|jwt|session|token/i.test(raw)) {
+    return 'Sesi login sudah berakhir. Masuk kembali lalu ulangi penghapusan akun.';
+  }
+  return raw
+    ? `Gagal menghapus akun: ${raw}`
+    : 'Gagal menghapus akun. Periksa koneksi lalu coba lagi.';
+}
+
 export default function AthleteProfileSheet({ open, activities, onClose, onSaved }: Props) {
   const {
     user,
@@ -67,11 +80,16 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     setOwnerSimulatedTier,
     signOut,
     saveAthleteProfile,
+    deleteAccount,
   } = useAuth();
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>(() =>
@@ -113,7 +131,11 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
 
   // Reopening the sheet always starts in read mode with the saved values.
   useEffect(() => {
-    if (!open) setIsEditing(false);
+    if (open) return;
+    setIsEditing(false);
+    setDeleteModalOpen(false);
+    setDeleteConfirmText('');
+    setDeleteError(null);
   }, [open]);
 
   // Opening the Athlete Profile re-checks tier, expiry and the active device.
@@ -161,6 +183,8 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     () => computePowerZoneRanges(effectiveFtp, zonePercents),
     [effectiveFtp, zonePercents],
   );
+
+  const canConfirmDelete = deleteConfirmText.trim().toUpperCase() === 'HAPUS';
 
   if (!open) return null;
 
@@ -217,6 +241,21 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
       setAccountError(cause instanceof Error ? cause.message : 'Gagal keluar dari akun.');
     } finally {
       setLoggingOut(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleting || !canConfirmDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAccount();
+      // The auth gate swaps to the login screen, which shows the notice.
+      onClose();
+    } catch (cause) {
+      setDeleteError(deleteAccountErrorMessage(cause));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -676,8 +715,129 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               </p>
             )}
           </section>
+
+          <section className="mt-3 rounded-xl border border-rose-500/20 bg-[#151B1D]/70 p-3">
+            <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-rose-300/80">
+              <AlertTriangle size={11} />
+              Zona Berbahaya
+            </p>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+              Tindakan di bawah ini bersifat permanen dan tidak dapat dibatalkan.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteConfirmText('');
+                setDeleteError(null);
+                setDeleteModalOpen(true);
+              }}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/30 py-2.5 text-[11px] font-semibold text-rose-300/90 transition active:scale-[0.98]"
+            >
+              <Trash2 size={14} />
+              Hapus Akun Permanen
+            </button>
+          </section>
+
+          <PrivacyPolicyLink className="mt-4 block text-center text-[10px] text-slate-500 underline-offset-2 active:text-slate-300" />
         </div>
       </div>
+
+      {deleteModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-account-title"
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-[#0D1112]/85 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] backdrop-blur-sm sm:items-center sm:pb-4"
+        >
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-rose-500/30 bg-[#151B1D] shadow-2xl">
+            <div className="flex flex-col items-center gap-2 bg-gradient-to-b from-rose-500/15 to-transparent px-5 pb-3 pt-5 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-500/15 text-rose-300">
+                <AlertTriangle size={22} />
+              </span>
+              <h2
+                id="delete-account-title"
+                className="text-base font-bold leading-snug text-slate-100"
+              >
+                Hapus Akun Permanen
+              </h2>
+            </div>
+
+            <div className="px-5 pb-5">
+              <p className="text-[12px] leading-relaxed text-slate-300">
+                Seluruh riwayat aktivitas, rute tersimpan, Heatmap pribadi, serta status Pro/Trial
+                kamu akan{' '}
+                <span className="font-semibold text-rose-300">dihapus permanen</span> dan tidak
+                dapat dipulihkan.
+              </p>
+
+              <p className="mt-2 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+                Catatan: jika kamu masih memiliki masa langganan Pro aktif, penghapusan akun tidak
+                otomatis mengembalikan dana (non-refundable).
+              </p>
+
+              <label
+                htmlFor="delete-account-confirm"
+                className="mt-3 block text-[11px] font-medium text-slate-300"
+              >
+                Ketik{' '}
+                <span className="font-bold text-rose-300">HAPUS</span> pada kolom di bawah untuk
+                mengaktifkan tombol konfirmasi.
+              </label>
+              <input
+                id="delete-account-confirm"
+                value={deleteConfirmText}
+                onChange={(event) => {
+                  setDeleteConfirmText(event.target.value);
+                  setDeleteError(null);
+                }}
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="HAPUS"
+                disabled={deleting}
+                className="mt-1 w-full rounded-xl border border-rose-500/30 bg-[#1E2E16] px-3 py-2 text-sm font-semibold tracking-wide text-slate-100 outline-none placeholder:text-slate-600 focus:border-rose-400 disabled:opacity-60"
+              />
+
+              {deleteError && (
+                <p
+                  role="alert"
+                  className="mt-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] font-medium leading-relaxed text-rose-300"
+                >
+                  {deleteError}
+                </p>
+              )}
+
+              <div className="mt-4 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteAccount()}
+                  disabled={!canConfirmDelete || deleting}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose-500 py-3 text-sm font-bold text-white shadow-lg shadow-rose-500/20 transition hover:bg-rose-600 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {deleting ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={16} />
+                  )}
+                  {deleting ? 'Menghapus akun…' : 'Ya, Hapus Permanen'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteModalOpen(false);
+                    setDeleteConfirmText('');
+                    setDeleteError(null);
+                  }}
+                  disabled={deleting}
+                  className="w-full rounded-xl border border-white/15 bg-[#1E2E16]/60 py-2.5 text-[12px] font-semibold text-slate-200 transition active:scale-[0.99] disabled:opacity-60"
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ProPaywallSheet open={paywallOpen} onClose={() => setPaywallOpen(false)} />
     </div>

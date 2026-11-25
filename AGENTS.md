@@ -75,6 +75,14 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   pan/pinch gestures and the share/save actions.
 - `src/lib/riderProfile.ts` — `powerZonePercents` (six lower bounds as % of FTP) feed both
   `computePowerZoneRanges` and the zone histogram, so a custom Z1–Z6 split stays consistent.
+- `src/lib/accountDeletion.ts` + `supabase/migrations/20261125010000_delete_own_account.sql` —
+  UU PDP self-delete. `delete_own_account()` is `SECURITY DEFINER` and removes the caller's
+  `activities`, `saved_routes` (when the table exists) and `profiles`, then the `auth.users`
+  row. `AuthContext.deleteAccount()` wipes every per-account localStorage key, signs out
+  gracefully (the account is already gone server-side) and leaves a one-shot notice that
+  `AuthScreen` consumes on mount.
+- `src/components/PrivacyPolicyLink.tsx` — `https://allmova.vercel.app/privacy`; `Browser.open`
+  on native, a plain `target="_blank"` anchor on web.
 - `src/lib/subscriptionAndDeviceGuard.ts` — device UUID (`allmova_device_id`), trusted clock
   (`allmova_last_server_ms` = newest `server_now`, so a rolled-back phone clock cannot extend
   a trial), cached `active_device_id`, per-account plan snapshot, and the two RPC wrappers.
