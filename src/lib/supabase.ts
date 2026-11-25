@@ -2,6 +2,11 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityType } from './valhalla';
 import { timestampOf, type LngLatEle } from './polyline';
 import { toActivityRecord, type ActivityRecord, type ActivityRow } from './activity';
+import {
+  toCuratedRoute,
+  type CuratedRoute,
+  type CuratedRouteRow,
+} from './curatedRoutes';
 import type { ActivityWeather } from './weatherService';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
@@ -36,6 +41,8 @@ export type PlannedRoute = {
   coordinates: LngLatEle[];
   routingMode?: 'snap' | 'offtrail';
   elevationProfile?: { distanceMeters: number; elevationMeters: number }[];
+  /** Set when the route was copied from a curated recommendation. */
+  curatedRouteId?: string;
 };
 
 /**
@@ -117,6 +124,7 @@ export async function savePlannedRoute(route: PlannedRoute): Promise<void> {
     elevation_gain_meters: route.elevationGain,
     estimated_duration_seconds: route.durationSeconds,
     elevation_profile: route.elevationProfile ?? null,
+    ...(route.curatedRouteId ? { curated_route_id: route.curatedRouteId } : {}),
   };
 
   await writeGeometryWithFallback(
@@ -266,4 +274,43 @@ export async function updateActivityProperties(
     coordinates,
     properties,
   );
+}
+
+/**
+ * Active curated recommendations, newest first. `select('*')` keeps the client
+ * compatible with editorial columns added later; rows without a usable
+ * polyline are dropped by the mapper instead of failing the whole feed.
+ */
+export async function fetchCuratedRoutes(): Promise<CuratedRoute[]> {
+  const supabase = getSupabaseClientOrNull();
+  if (!supabase) {
+    throw new Error('Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.');
+  }
+
+  let data: unknown = null;
+  let error: { message: string; code?: string } | null = null;
+  try {
+    const response = await supabase
+      .from('curated_routes')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+    data = response.data;
+    error = response.error;
+  } catch {
+    throw new Error('Gagal memuat rekomendasi rute. Periksa koneksi internetmu lalu coba lagi.');
+  }
+
+  if (error) {
+    if (error.code === '42P01') {
+      throw new Error('Rute rekomendasi belum tersedia. Coba lagi nanti.');
+    }
+    throw new Error('Gagal memuat rekomendasi rute. Periksa koneksi internetmu lalu coba lagi.');
+  }
+
+  if (!Array.isArray(data)) return [];
+
+  return (data as CuratedRouteRow[])
+    .map(toCuratedRoute)
+    .filter((route): route is CuratedRoute => route !== null);
 }
