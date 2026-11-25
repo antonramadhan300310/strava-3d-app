@@ -122,12 +122,24 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   `saveMediaToGallery` for the MediaStore gallery write (`Pictures/ALLMOVA`,
   `Movies/ALLMOVA`; `IS_PENDING` on API 29+, legacy path + media scan below that).
 - `src/lib/otaUpdater.ts` + `src/components/OtaUpdateManager.tsx` — `@capgo/capacitor-updater`
-  with `autoUpdate: false`. On launch the app calls `notifyAppReady()`, reads
-  `version.json` from the `ota-latest` GitHub release, gates on `minNativeVersion` against
-  `NATIVE_APP_VERSION`, then downloads/applies the zip bundle. Every network call fails
-  silently so an offline start still works.
-- `.github/workflows/build-apk.yml` republishes `allmova-ota-bundle.zip` (zip of `out/`),
-  `version.json` and `allmova-latest.apk` to the `ota-latest` release on every push to main.
+  with `autoUpdate: false`. `AppShell` calls `notifyAppReady()` at module load (before React
+  renders, so a crash in any screen cannot trigger capgo's auto-rollback). On launch the app
+  applies a bundle left pending by an earlier launch, then reads `version.json` from the
+  `ota-latest` release, gates on `minNativeVersion` against the real APK version
+  (`CapacitorUpdater.current().native`), downloads the zip and offers a reload; the bundle is
+  also applied automatically on the next launch. Every network call fails silently so an
+  offline start still works.
+  GitHub reads go through `CapacitorHttp` on native: release assets redirect to
+  `release-assets.githubusercontent.com`, which sends no `Access-Control-Allow-Origin`, so a
+  WebView `fetch` always fails there (this was why OTA never installed). Manifest reads are
+  cache-busted with `?t=Date.now()` because `ota-latest` is re-uploaded on every build.
+  `otaVersion` is `1.3.<run_number>` (semver) with a matching `buildNumber`; a bundle that
+  fails to boot twice is remembered in `allmova_ota_rejected_version` and skipped.
+  The Athlete Profile shows the native/bundle version and a manual "Cek Pembaruan" button.
+- `.github/workflows/build-apk.yml` republishes `allmova-ota-bundle.zip` (zip of `out/`,
+  `index.html` verified at the zip root), `version.json` and `allmova-latest.apk` to the
+  `ota-latest` release on every push to main. `minNativeVersion` tracks the
+  `versionName "1.2.<run>"` line in `android/app/build.gradle`; raising it locks out older APKs.
 
 ## Gotchas
 

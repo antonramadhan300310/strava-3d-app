@@ -13,6 +13,7 @@ import {
   LogOut,
   Mail,
   Pencil,
+  RefreshCw,
   Save,
   Trash2,
   UserRound,
@@ -20,6 +21,17 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import type { ActivityRecord } from '@/lib/activity';
+import {
+  NATIVE_APP_VERSION,
+  applyOtaBundle,
+  checkOtaUpdate,
+  currentBundleVersion,
+  installedOtaVersion,
+  isNativeApp,
+  nativeAppVersion,
+  otaRepoSlug,
+  type OtaFailureReason,
+} from '@/lib/otaUpdater';
 import {
   BIKE_PHYSICS,
   BIKE_TYPES,
@@ -68,6 +80,26 @@ function deleteAccountErrorMessage(cause: unknown): string {
     : 'Gagal menghapus akun. Periksa koneksi lalu coba lagi.';
 }
 
+/** Actionable Indonesian text: the whole point of the manual check is diagnosis. */
+function otaFailureText(reason: OtaFailureReason, detail?: string): string {
+  switch (reason) {
+    case 'network':
+      return 'Gagal menghubungi GitHub. Periksa koneksi internet lalu coba lagi.';
+    case 'not-found':
+      return `Manifest pembaruan tidak ditemukan di release ota-latest (${detail || 'HTTP error'}).`;
+    case 'invalid-manifest':
+      return 'Manifest pembaruan (version.json) tidak valid atau kosong.';
+    case 'download-failed':
+      return `Unduhan bundle gagal: ${detail || 'tanpa keterangan'}.`;
+    case 'rejected':
+      return `Bundle ${detail || ''} gagal dijalankan di perangkat ini; menunggu build berikutnya.`;
+    default:
+      return 'Pemeriksaan pembaruan gagal.';
+  }
+}
+
+type OtaNotice = { tone: 'info' | 'ok' | 'error'; text: string };
+
 export default function AthleteProfileSheet({ open, activities, onClose, onSaved }: Props) {
   const {
     user,
@@ -97,6 +129,10 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   );
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+  const [otaVersions, setOtaVersions] = useState<{ native: string; bundle: string } | null>(null);
+  const [otaChecking, setOtaChecking] = useState(false);
+  const [otaNotice, setOtaNotice] = useState<OtaNotice | null>(null);
+  const nativeOta = isNativeApp();
 
   // The context profile is the source of truth; localStorage only fills the gap
   // before the cloud fetch finishes or while the device is offline.
@@ -143,6 +179,97 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     if (!open) return;
     void refreshSubscription();
   }, [open, refreshSubscription]);
+
+  // Reads the APK version and the OTA bundle actually running on this device.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      const [nativeVersion, running] = await Promise.all([
+        nativeAppVersion(),
+        currentBundleVersion(),
+      ]);
+      if (cancelled) return;
+      setOtaVersions({
+        native: nativeVersion,
+        bundle: running ?? installedOtaVersion() ?? nativeVersion,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const runOtaCheck = async () => {
+    if (otaChecking) return;
+    setOtaChecking(true);
+    setOtaNotice({ tone: 'info', text: 'Memeriksa pembaruan…' });
+    try {
+      const outcome = await checkOtaUpdate({
+        onStage: (stage) =>
+          setOtaNotice({
+            tone: 'info',
+            text: stage === 'downloading' ? 'Mengunduh pembaruan…' : 'Memeriksa pembaruan…',
+          }),
+      });
+
+      if (outcome.status === 'not-native') {
+        setOtaNotice({
+          tone: 'info',
+          text: 'Pembaruan OTA hanya tersedia di aplikasi Android ALLMOVA.',
+        });
+        return;
+      }
+
+      if (outcome.status === 'up-to-date') {
+        setOtaNotice({ tone: 'ok', text: `Sudah versi terbaru (v${outcome.version}).` });
+        return;
+      }
+
+      if (outcome.status === 'native-required') {
+        setOtaNotice({
+          tone: 'error',
+          text: `Perlu APK baru: versi native minimal v${outcome.release.minNativeVersion}. Unduh dari halaman rilis ALLMOVA.`,
+        });
+        return;
+      }
+
+      if (outcome.status === 'error') {
+        setOtaNotice({ tone: 'error', text: otaFailureText(outcome.reason, outcome.detail) });
+        return;
+      }
+
+      setOtaVersions((current) => ({
+        native: current?.native ?? NATIVE_APP_VERSION,
+        bundle: outcome.bundle.version,
+      }));
+      setOtaNotice({
+        tone: 'info',
+        text: `Pembaruan v${outcome.bundle.version} siap, memuat ulang…`,
+      });
+      // Give the notice a frame to paint: `set()` tears the WebView down.
+      await new Promise((resolve) => window.setTimeout(resolve, 900));
+      const applied = await applyOtaBundle(outcome.bundle);
+      if (!applied.ok) {
+        setOtaNotice({
+          tone: 'error',
+          text: `Pembaruan gagal diterapkan: ${applied.detail || 'tanpa keterangan'}.`,
+        });
+        setOtaChecking(false);
+        return;
+      }
+      // Only reached when the reload did not tear the context down.
+      window.setTimeout(() => setOtaChecking(false), 4000);
+    } catch (cause) {
+      setOtaNotice({
+        tone: 'error',
+        text: `Pemeriksaan pembaruan gagal: ${
+          cause instanceof Error ? cause.message : 'tanpa keterangan'
+        }.`,
+      });
+      setOtaChecking(false);
+    }
+  };
 
   useEffect(() => {
     if (!open || isEditing) return;
@@ -714,6 +841,75 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                 {accountError}
               </p>
             )}
+          </section>
+
+          <section className="mt-3 rounded-xl border border-white/10 bg-[#151B1D]/70 p-3">
+            <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <RefreshCw size={11} />
+              Versi &amp; Pembaruan
+            </p>
+            <dl className="mt-2 flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-[11px] text-slate-400">Versi Aplikasi</dt>
+                <dd className="text-[11px] font-semibold tabular-nums text-slate-200">
+                  v{otaVersions?.native ?? NATIVE_APP_VERSION}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-[11px] text-slate-400">Bundle OTA Aktif</dt>
+                <dd className="max-w-[60%] truncate text-right text-[11px] font-semibold tabular-nums text-slate-200">
+                  {otaVersions ? (
+                    <>
+                      v{otaVersions.bundle}
+                      {otaVersions.bundle === otaVersions.native && (
+                        <span className="ml-1 font-normal text-slate-500">(bawaan APK)</span>
+                      )}
+                    </>
+                  ) : (
+                    'Memuat…'
+                  )}
+                </dd>
+              </div>
+            </dl>
+
+            <button
+              type="button"
+              onClick={() => void runOtaCheck()}
+              disabled={otaChecking || !nativeOta}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-[#B9F51E]/35 py-2.5 text-[11px] font-semibold text-[#B9F51E] transition active:scale-[0.98] disabled:opacity-50"
+            >
+              {otaChecking ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <RefreshCw size={14} />
+              )}
+              {otaChecking ? 'Memeriksa pembaruan…' : 'Cek Pembaruan'}
+            </button>
+
+            {otaNotice && (
+              <p
+                role="status"
+                className={`mt-2 text-[10px] font-medium leading-relaxed ${
+                  otaNotice.tone === 'error'
+                    ? 'text-rose-300'
+                    : otaNotice.tone === 'ok'
+                      ? 'text-[#B9F51E]'
+                      : 'text-slate-300'
+                }`}
+              >
+                {otaNotice.text}
+              </p>
+            )}
+
+            {!nativeOta && !otaNotice && (
+              <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                Pembaruan OTA hanya berjalan di aplikasi Android.
+              </p>
+            )}
+
+            <p className="mt-2 truncate text-[9px] text-slate-600">
+              Sumber: github.com/{otaRepoSlug()} · rilis ota-latest
+            </p>
           </section>
 
           <section className="mt-3 rounded-xl border border-rose-500/20 bg-[#151B1D]/70 p-3">

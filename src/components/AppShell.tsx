@@ -24,8 +24,14 @@ import { useRouteBuilder } from '@/hooks/useRouteBuilder';
 import type { ActivityRecord } from '@/lib/activity';
 import { guideToLngLat, toGuideRoute } from '@/lib/guideRoute';
 import { readMapProvider, writeMapProvider, type MapProvider } from '@/lib/mapProvider';
+import { isNativeApp, notifyAppReady } from '@/lib/otaUpdater';
 
 const NOTICE_MS = 3000;
+
+// Runs while the bundle is parsed, before React renders: capgo rolls a freshly
+// applied bundle back when the ready signal never arrives, so a crash in any
+// screen below must not be able to swallow it.
+if (typeof window !== 'undefined' && isNativeApp()) void notifyAppReady();
 
 export default function AppShell() {
   return (
