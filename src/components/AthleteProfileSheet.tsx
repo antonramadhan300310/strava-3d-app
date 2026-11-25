@@ -29,7 +29,6 @@ import {
   installedOtaVersion,
   isNativeApp,
   nativeAppVersion,
-  otaRepoSlug,
   type OtaFailureReason,
 } from '@/lib/otaUpdater';
 import {
@@ -84,9 +83,9 @@ function deleteAccountErrorMessage(cause: unknown): string {
 function otaFailureText(reason: OtaFailureReason, detail?: string): string {
   switch (reason) {
     case 'network':
-      return 'Gagal menghubungi GitHub. Periksa koneksi internet lalu coba lagi.';
+      return 'Gagal menghubungi server pembaruan. Periksa koneksi internet lalu coba lagi.';
     case 'not-found':
-      return `Manifest pembaruan tidak ditemukan di release ota-latest (${detail || 'HTTP error'}).`;
+      return `Manifest pembaruan tidak ditemukan di Supabase Storage (${detail || 'HTTP error'}).`;
     case 'invalid-manifest':
       return 'Manifest pembaruan (version.json) tidak valid atau kosong.';
     case 'download-failed':
@@ -908,7 +907,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
             )}
 
             <p className="mt-2 truncate text-[9px] text-slate-600">
-              Sumber: github.com/{otaRepoSlug()} · rilis ota-latest
+              Sumber: Supabase Storage • ota-updates
             </p>
           </section>
 
