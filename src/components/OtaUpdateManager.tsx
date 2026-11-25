@@ -4,12 +4,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Download, RefreshCw, X } from 'lucide-react';
 import {
   applyOtaBundle,
+  checkOtaUpdate,
+  clearPendingOtaBundle,
   currentBundleVersion,
-  downloadOtaBundle,
-  fetchOtaRelease,
-  installedOtaVersion,
   isNativeApp,
-  isNativeVersionOutdated,
   notifyAppReady,
   pendingOtaBundle,
   type OtaBundle,
@@ -19,7 +17,8 @@ import { openExternalUrl } from '@/lib/nativeTrackingService';
 
 /**
  * Runs the silent OTA check once per launch: a mandatory native update gate
- * first, then an optional live bundle download.
+ * first, then a live bundle download. A bundle downloaded on an earlier launch
+ * is applied here, before the user starts recording anything.
  */
 export default function OtaUpdateManager() {
   const [requiredRelease, setRequiredRelease] = useState<OtaRelease | null>(null);
@@ -32,32 +31,36 @@ export default function OtaUpdateManager() {
     let cancelled = false;
 
     void (async () => {
+      // Idempotent safety net: AppShell already signalled readiness at module
+      // load, this only matters if that call raced the native bridge.
       await notifyAppReady();
-      if (cancelled) return;
 
-      const release = await fetchOtaRelease();
-      if (cancelled || !release) return;
-
-      if (isNativeVersionOutdated(release.minNativeVersion)) {
-        setRequiredRelease(release);
-        return;
-      }
-
-      const running = await currentBundleVersion();
       const pending = pendingOtaBundle();
+      const running = await currentBundleVersion();
       if (cancelled) return;
 
-      // A bundle downloaded on an earlier launch is still waiting for a reload.
-      if (pending && pending.version !== running) {
-        setReadyBundle(pending);
-        return;
+      if (pending && pending.version === running) {
+        // The update already booted; nothing left to apply.
+        clearPendingOtaBundle();
+      } else if (pending) {
+        const applied = await applyOtaBundle(pending);
+        if (cancelled) return;
+        if (!applied.ok) {
+          // A stale bundle (deleted by a capgo rollback) must not block the check.
+          clearPendingOtaBundle();
+        } else {
+          return;
+        }
       }
 
-      const known = installedOtaVersion();
-      if (release.otaVersion === known || release.otaVersion === running) return;
+      const outcome = await checkOtaUpdate();
+      if (cancelled) return;
 
-      const bundle = await downloadOtaBundle(release);
-      if (!cancelled && bundle) setReadyBundle(bundle);
+      if (outcome.status === 'native-required') {
+        setRequiredRelease(outcome.release);
+      } else if (outcome.status === 'ready') {
+        setReadyBundle(outcome.bundle);
+      }
     })();
 
     return () => {
@@ -68,8 +71,8 @@ export default function OtaUpdateManager() {
   const reload = useCallback(async () => {
     if (!readyBundle) return;
     setApplying(true);
-    const applied = await applyOtaBundle(readyBundle.id);
-    if (!applied) setApplying(false);
+    const applied = await applyOtaBundle(readyBundle);
+    if (!applied.ok) setApplying(false);
   }, [readyBundle]);
 
   if (!isNativeApp()) return null;
