@@ -30,6 +30,7 @@ import {
   resetCleanAllmovaMapStyleSnapshots,
 } from '@/lib/mapStyleSanitizer';
 import { updateRouteEndpointMarkers } from '@/lib/routeEndpoints';
+import { createGuideEndpointElement } from '@/lib/guideRoute';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const TERRAIN_SOURCE_ID = 'terrain-source';
@@ -42,6 +43,10 @@ const TRACK_SOURCE_ID = 'live-track';
 const TRACK_CASING_LAYER_ID = 'live-track-casing';
 const TRACK_LAYER_ID = 'live-track-layer';
 const TRACK_COLOR = '#22d3ee';
+const GUIDE_SOURCE_ID = 'guide-route';
+const GUIDE_CASING_LAYER_ID = 'guide-route-casing';
+const GUIDE_LAYER_ID = 'guide-route-line';
+const GUIDE_COLOR = '#38bdf8';
 const DEFAULT_CENTER: [number, number] = [107.6191, -6.9175];
 const DEFAULT_ZOOM = 13;
 const PITCH_3D = 60;
@@ -89,6 +94,10 @@ type Props = {
   sportMode?: ActivityType;
   /** Personal heatmap drawn beneath the active route line and waypoint markers. */
   heatmap?: HeatmapLayers | null;
+  /** Follow Route guide polyline, drawn beneath the live track as a dashed line. */
+  guideRoute?: LngLat[] | null;
+  /** Bumped when a guide route is (re)selected, to frame its full extent. */
+  guideFitToken?: number;
 };
 
 export type HeatmapLayers = {
@@ -135,6 +144,8 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     activityType = 'cycling',
     sportMode = activityType,
     heatmap = null,
+    guideRoute = null,
+    guideFitToken = 0,
   },
   ref,
 ) {
@@ -142,6 +153,8 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const routeEndpointMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const guideMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const guideRef = useRef<LngLat[] | null>(guideRoute);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const userMarkerKeyRef = useRef<string | null>(null);
   const haloRef = useRef<HTMLDivElement | null>(null);
@@ -168,6 +181,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
 
   routeRef.current = route;
   trackRef.current = liveTrack;
+  guideRef.current = guideRoute;
   clickRef.current = onMapClick;
   positionRef.current = livePosition;
   is3DRef.current = is3D;
@@ -263,6 +277,9 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       ensureHeatmapLayers(map);
       appliedHeatmapRef.current = { lines: null };
       applyHeatmap(map, heatmapRef.current, appliedHeatmapRef);
+      // Added last so the guide sits under the heatmap, planning line and track.
+      ensureGuideLayers(map);
+      applyGuideRoute(map, guideRef.current);
     };
 
     map.on('style.load', () => {
@@ -299,6 +316,8 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       markersRef.current = [];
       for (const marker of routeEndpointMarkersRef.current) marker.remove();
       routeEndpointMarkersRef.current = [];
+      for (const marker of guideMarkersRef.current) marker.remove();
+      guideMarkersRef.current = [];
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
       userMarkerKeyRef.current = null;
@@ -452,6 +471,33 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     if (mapRef.current) applyTrack(mapRef.current, liveTrack);
   }, [liveTrack]);
 
+  // Guide line + S/F badges. Markers are rebuilt from scratch so removing or
+  // replacing a route never leaves a stale endpoint behind.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    applyGuideRoute(map, guideRoute);
+
+    for (const marker of guideMarkersRef.current) marker.remove();
+    guideMarkersRef.current = [];
+
+    if (!guideRoute || guideRoute.length < 2) return;
+    const first = guideRoute[0];
+    const last = guideRoute[guideRoute.length - 1];
+    const create = (role: 'start' | 'finish', coordinate: LngLat) =>
+      new maplibregl.Marker({
+        element: createGuideEndpointElement(role),
+        anchor: 'center',
+        rotationAlignment: 'viewport',
+        pitchAlignment: 'viewport',
+      })
+        .setLngLat(coordinate)
+        .addTo(map);
+
+    guideMarkersRef.current = [create('start', first), create('finish', last)];
+  }, [guideRoute]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -514,6 +560,17 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     );
     map.fitBounds(bounds, { padding: 64, maxZoom: 16, duration: 1200 });
   }, []);
+
+  // Smart zoom: framing the whole guide route on selection. Once recording
+  // starts, the auto-follow effect takes the camera back to the blue dot.
+  const guideFitRef = useRef(guideFitToken);
+  useEffect(() => {
+    if (guideFitToken === guideFitRef.current) return;
+    guideFitRef.current = guideFitToken;
+    if (!guideRoute || guideRoute.length < 2) return;
+    setAutoFollow(false);
+    fitCoordinates(guideRoute);
+  }, [guideFitToken, guideRoute, fitCoordinates]);
 
   const locate = useCallback(() => {
     setAutoFollow(true);
@@ -628,6 +685,71 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     </div>
   );
 });
+
+/**
+ * The Follow Route polyline: a charcoal casing under a dashed cyan line, both
+ * below the neon planning line and the live track so the recording always wins
+ * visually.
+ */
+function ensureGuideLayers(map: maplibregl.Map) {
+  const before = map.getLayer(HEATMAP_CASING_LAYER_ID)
+    ? HEATMAP_CASING_LAYER_ID
+    : map.getLayer(ROUTE_CASING_LAYER_ID)
+      ? ROUTE_CASING_LAYER_ID
+      : undefined;
+
+  if (!map.getSource(GUIDE_SOURCE_ID)) {
+    map.addSource(GUIDE_SOURCE_ID, { type: 'geojson', data: EMPTY_LINE });
+  }
+
+  if (!map.getLayer(GUIDE_CASING_LAYER_ID)) {
+    map.addLayer(
+      {
+        id: GUIDE_CASING_LAYER_ID,
+        type: 'line',
+        source: GUIDE_SOURCE_ID,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#0D1112',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5.5, 14, 8, 18, 10.5],
+          'line-opacity': 0.55,
+        },
+      },
+      before,
+    );
+  }
+
+  if (!map.getLayer(GUIDE_LAYER_ID)) {
+    map.addLayer(
+      {
+        id: GUIDE_LAYER_ID,
+        type: 'line',
+        source: GUIDE_SOURCE_ID,
+        layout: { 'line-join': 'round', 'line-cap': 'butt' },
+        paint: {
+          'line-color': GUIDE_COLOR,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 4.2, 18, 5.4],
+          'line-opacity': 0.95,
+          'line-dasharray': [2, 1.6],
+        },
+      },
+      before,
+    );
+  }
+}
+
+function applyGuideRoute(map: maplibregl.Map, guideRoute: LngLat[] | null) {
+  const source = map.getSource(GUIDE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  if (!source) return;
+  source.setData({
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'LineString',
+      coordinates: guideRoute && guideRoute.length > 1 ? guideRoute : [],
+    },
+  });
+}
 
 function applyRoute(map: maplibregl.Map, route: LngLatEle[] | null) {
   const source = map.getSource(ROUTE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;

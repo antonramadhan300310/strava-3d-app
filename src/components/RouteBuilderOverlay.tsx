@@ -9,6 +9,7 @@ import {
   Loader2,
   Mountain,
   MoveRight,
+  Navigation,
   Route,
   Save,
   Trash2,
@@ -20,8 +21,10 @@ import { FloatingButton, type MapViewHandle } from '@/components/MapView';
 import RouteSearchBar from '@/components/RouteSearchBar';
 import HeatmapControl from '@/components/HeatmapControl';
 import RouteTerrainSheet from '@/components/RouteTerrainSheet';
+import SavedRouteSheet from '@/components/SavedRouteSheet';
 import type { HeatmapState } from '@/hooks/useHeatmap';
 import type { RouteBuilderState } from '@/hooks/useRouteBuilder';
+import type { ActivityRecord } from '@/lib/activity';
 import type { LngLat } from '@/lib/polyline';
 import { PROFILES, type ActivityType } from '@/lib/valhalla';
 import {
@@ -45,12 +48,25 @@ type Props = {
   heatmap: HeatmapState;
   /** Frames the filtered heatmap extent on the map. */
   onFocusHeatmap: () => void;
+  /** Saved routes offered for Follow Route navigation. */
+  savedRoutes: ActivityRecord[];
+  savedRoutesLoading: boolean;
+  onFollowRoute: (activity: ActivityRecord) => void;
 };
 
-export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusHeatmap }: Props) {
+export default function RouteBuilderOverlay({
+  builder,
+  mapRef,
+  heatmap,
+  onFocusHeatmap,
+  savedRoutes,
+  savedRoutesLoading,
+  onFollowRoute,
+}: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showSave, setShowSave] = useState(false);
   const [showTerrain, setShowTerrain] = useState(false);
+  const [showRoutes, setShowRoutes] = useState(false);
   const [title, setTitle] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -146,6 +162,20 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
         <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
           <HeatmapControl heatmap={heatmap} onFocus={onFocusHeatmap} />
         </div>
+
+        <button
+          type="button"
+          onClick={() => setShowRoutes(true)}
+          className="pointer-events-auto flex w-[calc(100%-5.5rem)] max-w-md items-center justify-between rounded-xl border border-white/10 bg-[#151B1D]/90 px-3 py-2 text-[11px] font-semibold text-slate-100 shadow-lg backdrop-blur transition active:scale-[0.99]"
+        >
+          <span className="flex items-center gap-1.5">
+            <Navigation size={13} className="text-sky-300" />
+            Rute Tersimpan
+          </span>
+          <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] tabular-nums text-sky-200">
+            {savedRoutes.length}
+          </span>
+        </button>
       </div>
 
       <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 px-3 pb-[calc(env(safe-area-inset-bottom)+5.5rem)]">
@@ -290,6 +320,17 @@ export default function RouteBuilderOverlay({ builder, mapRef, heatmap, onFocusH
           onClose={() => setShowTerrain(false)}
         />
       )}
+
+      <SavedRouteSheet
+        open={showRoutes}
+        routes={savedRoutes}
+        loading={savedRoutesLoading}
+        onSelect={(activity) => {
+          setShowRoutes(false);
+          onFollowRoute(activity);
+        }}
+        onClose={() => setShowRoutes(false)}
+      />
     </>
   );
 }
