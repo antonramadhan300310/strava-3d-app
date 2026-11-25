@@ -9,11 +9,13 @@ import { CapacitorUpdater, type BundleInfo } from '@capgo/capacitor-updater';
  */
 export const NATIVE_APP_VERSION = '1.2.0';
 
-const FALLBACK_REPO = 'antonramadhan300310/strava-3d-app';
-const OTA_RELEASE_TAG = 'ota-latest';
-const MANIFEST_ASSET = 'version.json';
-const BUNDLE_ASSET = 'allmova-ota-bundle.zip';
-const APK_ASSET = 'allmova-latest.apk';
+/**
+ * OTA assets live in a public Supabase Storage bucket, so the manifest and the
+ * bundle are plain HTTP 200 responses with no cross-domain redirect.
+ */
+export const OTA_STORAGE_BASE =
+  'https://adnboduimzesbvbejdwr.supabase.co/storage/v1/object/public/ota-updates';
+const MANIFEST_URL = `${OTA_STORAGE_BASE}/version.json`;
 
 const APPLIED_KEY = 'allmova_ota_applied_v2';
 const PENDING_KEY = 'allmova_ota_pending_v2';
@@ -71,23 +73,14 @@ export function isNativeApp(): boolean {
   return Capacitor.isNativePlatform();
 }
 
-export function otaRepoSlug(): string {
-  const configured = process.env.NEXT_PUBLIC_GITHUB_REPO?.trim();
-  return configured && configured.includes('/') ? configured : FALLBACK_REPO;
-}
-
-function releaseAssetUrl(asset: string): string {
-  return `https://github.com/${otaRepoSlug()}/releases/download/${OTA_RELEASE_TAG}/${asset}`;
-}
-
 function withCacheBust(url: string): string {
   const separator = url.includes('?') ? '&' : '?';
   return `${url}${separator}t=${Date.now()}`;
 }
 
-/** `ota-latest` is re-uploaded on every build, so every read must bypass the CDN. */
+/** `version.json` is overwritten on every build, so every read must bypass the CDN. */
 export function otaManifestUrl(): string {
-  return withCacheBust(releaseAssetUrl(MANIFEST_ASSET));
+  return withCacheBust(MANIFEST_URL);
 }
 
 /** Compares dotted semver-ish versions; a missing or non-numeric segment is 0. */
@@ -173,9 +166,8 @@ export async function notifyAppReady(): Promise<void> {
 }
 
 /**
- * Native HTTP for every GitHub read: `release-assets.githubusercontent.com`
- * (the redirect target of a release download) sends no CORS header, so a
- * WebView `fetch` always fails there.
+ * Native HTTP for the manifest read: the WebView `fetch` path is kept for web
+ * builds, but on Android `CapacitorHttp` bypasses any WebView cache and CORS.
  */
 async function getText(
   url: string,
@@ -223,6 +215,9 @@ function parseManifest(text: string): OtaRelease | null {
 
   const buildNumber =
     Number.parseInt(String(raw.buildNumber ?? ''), 10) || parseBuildNumber(otaVersion);
+  const bundleUrl =
+    String(raw.url ?? raw.bundleUrl ?? '').trim() ||
+    `${OTA_STORAGE_BASE}/allmova-ota-${otaVersion}.zip`;
 
   return {
     otaVersion,
@@ -230,52 +225,24 @@ function parseManifest(text: string): OtaRelease | null {
     commitSha: String(raw.commitSha ?? ''),
     builtAt: String(raw.builtAt ?? ''),
     minNativeVersion: String(raw.minNativeVersion ?? '0.0.0'),
-    bundleUrl: String(raw.bundleUrl ?? '') || releaseAssetUrl(BUNDLE_ASSET),
-    apkUrl: String(raw.apkUrl ?? '') || releaseAssetUrl(APK_ASSET),
+    bundleUrl,
+    apkUrl: String(raw.apkUrl ?? ''),
     releaseNotes: String(raw.releaseNotes ?? ''),
   };
 }
 
 export async function fetchOtaRelease(signal?: AbortSignal): Promise<OtaFetchResult> {
-  const direct = await getText(otaManifestUrl(), signal);
-  if (direct && direct.status >= 200 && direct.status < 300) {
-    const release = parseManifest(direct.text);
-    if (release) return { ok: true, release };
-    return { ok: false, reason: 'invalid-manifest', detail: direct.text.slice(0, 120) };
+  const response = await getText(otaManifestUrl(), signal);
+  if (!response) return { ok: false, reason: 'network' };
+  if (response.status < 200 || response.status >= 300) {
+    return { ok: false, reason: 'not-found', detail: `HTTP ${response.status}` };
   }
 
-  // Fallback: resolve the asset through the release API in case the asset name
-  // ever changes, then read the manifest from its canonical download URL.
-  const api = await getText(
-    `https://api.github.com/repos/${otaRepoSlug()}/releases/tags/${OTA_RELEASE_TAG}`,
-    signal,
-  );
-  if (!api || api.status < 200 || api.status >= 300) {
-    return {
-      ok: false,
-      reason: direct ? 'not-found' : 'network',
-      detail: `HTTP ${direct?.status ?? api?.status ?? 0}`,
-    };
+  const release = parseManifest(response.text);
+  if (!release) {
+    return { ok: false, reason: 'invalid-manifest', detail: response.text.slice(0, 120) };
   }
-
-  let manifestUrl = releaseAssetUrl(MANIFEST_ASSET);
-  try {
-    const listing = JSON.parse(api.text) as {
-      assets?: { name?: string; browser_download_url?: string }[];
-    };
-    const asset = listing.assets?.find((entry) => entry.name === MANIFEST_ASSET);
-    if (asset?.browser_download_url) manifestUrl = asset.browser_download_url;
-  } catch {
-    // Keep the canonical asset URL.
-  }
-
-  const manifest = await getText(withCacheBust(manifestUrl), signal);
-  if (!manifest || manifest.status < 200 || manifest.status >= 300) {
-    return { ok: false, reason: 'not-found', detail: `HTTP ${manifest?.status ?? 0}` };
-  }
-
-  const release = parseManifest(manifest.text);
-  return release ? { ok: true, release } : { ok: false, reason: 'invalid-manifest' };
+  return { ok: true, release };
 }
 
 /** Bundle the app is running right now; the builtin bundle reports the native version. */
@@ -373,8 +340,10 @@ export async function downloadOtaBundle(release: OtaRelease): Promise<OtaDownloa
   }
 
   try {
+    // Every build publishes a new filename, so the manifest URL is immutable and
+    // safe to download as is; adding `?t=` would only defeat CDN caching.
     const info: BundleInfo = await CapacitorUpdater.download({
-      url: withCacheBust(release.bundleUrl),
+      url: release.bundleUrl,
       version: release.otaVersion,
     });
     const bundle: OtaBundle = {

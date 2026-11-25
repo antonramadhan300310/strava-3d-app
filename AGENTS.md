@@ -135,20 +135,23 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   with `autoUpdate: false`. `AppShell` calls `notifyAppReady()` at module load (before React
   renders, so a crash in any screen cannot trigger capgo's auto-rollback). On launch the app
   applies a bundle left pending by an earlier launch, then reads `version.json` from the
-  `ota-latest` release, gates on `minNativeVersion` against the real APK version
-  (`CapacitorUpdater.current().native`), downloads the zip and offers a reload; the bundle is
-  also applied automatically on the next launch. Every network call fails silently so an
-  offline start still works.
-  GitHub reads go through `CapacitorHttp` on native: release assets redirect to
-  `release-assets.githubusercontent.com`, which sends no `Access-Control-Allow-Origin`, so a
-  WebView `fetch` always fails there (this was why OTA never installed). Manifest reads are
-  cache-busted with `?t=Date.now()` because `ota-latest` is re-uploaded on every build.
+  public Supabase Storage bucket `ota-updates` (`OTA_STORAGE_BASE`), gates on
+  `minNativeVersion` against the real APK version (`CapacitorUpdater.current().native`),
+  downloads the zip and offers a reload; the bundle is also applied automatically on the next
+  launch. Every network call fails silently so an offline start still works.
+  The manifest read goes through `CapacitorHttp` on native and is cache-busted with
+  `?t=Date.now()` because `version.json` is overwritten on every build. The bundle itself is
+  named per build (`allmova-ota-1.3.<run>.zip`), so its URL is used exactly as published —
+  no query string — and the download is a direct HTTP 200 with no cross-domain redirect.
   `otaVersion` is `1.3.<run_number>` (semver) with a matching `buildNumber`; a bundle that
   fails to boot twice is remembered in `allmova_ota_rejected_version` and skipped.
   The Athlete Profile shows the native/bundle version and a manual "Cek Pembaruan" button.
-- `.github/workflows/build-apk.yml` republishes `allmova-ota-bundle.zip` (zip of `out/`,
-  `index.html` verified at the zip root), `version.json` and `allmova-latest.apk` to the
-  `ota-latest` release on every push to main. `minNativeVersion` tracks the
+- `.github/workflows/build-apk.yml` zips `out/` into `allmova-ota-1.3.<run>.zip` (with
+  `index.html` verified at the zip root), writes `version.json` pointing at the Supabase
+  public object URL, and uploads both to the `ota-updates` bucket with `curl`
+  (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `x-upsert: true`, `cache-control: max-age=0`,
+  non-2xx fails the job). The same artifacts plus `allmova-latest.apk` are still mirrored to
+  the `ota-latest` GitHub release as a backup channel. `minNativeVersion` tracks the
   `versionName "1.2.<run>"` line in `android/app/build.gradle`; raising it locks out older APKs.
 
 ## Gotchas
