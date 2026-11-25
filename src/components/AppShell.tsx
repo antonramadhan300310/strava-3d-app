@@ -10,7 +10,7 @@ import ProPaywallSheet from '@/components/ProPaywallSheet';
 import BottomNav, { type TabKey } from '@/components/BottomNav';
 import MapView, { type MapViewHandle } from '@/components/MapView';
 import RecordOverlay from '@/components/RecordOverlay';
-import RouteBuilderOverlay from '@/components/RouteBuilderOverlay';
+import RouteBuilderOverlay, { type RoutesSubTab } from '@/components/RouteBuilderOverlay';
 import ActivitiesPanel from '@/components/ActivitiesPanel';
 import ActivityDetail from '@/components/ActivityDetail';
 import MapProviderModal from '@/components/MapProviderModal';
@@ -21,10 +21,19 @@ import { useActivities } from '@/hooks/useActivities';
 import { useHeatmap } from '@/hooks/useHeatmap';
 import { useOfflineActivitySync } from '@/hooks/useOfflineActivitySync';
 import { useRouteBuilder } from '@/hooks/useRouteBuilder';
+import { useCuratedRoutes } from '@/hooks/useCuratedRoutes';
 import type { ActivityRecord } from '@/lib/activity';
+import {
+  curatedRouteDurationSeconds,
+  curatedRouteKey,
+  toCuratedGuideRoute,
+  type CuratedRoute,
+} from '@/lib/curatedRoutes';
 import { guideToLngLat, toGuideRoute } from '@/lib/guideRoute';
 import { readMapProvider, writeMapProvider, type MapProvider } from '@/lib/mapProvider';
 import { isNativeApp, notifyAppReady } from '@/lib/otaUpdater';
+import { buildElevationProfile } from '@/lib/routePlannerEngine';
+import { isSupabaseConfigured, savePlannedRoute } from '@/lib/supabase';
 
 const NOTICE_MS = 3000;
 
@@ -79,6 +88,7 @@ function TrackerApp() {
   const [providerChecked, setProviderChecked] = useState(false);
   const [heatmapFocusToken, setHeatmapFocusToken] = useState(0);
   const [guideFitToken, setGuideFitToken] = useState(0);
+  const [routesSubTab, setRoutesSubTab] = useState<RoutesSubTab>('mine');
   const consumedFocusRef = useRef(0);
   const mapRef = useRef<MapViewHandle | null>(null);
   const guide = useGuideRoute();
@@ -91,6 +101,8 @@ function TrackerApp() {
   useOfflineActivitySync(user?.id ?? null, activities.refresh);
   const isRoutes = tab === 'routes' && isPro;
   const isRecord = tab === 'record';
+  // The curated feed only loads once the Pro-only Routes tab is opened.
+  const curated = useCuratedRoutes(isRoutes);
   const isActivities = tab === 'activities';
 
   const savedRoutes = useMemo(
@@ -158,6 +170,26 @@ function TrackerApp() {
     [setGuideRoute],
   );
 
+  // A curated route uses the same Follow Route engine as a saved route: it
+  // becomes the guide and the Record tab takes over.
+  const followCuratedRoute = useCallback(
+    (route: CuratedRoute) => {
+      const guideRoute = toCuratedGuideRoute(route);
+      if (!guideRoute) {
+        setNotice('Rute rekomendasi ini belum punya cukup titik untuk dipandu.');
+        return;
+      }
+      setGuideRoute(guideRoute);
+      setGuideFitToken((token) => token + 1);
+      setTab('record');
+    },
+    [setGuideRoute],
+  );
+
+  const requireProForCurated = useCallback(() => {
+    requirePro('Rute rekomendasi PRO khusus pelanggan Pro ALLMOVA.');
+  }, [requirePro]);
+
   const selectProvider = useCallback((next: MapProvider) => {
     writeMapProvider(next);
     setProvider(next);
@@ -170,6 +202,34 @@ function TrackerApp() {
   const liveGps = isRecord || recorder.phase !== 'idle';
 
   const refreshActivities = activities.refresh;
+
+  // Copying a recommendation writes a planned route, so the Rute Saya list has
+  // to be reloaded before the saved badge shows up there.
+  const saveCuratedRoute = useCallback(
+    async (route: CuratedRoute) => {
+      if (!isSupabaseConfigured) {
+        throw new Error('Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.');
+      }
+      if (!user) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
+
+      await savePlannedRoute({
+        userId: user.id,
+        title: route.name,
+        activityType: route.sportType,
+        distanceMeters: Math.round(route.distanceMeters),
+        elevationGain: route.elevationGain,
+        durationSeconds: curatedRouteDurationSeconds(route),
+        coordinates: route.coordinates,
+        routingMode: 'snap',
+        elevationProfile: buildElevationProfile(route.coordinates),
+        curatedRouteId: curatedRouteKey(route),
+      });
+      await refreshActivities();
+      setNotice(`Rute "${route.name}" disimpan ke Rute Saya.`);
+    },
+    [refreshActivities, user],
+  );
+
   // Opening the feed or saving a route both change what should be listed.
   const savedRouteSignal = builder.info;
   useEffect(() => {
@@ -259,7 +319,7 @@ function TrackerApp() {
           active={!isActivities}
           waypoints={isRoutes ? builder.waypoints : []}
           route={isRoutes ? builder.coordinates : null}
-          onMapClick={isRoutes ? builder.addWaypoint : undefined}
+          onMapClick={isRoutes && routesSubTab === 'mine' ? builder.addWaypoint : undefined}
           livePosition={liveGps ? recorder.livePosition : null}
           liveTrack={liveGps ? recorder.track : null}
           gpsAccuracy={liveGps ? recorder.gpsAccuracy : null}
@@ -282,6 +342,13 @@ function TrackerApp() {
           savedRoutes={savedRoutes}
           savedRoutesLoading={activities.loading}
           onFollowRoute={followRoute}
+          subTab={routesSubTab}
+          onChangeSubTab={setRoutesSubTab}
+          curated={curated}
+          isPro={isPro}
+          onFollowCuratedRoute={followCuratedRoute}
+          onSaveCuratedRoute={saveCuratedRoute}
+          onRequirePro={requireProForCurated}
         />
       )}
       {isRecord && (

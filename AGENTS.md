@@ -35,6 +35,16 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   zeroes offline); `elevationGainOf` smooths before summing so DEM steps do not inflate
   the climb. `estimateSportMetrics` holds the speed/pace/Naismith formulas and feeds both
   the Routes summary card and the duration saved with a route.
+- `src/lib/curatedRoutes.ts` + `src/hooks/useCuratedRoutes.ts` — the `Rekomendasi` sub-tab
+  reads `curated_routes` (`is_active = true`, `created_at desc`, sport chips + name/city
+  search). `toCuratedRoute` accepts a GeoJSON geometry, a plain `[[lng,lat,ele], …]` array
+  or hex WKB, derives a missing distance/difficulty, and drops rows without a polyline.
+  `toCuratedGuideRoute` converts to the lat-first `GuideRoute` so "Ikuti Rute" reuses the
+  Follow Route engine; "Simpan" copies the row into `activities` via `savePlannedRoute`
+  with `curated_route_id` in the GeoJSON properties for duplicate detection. Migration:
+  `supabase/migrations/20261126010000_curated_routes.sql` (public read of active rows,
+  no client writes). The Routes tab's segmented control lives in `RouteBuilderOverlay`
+  (`RoutesSubTab`), and AppShell gates map taps to the `Rute Saya` sub-tab.
 - `src/hooks/useFlyoverPlayback.ts` — `requestAnimationFrame` driver. Map updates go through
   `onFrame` every frame; React state (HUD, scrubber) is throttled to ~16 Hz.
 - `src/components/FlyoverMap.tsx` — imperative `applyFrame` handle; owns the map, marker,

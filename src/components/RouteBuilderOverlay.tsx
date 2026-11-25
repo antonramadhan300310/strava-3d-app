@@ -12,6 +12,7 @@ import {
   Navigation,
   Route,
   Save,
+  Sparkles,
   Trash2,
   Undo2,
   Upload,
@@ -22,9 +23,12 @@ import RouteSearchBar from '@/components/RouteSearchBar';
 import HeatmapControl from '@/components/HeatmapControl';
 import RouteTerrainSheet from '@/components/RouteTerrainSheet';
 import SavedRouteSheet from '@/components/SavedRouteSheet';
+import CuratedRouteList from '@/components/CuratedRouteList';
 import type { HeatmapState } from '@/hooks/useHeatmap';
 import type { RouteBuilderState } from '@/hooks/useRouteBuilder';
+import type { CuratedRoutesState } from '@/hooks/useCuratedRoutes';
 import type { ActivityRecord } from '@/lib/activity';
+import type { CuratedRoute } from '@/lib/curatedRoutes';
 import type { LngLat } from '@/lib/polyline';
 import { PROFILES, type ActivityType } from '@/lib/valhalla';
 import {
@@ -42,6 +46,8 @@ const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
   hike: <Mountain size={18} />,
 };
 
+export type RoutesSubTab = 'mine' | 'recommended';
+
 type Props = {
   builder: RouteBuilderState;
   mapRef: React.RefObject<MapViewHandle | null>;
@@ -52,6 +58,14 @@ type Props = {
   savedRoutes: ActivityRecord[];
   savedRoutesLoading: boolean;
   onFollowRoute: (activity: ActivityRecord) => void;
+  /** `Rute Saya` (planner) or `Rekomendasi` (curated feed). */
+  subTab: RoutesSubTab;
+  onChangeSubTab: (next: RoutesSubTab) => void;
+  curated: CuratedRoutesState;
+  isPro: boolean;
+  onFollowCuratedRoute: (route: CuratedRoute) => void;
+  onSaveCuratedRoute: (route: CuratedRoute) => Promise<void>;
+  onRequirePro: () => void;
 };
 
 export default function RouteBuilderOverlay({
@@ -62,6 +76,13 @@ export default function RouteBuilderOverlay({
   savedRoutes,
   savedRoutesLoading,
   onFollowRoute,
+  subTab,
+  onChangeSubTab,
+  curated,
+  isPro,
+  onFollowCuratedRoute,
+  onSaveCuratedRoute,
+  onRequirePro,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showSave, setShowSave] = useState(false);
@@ -139,137 +160,158 @@ export default function RouteBuilderOverlay({
         }}
       />
 
-      <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] flex flex-col items-center gap-2">
-        <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
-          <RouteSearchBar onSelect={handleSearchSelect} getBiasCenter={getBiasCenter} />
+      <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] z-20 flex flex-col items-center gap-2">
+        <div className="pointer-events-auto w-full max-w-md">
+          <RoutesSubTabs value={subTab} onChange={onChangeSubTab} />
         </div>
 
-        {builder.metrics && (
-          <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
-            <MetricsCard
-              distanceMeters={builder.metrics.distanceMeters}
-              elevationGainMeters={builder.metrics.elevationGainMeters}
-              durationSeconds={builder.metrics.durationSeconds}
-              speedKmh={builder.metrics.estimate.speedKmh}
-              paceSecondsPerKm={builder.metrics.estimate.paceSecondsPerKm}
-              elevationProfile={builder.metrics.elevationProfile}
-              sportMode={builder.activityType}
-              onInfo={() => setShowTerrain(true)}
-            />
-          </div>
+        {subTab === 'mine' && (
+          <>
+            <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
+              <RouteSearchBar onSelect={handleSearchSelect} getBiasCenter={getBiasCenter} />
+            </div>
+    
+            {builder.metrics && (
+              <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
+                <MetricsCard
+                  distanceMeters={builder.metrics.distanceMeters}
+                  elevationGainMeters={builder.metrics.elevationGainMeters}
+                  durationSeconds={builder.metrics.durationSeconds}
+                  speedKmh={builder.metrics.estimate.speedKmh}
+                  paceSecondsPerKm={builder.metrics.estimate.paceSecondsPerKm}
+                  elevationProfile={builder.metrics.elevationProfile}
+                  sportMode={builder.activityType}
+                  onInfo={() => setShowTerrain(true)}
+                />
+              </div>
+            )}
+    
+            <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
+              <HeatmapControl heatmap={heatmap} onFocus={onFocusHeatmap} />
+            </div>
+    
+            <button
+              type="button"
+              onClick={() => setShowRoutes(true)}
+              className="pointer-events-auto flex w-[calc(100%-5.5rem)] max-w-md items-center justify-between rounded-xl border border-white/10 bg-[#151B1D]/90 px-3 py-2 text-[11px] font-semibold text-slate-100 shadow-lg backdrop-blur transition active:scale-[0.99]"
+            >
+              <span className="flex items-center gap-1.5">
+                <Navigation size={13} className="text-sky-300" />
+                Rute Tersimpan
+              </span>
+              <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] tabular-nums text-sky-200">
+                {savedRoutes.length}
+              </span>
+            </button>
+          </>
         )}
-
-        <div className="pointer-events-auto w-[calc(100%-5.5rem)] max-w-md self-start">
-          <HeatmapControl heatmap={heatmap} onFocus={onFocusHeatmap} />
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setShowRoutes(true)}
-          className="pointer-events-auto flex w-[calc(100%-5.5rem)] max-w-md items-center justify-between rounded-xl border border-white/10 bg-[#151B1D]/90 px-3 py-2 text-[11px] font-semibold text-slate-100 shadow-lg backdrop-blur transition active:scale-[0.99]"
-        >
-          <span className="flex items-center gap-1.5">
-            <Navigation size={13} className="text-sky-300" />
-            Rute Tersimpan
-          </span>
-          <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] tabular-nums text-sky-200">
-            {savedRoutes.length}
-          </span>
-        </button>
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 px-3 pb-[calc(env(safe-area-inset-bottom)+5.5rem)]">
-        {status && (
-          <p
-            className={`mx-auto max-w-md rounded-xl px-3 py-2 text-center text-xs font-medium shadow-lg ${
-              builder.error
-                ? 'bg-rose-500/95 text-white'
-                : builder.info
-                  ? 'bg-emerald-500/95 text-white'
-                  : 'bg-[#151B1D]/90 text-slate-100'
-            }`}
-            role="status"
-          >
-            {status}
-          </p>
-        )}
-
-        <div
-          className="mx-auto flex w-full max-w-md items-center gap-1 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-1 shadow-2xl backdrop-blur"
-          role="group"
-          aria-label="Mode perencanaan rute"
-        >
-          <RoutingModeButton
-            active={builder.routingMode === 'snap'}
-            label="Ikuti Jalur"
-            onClick={() => builder.changeRoutingMode('snap')}
-          >
-            <Route size={16} />
-          </RoutingModeButton>
-          <RoutingModeButton
-            active={builder.routingMode === 'offtrail'}
-            label="Garis Lurus (Off-Trail)"
-            onClick={() => builder.changeRoutingMode('offtrail')}
-          >
-            <MoveRight size={16} />
-          </RoutingModeButton>
+      {subTab === 'recommended' ? (
+        <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top)+4.6rem)] bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-10 px-3">
+          <CuratedRouteList
+            state={curated}
+            savedRoutes={savedRoutes}
+            isPro={isPro}
+            onFollow={onFollowCuratedRoute}
+            onSave={onSaveCuratedRoute}
+            onRequirePro={onRequirePro}
+          />
         </div>
+      ) : (
+        <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 px-3 pb-[calc(env(safe-area-inset-bottom)+5.5rem)]">
+          {status && (
+            <p
+              className={`mx-auto max-w-md rounded-xl px-3 py-2 text-center text-xs font-medium shadow-lg ${
+                builder.error
+                  ? 'bg-rose-500/95 text-white'
+                  : builder.info
+                    ? 'bg-emerald-500/95 text-white'
+                    : 'bg-[#151B1D]/90 text-slate-100'
+              }`}
+              role="status"
+            >
+              {status}
+            </p>
+          )}
 
-        <div className="mx-auto flex w-full max-w-md items-center justify-between gap-2 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-2 shadow-2xl backdrop-blur">
-          <div className="flex flex-1 gap-1" role="group" aria-label="Profil aktivitas">
-            {PROFILES.map((profile) => {
-              const selected = builder.activityType === profile.key;
-              return (
-                <button
-                  key={profile.key}
-                  type="button"
-                  onClick={() => builder.changeActivityType(profile.key)}
-                  aria-pressed={selected}
-                  className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] font-semibold transition active:scale-95 ${
-                    selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'text-slate-300 active:bg-[#1E2E16]'
-                  }`}
-                >
-                  {PROFILE_ICONS[profile.key]}
-                  {profile.label}
-                </button>
-              );
-            })}
+          <div
+            className="mx-auto flex w-full max-w-md items-center gap-1 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-1 shadow-2xl backdrop-blur"
+            role="group"
+            aria-label="Mode perencanaan rute"
+          >
+            <RoutingModeButton
+              active={builder.routingMode === 'snap'}
+              label="Ikuti Jalur"
+              onClick={() => builder.changeRoutingMode('snap')}
+            >
+              <Route size={16} />
+            </RoutingModeButton>
+            <RoutingModeButton
+              active={builder.routingMode === 'offtrail'}
+              label="Garis Lurus (Off-Trail)"
+              onClick={() => builder.changeRoutingMode('offtrail')}
+            >
+              <MoveRight size={16} />
+            </RoutingModeButton>
           </div>
 
-          <div className="flex items-center gap-2">
-            <FloatingButton
-              label="Batalkan titik terakhir"
-              onClick={builder.undo}
-              disabled={builder.waypoints.length === 0}
+          <div className="mx-auto flex w-full max-w-md items-center justify-between gap-2 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-2 shadow-2xl backdrop-blur">
+            <div className="flex flex-1 gap-1" role="group" aria-label="Profil aktivitas">
+              {PROFILES.map((profile) => {
+                const selected = builder.activityType === profile.key;
+                return (
+                  <button
+                    key={profile.key}
+                    type="button"
+                    onClick={() => builder.changeActivityType(profile.key)}
+                    aria-pressed={selected}
+                    className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-2 text-[10px] font-semibold transition active:scale-95 ${
+                      selected ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'text-slate-300 active:bg-[#1E2E16]'
+                    }`}
+                  >
+                    {PROFILE_ICONS[profile.key]}
+                    {profile.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <FloatingButton
+                label="Batalkan titik terakhir"
+                onClick={builder.undo}
+                disabled={builder.waypoints.length === 0}
+              >
+                <Undo2 size={18} />
+              </FloatingButton>
+              <FloatingButton
+                label="Hapus semua titik"
+                onClick={builder.clear}
+                disabled={builder.waypoints.length === 0 && !builder.coordinates}
+              >
+                <Trash2 size={18} />
+              </FloatingButton>
+            </div>
+          </div>
+
+          <div className="mx-auto flex w-full max-w-md items-center gap-2">
+            <ActionButton label="Import GPX" onClick={() => fileInputRef.current?.click()}>
+              <Upload size={18} />
+            </ActionButton>
+            <ActionButton
+              label="Export GPX"
+              onClick={() => void builder.exportGpx(title.trim() || builder.suggestedTitle)}
+              disabled={!hasRoute}
             >
-              <Undo2 size={18} />
-            </FloatingButton>
-            <FloatingButton
-              label="Hapus semua titik"
-              onClick={builder.clear}
-              disabled={builder.waypoints.length === 0 && !builder.coordinates}
-            >
-              <Trash2 size={18} />
-            </FloatingButton>
+              <Download size={18} />
+            </ActionButton>
+            <ActionButton label="Save Route" onClick={openSave} disabled={!hasRoute} primary>
+              <Save size={18} />
+            </ActionButton>
           </div>
         </div>
-
-        <div className="mx-auto flex w-full max-w-md items-center gap-2">
-          <ActionButton label="Import GPX" onClick={() => fileInputRef.current?.click()}>
-            <Upload size={18} />
-          </ActionButton>
-          <ActionButton
-            label="Export GPX"
-            onClick={() => void builder.exportGpx(title.trim() || builder.suggestedTitle)}
-            disabled={!hasRoute}
-          >
-            <Download size={18} />
-          </ActionButton>
-          <ActionButton label="Save Route" onClick={openSave} disabled={!hasRoute} primary>
-            <Save size={18} />
-          </ActionButton>
-        </div>
-      </div>
+      )}
 
       {showSave && (
         <div className="absolute inset-0 z-50 flex items-end justify-center overflow-y-auto bg-[#0D1112]/60 px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] backdrop-blur-sm sm:items-center sm:pb-4">
@@ -332,6 +374,65 @@ export default function RouteBuilderOverlay({
         onClose={() => setShowRoutes(false)}
       />
     </>
+  );
+}
+
+/** Segmented control that switches the Routes tab between the planner and the feed. */
+function RoutesSubTabs({
+  value,
+  onChange,
+}: {
+  value: RoutesSubTab;
+  onChange: (next: RoutesSubTab) => void;
+}) {
+  return (
+    <div
+      className="flex w-full items-center gap-1 rounded-2xl border border-white/10 bg-[#151B1D]/90 p-1 shadow-2xl backdrop-blur"
+      role="tablist"
+      aria-label="Jenis rute"
+    >
+      <SubTabButton
+        active={value === 'mine'}
+        label="Rute Saya"
+        onClick={() => onChange('mine')}
+      >
+        <Route size={14} />
+      </SubTabButton>
+      <SubTabButton
+        active={value === 'recommended'}
+        label="Rekomendasi"
+        onClick={() => onChange('recommended')}
+      >
+        <Sparkles size={14} />
+      </SubTabButton>
+    </div>
+  );
+}
+
+function SubTabButton({
+  active,
+  label,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] font-bold transition active:scale-[0.98] ${
+        active ? 'bg-[#B9F51E] hover:bg-[#A5E012] text-[#0D1112]' : 'text-slate-300 active:bg-[#1E2E16]'
+      }`}
+    >
+      {children}
+      {label}
+    </button>
   );
 }
 
