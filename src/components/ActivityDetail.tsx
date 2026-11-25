@@ -12,6 +12,7 @@ import {
   Loader2,
   Lock,
   Mountain,
+  Navigation,
   Pause,
   Play,
   RotateCcw,
@@ -88,6 +89,8 @@ type Props = {
   onNotice: (message: string) => void;
   /** Replaces the open activity after its track is rewritten in Supabase. */
   onTrackUpdated: (activity: ActivityRecord) => void;
+  /** Loads a planned route as the Follow Route guide and opens Record. */
+  onFollowRoute?: (activity: ActivityRecord) => void;
 };
 
 type DetailTab = 'summary' | 'splits' | 'pr';
@@ -105,6 +108,7 @@ export default function ActivityDetail({
   onClose,
   onNotice,
   onTrackUpdated,
+  onFollowRoute,
 }: Props) {
   const { isPro, user } = useAuth();
   const mapRef = useRef<FlyoverMapHandle | null>(null);
@@ -422,6 +426,18 @@ export default function ActivityDetail({
           cleanMode ? 'pointer-events-none opacity-0' : 'opacity-100'
         }`}
       >
+        {activity.isPlannedRoute && onFollowRoute && (
+          <button
+            type="button"
+            onClick={() => onFollowRoute(activity)}
+            aria-label="Ikuti rute ini"
+            title="Ikuti Rute"
+            className="flex h-10 items-center gap-1.5 rounded-full border border-sky-400/40 bg-sky-500/15 px-3 text-[11px] font-bold text-sky-300 shadow-xl backdrop-blur active:scale-95"
+          >
+            <Navigation size={16} />
+            Ikuti Rute
+          </button>
+        )}
         <button
           type="button"
           onClick={toggleMapStyle}

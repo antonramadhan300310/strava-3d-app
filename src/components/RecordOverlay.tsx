@@ -7,16 +7,25 @@ import {
   Footprints,
   Loader2,
   Mountain,
+  Navigation,
   Pause,
   Play,
   RotateCcw,
+  Route,
   Save,
   Square,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import type { ActivityRecorderState } from '@/hooks/useActivityRecorder';
+import { useGuideProgress, type GuideProgressState } from '@/hooks/useGuideProgress';
+import type { ActivityRecord } from '@/lib/activity';
+import { formatGuideDistance, type GuideRoute } from '@/lib/guideRoute';
+import { isRouteVoiceMuted, setRouteVoiceMuted } from '@/lib/routeVoice';
 import { RPE_SCALE, rpeLabel } from '@/lib/powerAndEffort';
 import type { ActivityType } from '@/lib/valhalla';
+import SavedRouteSheet from '@/components/SavedRouteSheet';
 
 const PROFILE_ICONS: Record<ActivityType, React.ReactNode> = {
   cycling: <Bike size={18} />,
@@ -49,17 +58,56 @@ function suggestedTitle(activityType: ActivityType): string {
   return `${ACTIVITY_NAMES[activityType]} ${stamp}`;
 }
 
-export default function RecordOverlay({ recorder }: { recorder: ActivityRecorderState }) {
+export default function RecordOverlay({
+  recorder,
+  guideRoute,
+  savedRoutes,
+  savedRoutesLoading,
+  onSelectGuideRoute,
+  onClearGuideRoute,
+  onSessionEnd,
+}: {
+  recorder: ActivityRecorderState;
+  guideRoute: GuideRoute | null;
+  savedRoutes: ActivityRecord[];
+  savedRoutesLoading: boolean;
+  onSelectGuideRoute: (activity: ActivityRecord) => void;
+  onClearGuideRoute: () => void;
+  onSessionEnd: () => void;
+}) {
   const [showSave, setShowSave] = useState(false);
   const [title, setTitle] = useState('');
   const [rpe, setRpe] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [voiceMuted, setVoiceMuted] = useState(false);
 
   const idle = recorder.phase === 'idle';
   // The HUD stays up while elevations are fetched so the numbers do not blink out.
   const active = recorder.phase !== 'idle';
   const finished = recorder.finishResult !== null;
+
+  // localStorage is client-only, so the mute preference loads after hydration.
+  useEffect(() => {
+    setVoiceMuted(isRouteVoiceMuted());
+  }, []);
+
+  const guiding = Boolean(guideRoute) && active;
+  const guideProgress = useGuideProgress(
+    guideRoute,
+    recorder.livePosition,
+    guiding,
+    !voiceMuted,
+  );
+
+  const toggleVoice = () => {
+    setVoiceMuted((current) => {
+      const next = !current;
+      setRouteVoiceMuted(next);
+      return next;
+    });
+  };
 
   // Keep a GPS fix flowing while the tab is open so the signal badge and blue
   // dot are live before Start is pressed.
@@ -93,6 +141,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
     try {
       await recorder.saveActivity(trimmed, rpe);
       setShowSave(false);
+      onSessionEnd();
     } catch (cause) {
       setSaveError(cause instanceof Error ? cause.message : 'Gagal menyimpan aktivitas.');
     } finally {
@@ -102,8 +151,51 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
 
   return (
     <>
+      {guiding && guideRoute && (
+        <GuideHud
+          route={guideRoute}
+          progress={guideProgress}
+          muted={voiceMuted}
+          onToggleVoice={toggleVoice}
+        />
+      )}
+
+      {idle && (
+        <div className="absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.2rem)] z-20 flex">
+          {guideRoute ? (
+            <div className="flex max-w-[calc(100%-4rem)] items-center gap-1.5 rounded-full border border-sky-400/40 bg-[#151B1D]/90 py-1 pl-3 pr-1 text-[11px] font-semibold text-slate-100 shadow-lg backdrop-blur">
+              <Navigation size={13} className="shrink-0 text-sky-300" />
+              <span className="truncate">{guideRoute.name}</span>
+              <button
+                type="button"
+                onClick={onClearGuideRoute}
+                aria-label="Lepas rute panduan"
+                className="ml-0.5 shrink-0 rounded-full p-1 text-slate-400 active:bg-[#1E2E16]"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="flex items-center gap-1.5 rounded-full border border-white/15 bg-[#151B1D]/90 px-3 py-1.5 text-[11px] font-semibold text-slate-100 shadow-lg backdrop-blur transition active:scale-95"
+            >
+              <Route size={13} className="text-sky-300" />
+              Pilih Rute
+            </button>
+          )}
+        </div>
+      )}
+
       {active && (
-        <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+4.5rem)] flex justify-center">
+        <div
+          className={`pointer-events-none absolute inset-x-3 flex justify-center ${
+            guiding && guideRoute
+              ? 'top-[calc(env(safe-area-inset-top)+6.4rem)]'
+              : 'top-[calc(env(safe-area-inset-top)+4.5rem)]'
+          }`}
+        >
           <TelemetryCard recorder={recorder} />
         </div>
       )}
@@ -236,6 +328,7 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
                 onClick={() => {
                   setShowSave(false);
                   recorder.discardFinish();
+                  onSessionEnd();
                 }}
                 aria-label="Tutup"
                 className="rounded-full p-1 text-slate-400 active:bg-[#1E2E16]"
@@ -309,7 +402,81 @@ export default function RecordOverlay({ recorder }: { recorder: ActivityRecorder
           </div>
         </div>
       )}
+
+      <SavedRouteSheet
+        open={pickerOpen}
+        routes={savedRoutes}
+        loading={savedRoutesLoading}
+        activeId={guideRoute?.id ?? null}
+        onSelect={(activity) => {
+          setPickerOpen(false);
+          onSelectGuideRoute(activity);
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
     </>
+  );
+}
+
+function GuideHud({
+  route,
+  progress,
+  muted,
+  onToggleVoice,
+}: {
+  route: GuideRoute;
+  progress: GuideProgressState | null;
+  muted: boolean;
+  onToggleVoice: () => void;
+}) {
+  const offRoute = progress?.offRoute ?? false;
+  const percent = Math.round((progress?.progress ?? 0) * 100);
+  const label = offRoute
+    ? `⚠ Di luar rute • ${Math.round(progress?.distanceToRouteMeters ?? 0)} m`
+    : `Sisa ${formatGuideDistance(progress?.remainingMeters ?? route.distanceMeters)}`;
+
+  return (
+    <div className="absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.2rem)] z-20 flex justify-center">
+      <div
+        className={`relative flex h-9 w-full max-w-md items-center gap-2 overflow-hidden rounded-full border px-3 text-[11px] font-semibold shadow-lg backdrop-blur ${
+          offRoute
+            ? 'border-amber-300/50 bg-amber-500/95 text-slate-900'
+            : 'border-sky-400/35 bg-[#151B1D]/92 text-slate-100'
+        }`}
+        role="status"
+        aria-live="polite"
+      >
+        <Navigation
+          size={13}
+          className={`shrink-0 ${offRoute ? 'text-slate-900' : 'text-sky-300'}`}
+        />
+        <span className="min-w-0 truncate">{route.name}</span>
+        <span
+          className={`ml-auto shrink-0 tabular-nums ${offRoute ? '' : 'text-sky-200'}`}
+          aria-label={offRoute ? 'Di luar rute' : 'Sisa jarak'}
+        >
+          {label}
+        </span>
+        <button
+          type="button"
+          onClick={onToggleVoice}
+          aria-label={muted ? 'Aktifkan panduan suara' : 'Bisukan panduan suara'}
+          aria-pressed={!muted}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+            offRoute ? 'text-slate-900 active:bg-black/10' : 'text-slate-300 active:bg-[#1E2E16]'
+          }`}
+        >
+          {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+        </button>
+
+        <span className="absolute inset-x-0 bottom-0 h-[3px] bg-white/15">
+          <span
+            className={`block h-full rounded-r-full ${offRoute ? 'bg-slate-900/60' : 'bg-sky-400'}`}
+            style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+          />
+        </span>
+      </div>
+    </div>
   );
 }
 

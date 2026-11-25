@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import AllmovaLogo from '@/components/AllmovaLogo';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { GuideRouteProvider, useGuideRoute } from '@/context/GuideRouteContext';
 import AuthScreen from '@/components/AuthScreen';
 import ProPaywallSheet from '@/components/ProPaywallSheet';
 import BottomNav, { type TabKey } from '@/components/BottomNav';
@@ -21,6 +22,7 @@ import { useHeatmap } from '@/hooks/useHeatmap';
 import { useOfflineActivitySync } from '@/hooks/useOfflineActivitySync';
 import { useRouteBuilder } from '@/hooks/useRouteBuilder';
 import type { ActivityRecord } from '@/lib/activity';
+import { guideToLngLat, toGuideRoute } from '@/lib/guideRoute';
 import { readMapProvider, writeMapProvider, type MapProvider } from '@/lib/mapProvider';
 
 const NOTICE_MS = 3000;
@@ -42,7 +44,11 @@ function AuthGate() {
   if (status !== 'authenticated' || !user) return <AuthScreen />;
   // Keying on the account id remounts every screen (and the MapLibre map) when
   // the session switches, so no in-memory track can survive into the new login.
-  return <TrackerApp key={user.id} />;
+  return (
+    <GuideRouteProvider key={user.id}>
+      <TrackerApp />
+    </GuideRouteProvider>
+  );
 }
 
 function SplashScreen() {
@@ -66,8 +72,10 @@ function TrackerApp() {
   const [providerModalOpen, setProviderModalOpen] = useState(false);
   const [providerChecked, setProviderChecked] = useState(false);
   const [heatmapFocusToken, setHeatmapFocusToken] = useState(0);
+  const [guideFitToken, setGuideFitToken] = useState(0);
   const consumedFocusRef = useRef(0);
   const mapRef = useRef<MapViewHandle | null>(null);
+  const guide = useGuideRoute();
   const builder = useRouteBuilder(mapRef);
   const recorder = useActivityRecorder();
   const activities = useActivities();
@@ -78,6 +86,15 @@ function TrackerApp() {
   const isRoutes = tab === 'routes' && isPro;
   const isRecord = tab === 'record';
   const isActivities = tab === 'activities';
+
+  const savedRoutes = useMemo(
+    () => activities.activities.filter((activity) => activity.isPlannedRoute),
+    [activities.activities],
+  );
+  const guideLngLat = useMemo(
+    () => (guide.activeGuideRoute ? guideToLngLat(guide.activeGuideRoute.coordinates) : null),
+    [guide.activeGuideRoute],
+  );
 
   const requirePro = useCallback((reason?: string) => {
     setPaywallReason(reason);
@@ -116,6 +133,25 @@ function TrackerApp() {
     setProviderChecked(true);
   }, []);
 
+  // Both entry points (Routes tab card and Record picker) land here: the route
+  // becomes the guide and the Record tab takes over.
+  const setGuideRoute = guide.setGuideRoute;
+  const clearGuideRoute = guide.clearGuideRoute;
+  const followRoute = useCallback(
+    (activity: ActivityRecord) => {
+      const route = toGuideRoute(activity);
+      if (!route) {
+        setNotice('Rute ini belum punya cukup titik untuk dipandu.');
+        return;
+      }
+      setGuideRoute(route);
+      setGuideFitToken((token) => token + 1);
+      setOpenActivity(null);
+      setTab('record');
+    },
+    [setGuideRoute],
+  );
+
   const selectProvider = useCallback((next: MapProvider) => {
     writeMapProvider(next);
     setProvider(next);
@@ -143,12 +179,16 @@ function TrackerApp() {
 
   // Saving a recording returns the recorder to idle; the new row must then show
   // up in the feed (and in the heatmap cache) without reopening the tab.
+  // The guide route is dropped at the same time so the next session starts clean.
   const previousPhaseRef = useRef(recorder.phase);
   useEffect(() => {
     const previous = previousPhaseRef.current;
     previousPhaseRef.current = recorder.phase;
-    if (previous !== 'idle' && recorder.phase === 'idle') void refreshActivities();
-  }, [recorder.phase, refreshActivities]);
+    if (previous !== 'idle' && recorder.phase === 'idle') {
+      void refreshActivities();
+      clearGuideRoute();
+    }
+  }, [recorder.phase, refreshActivities, clearGuideRoute]);
 
   const heatmapLayers = useMemo(
     () => ({
@@ -222,6 +262,8 @@ function TrackerApp() {
           activityType={recorder.activityType}
           sportMode={isRoutes ? builder.activityType : recorder.activityType}
           heatmap={heatmapLayers}
+          guideRoute={isRecord ? guideLngLat : null}
+          guideFitToken={guideFitToken}
         />
       )}
 
@@ -231,9 +273,22 @@ function TrackerApp() {
           mapRef={mapRef}
           heatmap={heatmap}
           onFocusHeatmap={focusHeatmap}
+          savedRoutes={savedRoutes}
+          savedRoutesLoading={activities.loading}
+          onFollowRoute={followRoute}
         />
       )}
-      {isRecord && <RecordOverlay recorder={recorder} />}
+      {isRecord && (
+        <RecordOverlay
+          recorder={recorder}
+          guideRoute={guide.activeGuideRoute}
+          savedRoutes={savedRoutes}
+          savedRoutesLoading={activities.loading}
+          onSelectGuideRoute={followRoute}
+          onClearGuideRoute={clearGuideRoute}
+          onSessionEnd={clearGuideRoute}
+        />
+      )}
 
       {isActivities && !openActivity && (
         <ActivitiesPanel
@@ -241,6 +296,7 @@ function TrackerApp() {
           onOpen={setOpenActivity}
           onNotice={setNotice}
           onOpenHeatmap={openHeatmapFromActivities}
+          onFollowRoute={followRoute}
         />
       )}
 
@@ -252,6 +308,7 @@ function TrackerApp() {
           onClose={closeActivity}
           onNotice={setNotice}
           onTrackUpdated={replaceActivity}
+          onFollowRoute={followRoute}
         />
       )}
 

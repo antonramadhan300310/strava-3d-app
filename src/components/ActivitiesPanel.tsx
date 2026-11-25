@@ -14,6 +14,7 @@ import {
   MapPin,
   Mountain,
   MountainSnow,
+  Navigation,
   Play,
   RefreshCw,
   Trash2,
@@ -53,6 +54,8 @@ type Props = {
   onNotice: (message: string) => void;
   /** Jumps to the Routes tab with the heatmap already switched on. */
   onOpenHeatmap: () => void;
+  /** Loads a saved route as the Follow Route guide and opens the Record tab. */
+  onFollowRoute: (activity: ActivityRecord) => void;
 };
 
 type ViewMode = 'history' | 'log';
@@ -62,7 +65,13 @@ const VIEW_MODES: { key: ViewMode; label: string; icon: React.ReactNode }[] = [
   { key: 'log', label: 'Training Log', icon: <BarChart3 size={13} /> },
 ];
 
-export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHeatmap }: Props) {
+export default function ActivitiesPanel({
+  activities,
+  onOpen,
+  onNotice,
+  onOpenHeatmap,
+  onFollowRoute,
+}: Props) {
   const { isPro, updateProfile } = useAuth();
   const [pendingDelete, setPendingDelete] = useState<ActivityRecord | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('history');
@@ -305,6 +314,9 @@ export default function ActivitiesPanel({ activities, onOpen, onNotice, onOpenHe
                     isPro ? void exportActivity(activity) : requirePro('Export GPX khusus Pro.')
                   }
                   onDelete={() => setPendingDelete(activity)}
+                  onFollowRoute={
+                    activity.isPlannedRoute ? () => onFollowRoute(activity) : undefined
+                  }
                 />
               ))}
             </ul>
@@ -451,6 +463,7 @@ function ActivityCard({
   onFlyover,
   onExport,
   onDelete,
+  onFollowRoute,
 }: {
   activity: ActivityRecord;
   hasPR: boolean;
@@ -459,6 +472,7 @@ function ActivityCard({
   onFlyover: () => void;
   onExport: () => void;
   onDelete: () => void;
+  onFollowRoute?: () => void;
 }) {
   return (
     <li className="rounded-2xl border border-white/10 bg-[#151B1D]/80 shadow-lg">
@@ -509,6 +523,11 @@ function ActivityCard({
         <CardAction label="Export GPX" onClick={onExport}>
           <Download size={14} />
         </CardAction>
+        {onFollowRoute && (
+          <CardAction label="Ikuti Rute" onClick={onFollowRoute}>
+            <Navigation size={14} />
+          </CardAction>
+        )}
         <CardAction label={deleting ? 'Menghapus…' : 'Hapus'} onClick={onDelete} danger busy={deleting}>
           {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
         </CardAction>
