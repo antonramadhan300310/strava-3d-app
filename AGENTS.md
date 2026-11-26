@@ -120,6 +120,18 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   `tier = 'free'` cannot erase an admin activation written to `plan_tier`.
   `supabase/migrations/20261127010000_profile_plan_aliases.sql` makes the two RPCs read the
   same aliases server-side.
+- `src/lib/planState.ts` is the single plan resolver: `mergePlanSignal` / `resolvePlanProfile`
+  / `describePlan`. The row and the RPC are always merged (never one instead of the other), a
+  server `pro` verdict is final because the server already ran the expiry check
+  (`serverVerifiedAt`), and `downgraded: true` beats the leftover `plan_tier` value. Every
+  consumer reads `isPro`/`tier` from `useAuth()` — `AthleteProfileSheet` must not recompute the
+  plan, or the badge and the nav lock disagree.
+- Timestamps are normalised by `parseTimestamp`/`toIsoTimestamp` in `src/lib/subscription.ts`
+  before any date maths: PostgREST returns `2026-12-09 23:32:40.194014+00` (space separator,
+  six fractional digits, `+00`), which is outside ISO-8601 and only parses on V8's legacy
+  parser. `getTrustedCurrentTimeMs()` is anchored to the newest `server_now` (projected with
+  device elapsed time, capped at a day), so a phone with a wrong date cannot expire an active
+  plan and a rolled-back clock cannot extend a trial.
 - Client writes to `profiles` go through an allowlist (`display_name`, `rider_profile`,
   `personal_goals`) in `AuthContext`; `tier`/`plan_tier`/`is_owner`/expiry columns are never
   sent, because a stale client would reset an admin activation back to Free.
@@ -195,6 +207,16 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   plus `allmova-latest.apk` are still mirrored to
   the `ota-latest` GitHub release as a backup channel. `minNativeVersion` tracks the
   `versionName "1.2.<run>"` line in `android/app/build.gradle`; raising it locks out older APKs.
+
+## Tests
+
+```bash
+npm run test:subscription   # plan state + Postgres timestamp parsing (scripts/subscription-plan.test.mjs)
+npm run test:ota            # OTA download path (scripts/ota-updater.test.mjs)
+```
+
+Both transpile the real `src/lib/*.ts` with the `typescript` package and stub only the
+platform boundary (Supabase client factory / Capacitor bridge).
 
 ## Security audit
 

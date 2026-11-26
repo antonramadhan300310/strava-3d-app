@@ -15,16 +15,20 @@ import { getSupabaseClientOrNull, isSupabaseConfigured } from '@/lib/supabase';
 import {
   PROFILE_COLUMNS,
   isOwnerEmail,
-  isProfilePro,
-  isTrialExpired,
   toAthleteProfile,
-  trialDaysLeft as trialDaysLeftOf,
   withTrustedTier,
   type AthleteProfile,
   type PlanTier,
   type ProfileRow,
   type ProfileUpdate,
 } from '@/lib/subscription';
+import {
+  describePlan,
+  mergePlanSignal,
+  resolvePlanProfile,
+  type FetchedProfile,
+  type PlanSignal,
+} from '@/lib/planState';
 import {
   cachedActiveDeviceId,
   claimActiveDevice,
@@ -36,7 +40,6 @@ import {
   subscribeToProfileChanges,
   syncSubscriptionAndDevice,
   writeSubscriptionSnapshot,
-  type SubscriptionSyncResult,
 } from '@/lib/subscriptionAndDeviceGuard';
 import {
   USER_STORAGE_KEYS,
@@ -114,7 +117,15 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   /** Permanently deletes the account (UU PDP) and clears every local cache. */
   deleteAccount: () => Promise<void>;
+  /** Re-reads `profiles` + the sync RPC and reports the outcome. */
   refreshProfile: () => Promise<void>;
+  /** True while `refreshProfile()` is in flight (drives the sheet spinner). */
+  subscriptionRefreshing: boolean;
+  /**
+   * Indonesian reason the last plan read/sync failed. `null` when the plan in
+   * `profile` is backed by a successful server read.
+   */
+  subscriptionError: string | null;
   refreshSubscription: () => Promise<void>;
   updateProfile: (patch: ProfileUpdate) => Promise<void>;
   saveAthleteProfile: (input: SaveAthleteProfileInput) => Promise<SaveAthleteProfileResult>;
@@ -187,6 +198,7 @@ function fallbackProfile(user: User): AthleteProfile {
       activeDeviceId: snapshot?.activeDeviceId ?? null,
       riderProfile: local,
       personalGoals: null,
+      serverVerifiedAt: null,
     },
     getTrustedCurrentTimeMs(),
   );
@@ -203,68 +215,6 @@ function seedLocalCache(profile: AthleteProfile): void {
   if (!readScopedStorage(USER_STORAGE_KEYS.displayName)) {
     writeScopedStorage(USER_STORAGE_KEYS.displayName, profile.displayName);
   }
-}
-
-/** Later of two ISO dates; an unparseable date defers to the other one. */
-function laterExpiry(a: string | null, b: string | null): string | null {
-  const aMs = a ? Date.parse(a) : Number.NaN;
-  const bMs = b ? Date.parse(b) : Number.NaN;
-  if (!Number.isFinite(aMs)) return b;
-  if (!Number.isFinite(bMs)) return a;
-  return aMs >= bMs ? a : b;
-}
-
-/**
- * Overlays a server RPC result onto a profile, then applies the trusted clock.
- *
- * The RPC and the `profiles` row are two views of the same account and either
- * can be stale: the admin panel may write `plan_tier` while the RPC still
- * reports `tier = 'free'`. Promotion therefore wins — a Pro signal from either
- * source is kept — and the expiry is taken from the Pro sources only, so a
- * Free row's empty date never turns into a lifetime plan.
- */
-function mergeSyncResult(
-  profile: AthleteProfile,
-  result: SubscriptionSyncResult,
-  now: number,
-): AthleteProfile {
-  const proExpiries: (string | null)[] = [];
-  if (result.tier === 'pro') proExpiries.push(result.proExpiresAt);
-  if (profile.tier === 'pro') proExpiries.push(profile.proExpiresAt);
-
-  // `null` from a Pro source means lifetime, which outranks any dated plan.
-  const proExpiresAt =
-    proExpiries.length === 0
-      ? null
-      : proExpiries.includes(null)
-        ? null
-        : proExpiries.reduce((latest, current) => laterExpiry(latest, current));
-
-  return withTrustedTier(
-    {
-      ...profile,
-      tier: proExpiries.length > 0 ? 'pro' : 'free',
-      proExpiresAt,
-      isOwner: result.isOwner || profile.isOwner,
-      activeDeviceId: result.activeDeviceId ?? profile.activeDeviceId,
-    },
-    now,
-  );
-}
-
-/**
- * A freshly read cloud row is authoritative for the plan: it is the same row
- * the admin panel edits. Only the offline fallback needs the RPC result, which
- * may promote it (the server knows about an activation the cache missed) but
- * never demote it.
- */
-function resolveFetchedProfile(
-  fetched: FetchedProfile,
-  sync: SubscriptionSyncResult | null,
-  now: number,
-): AthleteProfile {
-  if (fetched.cloud || !sync) return withTrustedTier(fetched.profile, now);
-  return mergeSyncResult(fetched.profile, sync, now);
 }
 
 function isTrialNoticeSeen(userId: string): boolean {
@@ -285,11 +235,18 @@ function markTrialNoticeSeen(userId: string): void {
   }
 }
 
-type FetchedProfile = {
-  profile: AthleteProfile;
-  /** False when the cloud row could not be read and the offline copy is used. */
-  cloud: boolean;
-};
+const PROFILE_READ_FAILED =
+  'Gagal membaca detail profil dari server. Status langganan memakai data terbaru yang tersedia.';
+const SYNC_FAILED = 'Gagal menyinkronkan status langganan. Periksa koneksi lalu coba lagi.';
+
+/** Indonesian, actionable copy for a failed `profiles` read. */
+function profileReadError(cause: unknown): string {
+  const raw = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
+  if (/jwt|token|session|not_authenticated|401/i.test(raw)) {
+    return 'Sesi login kedaluwarsa. Masuk kembali untuk menyegarkan status langganan.';
+  }
+  return raw ? `${PROFILE_READ_FAILED} (${raw})` : PROFILE_READ_FAILED;
+}
 
 async function fetchProfile(
   user: User,
@@ -297,7 +254,9 @@ async function fetchProfile(
 ): Promise<FetchedProfile> {
   const supabase = getSupabaseClientOrNull();
   const fallback = fallbackProfile(user);
-  if (!supabase) return { profile: fallback, cloud: false };
+  if (!supabase) {
+    return { profile: fallback, cloud: false, error: null };
+  }
 
   try {
     const { data, error } = await supabase
@@ -306,7 +265,12 @@ async function fetchProfile(
       .eq('id', user.id)
       .maybeSingle();
 
-    if (error) return { profile: fallback, cloud: false };
+    if (error) {
+      // Never silent: a swallowed read error is what left a paid account on the
+      // stale offline snapshot (and therefore on "AKUN FREE") for days.
+      console.warn('[ALLMOVA] gagal membaca public.profiles:', error.message);
+      return { profile: fallback, cloud: false, error: profileReadError(error.message) };
+    }
 
     if (data) {
       let profile = toAthleteProfile(data as ProfileRow, user.email ?? null, fallback.displayName);
@@ -346,7 +310,11 @@ async function fetchProfile(
             };
       }
 
-      return { profile: withTrustedTier(profile, getTrustedCurrentTimeMs()), cloud: true };
+      return {
+        profile: withTrustedTier(profile, getTrustedCurrentTimeMs()),
+        cloud: true,
+        error: null,
+      };
     }
 
     // A missing row is created without plan fields: the database trigger starts
@@ -373,10 +341,12 @@ async function fetchProfile(
             getTrustedCurrentTimeMs(),
           ),
           cloud: true,
+          error: null,
         }
-      : { profile: fallback, cloud: false };
-  } catch {
-    return { profile: fallback, cloud: false };
+      : { profile: fallback, cloud: false, error: PROFILE_READ_FAILED };
+  } catch (cause) {
+    console.warn('[ALLMOVA] gagal membaca public.profiles:', cause);
+    return { profile: fallback, cloud: false, error: profileReadError(cause) };
   }
 }
 
@@ -391,9 +361,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionKicked, setSessionKicked] = useState(false);
   const [googleSignInPending, setGoogleSignInPending] = useState(false);
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [subscriptionRefreshing, setSubscriptionRefreshing] = useState(false);
   const loadedUserIdRef = useRef<string | null>(null);
   const authEventSeenRef = useRef(false);
-  const latestSyncRef = useRef<SubscriptionSyncResult | null>(null);
+  const latestSyncRef = useRef<PlanSignal | null>(null);
   const claimedAtRef = useRef(0);
   const kickedRef = useRef(false);
   const oauthCallbackHandledRef = useRef(false);
@@ -401,44 +373,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const oauthCancelTimerRef = useRef<number | null>(null);
 
   /**
-   * True while the profile in state came from a freshly read `profiles` row.
-   * The row is then authoritative: an RPC result may still promote it (the
-   * server can know about an activation the read missed) but never demote it,
-   * so an admin downgrade is not undone by a stale `tier = 'pro'` column.
+   * Applies a server verdict to the profile in state. `mergePlanSignal` never
+   * demotes a Pro row and never lets a stale `tier = 'free'` erase a `plan_tier`
+   * activation, so this is the only write path a sync needs.
    */
-  const profileFromCloudRef = useRef(false);
-
-  const applySyncResult = useCallback((userId: string, result: SubscriptionSyncResult) => {
+  const applySyncResult = useCallback((userId: string, result: PlanSignal) => {
     latestSyncRef.current = result;
     setProfile((previous) => {
       if (!previous || previous.id !== userId) return previous;
-      const now = getTrustedCurrentTimeMs();
-      const next =
-        profileFromCloudRef.current && result.tier !== 'pro'
-          ? withTrustedTier(
-              {
-                ...previous,
-                isOwner: previous.isOwner || result.isOwner,
-                activeDeviceId: result.activeDeviceId ?? previous.activeDeviceId,
-              },
-              now,
-            )
-          : mergeSyncResult(previous, result, now);
+      const next = mergePlanSignal(previous, result, getTrustedCurrentTimeMs());
       writeSubscriptionSnapshot(userId, next);
       return next;
     });
   }, []);
 
-  /** Row -> context profile. The row is authoritative, so a downgrade sticks. */
+  /** Row -> context profile, with the same merge rule as a sync result. */
   const applyProfileRow = useCallback(
     (row: ProfileRow | Record<string, unknown>, nameFallback: string): AthleteProfile => {
-      profileFromCloudRef.current = true;
       return withTrustedTier(
         toAthleteProfile(row, session?.user?.email ?? null, nameFallback),
         getTrustedCurrentTimeMs(),
       );
     },
     [session],
+  );
+
+  /**
+   * Row read with one retry. A single failed request used to leave the account
+   * on the stale offline snapshot, which is exactly how a verified `pro` row
+   * still rendered as "AKUN FREE" until the next app restart.
+   */
+  const loadProfile = useCallback(
+    async (user: User, migration: LegacyMigration | null): Promise<FetchedProfile> => {
+      const first = await fetchProfile(user, migration);
+      if (first.cloud) return first;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return first;
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const retried = await fetchProfile(user, migration);
+      return retried.cloud ? retried : { ...retried, error: retried.error ?? first.error };
+    },
+    [],
   );
 
   const handleForeignDevice = useCallback(async (activeDeviceId: string | null) => {
@@ -460,7 +435,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     loadedUserIdRef.current = null;
-    profileFromCloudRef.current = false;
     setActiveUserId(null);
     setProfile(null);
     setSession(null);
@@ -480,9 +454,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile((previous) =>
         previous ? withTrustedTier(previous, getTrustedCurrentTimeMs()) : previous,
       );
+      if (typeof navigator !== 'undefined' && navigator.onLine !== false) {
+        setSubscriptionError((current) => current ?? SYNC_FAILED);
+      }
       return;
     }
 
+    setSubscriptionError(null);
     applySyncResult(user.id, result);
     await handleForeignDevice(result.activeDeviceId);
   }, [session, applySyncResult, handleForeignDevice]);
@@ -633,18 +611,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // No per-run cancellation: a token refresh re-runs this effect with the same
     // user id, and dropping the in-flight profile fetch would leave the app on
     // the splash screen. Late results are ignored when the user id changed.
-    void fetchProfile(user, migration)
+    void loadProfile(user, migration)
       .then((fetched) => {
         if (loadedUserIdRef.current !== user.id) return;
         seedLocalCache(fetched.profile);
-        const synced = resolveFetchedProfile(
+        const synced = resolvePlanProfile(
           fetched,
           latestSyncRef.current,
           getTrustedCurrentTimeMs(),
         );
-        profileFromCloudRef.current = fetched.cloud;
         writeSubscriptionSnapshot(user.id, synced);
         setProfile(synced);
+        setSubscriptionError(fetched.error);
         setStatus('authenticated');
       })
       .catch(() => {
@@ -652,7 +630,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(fallbackProfile(user));
         setStatus('authenticated');
       });
-  }, [session]);
+  }, [session, loadProfile]);
 
   // Sync on launch, when the app returns to the foreground and when it reconnects.
   useEffect(() => {
@@ -731,7 +709,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const user = session?.user;
     if (!user || !profile || status !== 'authenticated') return;
     if (isOwnerEmail(user.email)) return;
-    if (!isTrialExpired(profile, getTrustedCurrentTimeMs())) return;
+    if (!describePlan(profile, getTrustedCurrentTimeMs()).expired) return;
     if (isTrialNoticeSeen(user.id)) return;
     // Marked as soon as it is shown, so the popup appears exactly once even if
     // the app is closed while it is still on screen.
@@ -824,7 +802,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetAuthState = useCallback(() => {
     loadedUserIdRef.current = null;
     latestSyncRef.current = null;
-    profileFromCloudRef.current = false;
     kickedRef.current = false;
     setCachedActiveDeviceId(null);
     setActiveUserId(null);
@@ -834,6 +811,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTrialExpiredNotice(false);
     setGoogleSignInPending(false);
     setGoogleAuthError(null);
+    setSubscriptionError(null);
+    setSubscriptionRefreshing(false);
     setStatus('unauthenticated');
   }, []);
 
@@ -876,23 +855,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetAuthState();
   }, [session, resetAuthState]);
 
+  /**
+   * Re-reads the plan on demand (opening the Athlete Profile, tapping
+   * "Perbarui status"). The row and the RPC are fetched in parallel and always
+   * merged, so a failed `profiles` read still promotes to Pro from the RPC
+   * verdict, and a failure is reported instead of falling back silently.
+   */
   const refreshProfile = useCallback(async () => {
     const user = session?.user;
     if (!user) return;
 
-    await syncSubscription();
-    if (loadedUserIdRef.current !== user.id) return;
+    setSubscriptionRefreshing(true);
+    try {
+      const [fetched, signal] = await Promise.all([
+        loadProfile(user, null),
+        syncSubscriptionAndDevice(),
+      ]);
+      if (loadedUserIdRef.current !== user.id) return;
 
-    const fetched = await fetchProfile(user, null);
-    const synced = resolveFetchedProfile(
-      fetched,
-      latestSyncRef.current,
-      getTrustedCurrentTimeMs(),
-    );
-    profileFromCloudRef.current = fetched.cloud;
-    writeSubscriptionSnapshot(user.id, synced);
-    setProfile(synced);
-  }, [session, syncSubscription]);
+      if (signal) {
+        latestSyncRef.current = signal;
+        await handleForeignDevice(signal.activeDeviceId);
+        if (loadedUserIdRef.current !== user.id) return;
+      }
+
+      const now = getTrustedCurrentTimeMs();
+      const synced = resolvePlanProfile(fetched, signal ?? latestSyncRef.current, now);
+      writeSubscriptionSnapshot(user.id, synced);
+      setProfile(synced);
+
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      setSubscriptionError(
+        fetched.error ?? (signal || offline ? null : SYNC_FAILED),
+      );
+    } finally {
+      if (loadedUserIdRef.current === user.id) setSubscriptionRefreshing(false);
+    }
+  }, [handleForeignDevice, loadProfile, session]);
 
   const updateProfile = useCallback(
     async (patch: ProfileUpdate) => {
@@ -1026,12 +1025,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applyProfileRow, session],
   );
 
-  const isOwner = isOwnerEmail(session?.user?.email) || profile?.isOwner === true;
-  const trustedNow = getTrustedCurrentTimeMs();
-  const planIsPro = profile ? isProfilePro(profile, trustedNow) : false;
-  const isPro = isOwner ? ownerSimulatedTier === 'pro' : planIsPro;
-  const trialDays = profile ? trialDaysLeftOf(profile, trustedNow) : null;
-  const tier: PlanTier = profile?.tier ?? 'free';
+  // One derivation for every consumer: the sheet, the nav lock and the paywall
+  // all read these values, so they can never disagree with each other.
+  const plan = describePlan(profile, getTrustedCurrentTimeMs());
+  const isOwner = isOwnerEmail(session?.user?.email) || plan.isOwner;
+  const isPro = isOwner ? ownerSimulatedTier === 'pro' : plan.isPro;
+  const trialDays = plan.daysLeft;
+  const tier: PlanTier = plan.tier;
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -1060,6 +1060,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       deleteAccount,
       refreshProfile,
+      subscriptionRefreshing,
+      subscriptionError,
       refreshSubscription: syncSubscription,
       updateProfile,
       saveAthleteProfile,
@@ -1088,6 +1090,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       deleteAccount,
       refreshProfile,
+      subscriptionRefreshing,
+      subscriptionError,
       syncSubscription,
       updateProfile,
       saveAthleteProfile,
