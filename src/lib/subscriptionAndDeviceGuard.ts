@@ -1,8 +1,10 @@
 import { getSupabaseClientOrNull } from './supabase';
 import {
   isProTierKey,
+  parseTimestamp,
   readProfileExpiry,
   readProfileTier,
+  toIsoTimestamp,
   type PlanTier,
   type ProfileRow,
 } from './subscription';
@@ -17,8 +19,16 @@ import {
 
 const DEVICE_ID_KEY = 'allmova_device_id';
 const LAST_SERVER_MS_KEY = 'allmova_last_server_ms';
+const SERVER_SYNCED_AT_KEY = 'allmova_server_synced_at_ms';
 const ACTIVE_DEVICE_KEY = 'allmova_active_device_id';
 const SNAPSHOT_PREFIX = 'allmova_subscription_snapshot_';
+
+/**
+ * How far the server clock may be projected with the device clock since the
+ * last sync. It keeps the offline auto-downgrade moving forward while capping
+ * what a wildly wrong device date can do to a paid plan.
+ */
+const MAX_CLOCK_PROJECTION_MS = 86_400_000;
 
 let claimInFlight = false;
 
@@ -83,20 +93,39 @@ function readLastServerMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+function readServerSyncedAtMs(): number {
+  const raw = readLocal(SERVER_SYNCED_AT_KEY);
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 /** Remembers the newest server timestamp so a rolled-back clock cannot extend a trial. */
 export function recordServerNow(serverNow: string | null | undefined): void {
   if (!serverNow) return;
-  const parsed = Date.parse(serverNow);
-  if (!Number.isFinite(parsed)) return;
-  if (parsed > readLastServerMs()) writeLocal(LAST_SERVER_MS_KEY, String(parsed));
+  const parsed = parseTimestamp(serverNow);
+  if (parsed === null) return;
+  if (parsed > readLastServerMs()) {
+    writeLocal(LAST_SERVER_MS_KEY, String(parsed));
+    writeLocal(SERVER_SYNCED_AT_KEY, String(Date.now()));
+  }
 }
 
 /**
- * Wall clock that can only move forward: the larger of the device clock and the
- * newest `server_now` ever seen. Used for every trial expiry decision.
+ * Wall clock for every trial/expiry decision. The server is the authority: it
+ * already enforces the plan, so a phone whose date is set months ahead must not
+ * expire an active Pro plan locally, and a rolled-back clock must not extend a
+ * trial. The newest `server_now` is therefore the base, projected forward with
+ * the device's elapsed time since that sync (capped). The device clock is only
+ * used when the app has never reached the server.
  */
 export function getTrustedCurrentTimeMs(now: number = Date.now()): number {
-  return Math.max(now, readLastServerMs());
+  const serverMs = readLastServerMs();
+  if (serverMs <= 0) return now;
+
+  const syncedAtMs = readServerSyncedAtMs();
+  const elapsed = syncedAtMs > 0 ? Math.min(Math.max(0, now - syncedAtMs), MAX_CLOCK_PROJECTION_MS) : 0;
+  return serverMs + elapsed;
 }
 
 export function cachedActiveDeviceId(): string | null {
@@ -139,13 +168,18 @@ function normalizeRpcResult(data: unknown): SubscriptionSyncResult | null {
   const serverNow = asString(raw.server_now);
   recordServerNow(serverNow);
 
+  const downgraded = raw.downgraded === true;
+  // After a server-side downgrade `plan_tier` still holds the old "pro" value,
+  // so the verdict flag has to win over the column aliases.
+  const tier: PlanTier = !downgraded && isProTierKey(readProfileTier(raw)) ? 'pro' : 'free';
+
   return {
-    tier: isProTierKey(readProfileTier(raw)) ? 'pro' : 'free',
-    proExpiresAt: readProfileExpiry(raw),
+    tier,
+    proExpiresAt: toIsoTimestamp(readProfileExpiry(raw)),
     isOwner: raw.is_owner === true,
     activeDeviceId: asString(raw.active_device_id),
     serverNow,
-    downgraded: raw.downgraded === true,
+    downgraded,
   };
 }
 
@@ -247,7 +281,7 @@ export function readSubscriptionSnapshot(userId: string): SubscriptionSnapshot |
     const record = parsed as Record<string, unknown>;
     return {
       tier: isProTierKey(asString(record.tier)) ? 'pro' : 'free',
-      proExpiresAt: asString(record.proExpiresAt),
+      proExpiresAt: toIsoTimestamp(asString(record.proExpiresAt)),
       isOwner: record.isOwner === true,
       activeDeviceId: asString(record.activeDeviceId),
     };

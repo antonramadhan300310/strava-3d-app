@@ -30,6 +30,13 @@ export type AthleteProfile = {
   activeDeviceId: string | null;
   riderProfile: unknown;
   personalGoals: unknown;
+  /**
+   * Trusted-clock time of the server verdict that confirmed this plan, or
+   * `null` when the plan only came from a row read or an offline copy. The
+   * server already ran the expiry check, so a confirmed plan is never expired
+   * locally by a device clock that is set wrong.
+   */
+  serverVerifiedAt: number | null;
 };
 
 /** Plan fields are server-owned; the client only writes editable columns. */
@@ -83,10 +90,56 @@ export function readProfileExpiry(row: Record<string, unknown>): string | null {
   return firstStringValue(row, EXPIRY_KEYS);
 }
 
+/**
+ * PostgREST serialises a `timestamptz` as Postgres text, not ISO-8601:
+ * `2026-12-09 23:32:40.194014+00` — a space instead of `T`, six fractional
+ * digits and a two-digit offset. `Date.parse` accepts that only through V8's
+ * legacy fallback parser: the shape is outside the spec, so any other engine
+ * can return `NaN` and silently drop the expiry — and with it the plan.
+ * Normalise once, here, before any date maths.
+ */
+const PG_TIMESTAMP =
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/;
+
+function normalizeOffset(offset: string): string {
+  if (/^[+-]\d{2}$/.test(offset)) return `${offset}:00`;
+  if (/^[+-]\d{4}$/.test(offset)) return `${offset.slice(0, 3)}:${offset.slice(3)}`;
+  return offset;
+}
+
+/** Epoch milliseconds for an ISO string, Postgres text timestamp or epoch number. */
+export function parseTimestamp(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+
+  const raw = value.trim();
+  if (raw.length === 0) return null;
+
+  const match = PG_TIMESTAMP.exec(raw);
+  if (match) {
+    const [, date, time, fraction, offset] = match;
+    const millis = fraction ? fraction.slice(0, 3).padEnd(3, '0') : '000';
+    // Postgres omits the offset for a `timestamp` (no time zone) column; the
+    // server writes UTC, so a missing offset is read as UTC rather than local.
+    const zone = offset === undefined ? 'Z' : offset === 'Z' ? 'Z' : normalizeOffset(offset);
+    const parsed = Date.parse(`${date}T${time}.${millis}${zone}`);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const direct = Date.parse(raw);
+  return Number.isFinite(direct) ? direct : null;
+}
+
+/** Canonical ISO-8601 string, so every downstream `new Date()` is portable. */
+export function toIsoTimestamp(value: unknown): string | null {
+  const parsed = parseTimestamp(value);
+  return parsed === null ? null : new Date(parsed).toISOString();
+}
+
 /** A typo in an expiry column must not lock a paid account out of Pro. */
 function normalizeExpiry(value: string | null): string | null {
   if (!value) return null;
-  return Number.isFinite(Date.parse(value)) ? value : null;
+  return toIsoTimestamp(value);
 }
 
 export const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL ?? '').trim().toLowerCase();
@@ -131,6 +184,7 @@ export function toAthleteProfile(
         : null,
     riderProfile: record.rider_profile ?? null,
     personalGoals: record.personal_goals ?? null,
+    serverVerifiedAt: null,
   };
 }
 
@@ -139,8 +193,9 @@ export function isProfilePro(profile: AthleteProfile, now: number = Date.now()):
   if (profile.isOwner) return true;
   if (profile.tier !== 'pro') return false;
   if (!profile.proExpiresAt) return true;
-  const expiresAt = Date.parse(profile.proExpiresAt);
-  return Number.isFinite(expiresAt) && expiresAt > now;
+  if (profile.serverVerifiedAt !== null) return true;
+  const expiresAt = parseTimestamp(profile.proExpiresAt);
+  return expiresAt !== null && expiresAt > now;
 }
 
 /** Owner and lifetime Pro never expire; both show the crown badge. */
@@ -150,22 +205,27 @@ export function isLifetimePro(profile: AthleteProfile): boolean {
 
 export function isTrialPro(profile: AthleteProfile, now: number = Date.now()): boolean {
   if (profile.isOwner || profile.tier !== 'pro' || !profile.proExpiresAt) return false;
-  const expiresAt = Date.parse(profile.proExpiresAt);
-  return Number.isFinite(expiresAt) && expiresAt > now;
+  if (profile.serverVerifiedAt !== null) return true;
+  const expiresAt = parseTimestamp(profile.proExpiresAt);
+  return expiresAt !== null && expiresAt > now;
 }
 
 /** Whole days left in the trial, never below 1 so the badge stays positive. */
 export function trialDaysLeft(profile: AthleteProfile, now: number = Date.now()): number | null {
   if (!isTrialPro(profile, now) || !profile.proExpiresAt) return null;
-  const expiresAt = Date.parse(profile.proExpiresAt);
-  return Math.max(1, Math.ceil((expiresAt - now) / 86_400_000));
+  const expiresAt = parseTimestamp(profile.proExpiresAt);
+  if (expiresAt === null) return null;
+  // The device clock is not trusted once the server confirmed the plan.
+  const reference = profile.serverVerifiedAt ?? now;
+  return Math.max(1, Math.ceil((expiresAt - reference) / 86_400_000));
 }
 
 /** The trial has run out and the account is not an owner. */
 export function isTrialExpired(profile: AthleteProfile, now: number = Date.now()): boolean {
   if (profile.isOwner || !profile.proExpiresAt) return false;
-  const expiresAt = Date.parse(profile.proExpiresAt);
-  return Number.isFinite(expiresAt) && expiresAt <= now;
+  if (profile.serverVerifiedAt !== null) return false;
+  const expiresAt = parseTimestamp(profile.proExpiresAt);
+  return expiresAt !== null && expiresAt <= now;
 }
 
 /**

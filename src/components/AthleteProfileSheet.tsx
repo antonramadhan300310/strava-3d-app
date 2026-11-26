@@ -42,7 +42,7 @@ import {
   type BikeType,
   type RiderProfile,
 } from '@/lib/riderProfile';
-import { isLifetimePro, isProfilePro, isTrialPro } from '@/lib/subscription';
+import { isLifetimePro, isTrialPro, parseTimestamp } from '@/lib/subscription';
 import ProPaywallSheet from './ProPaywallSheet';
 import PrivacyPolicyLink from './PrivacyPolicyLink';
 
@@ -103,9 +103,12 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   const {
     user,
     profile: account,
+    isPro,
     isOwner,
     trialDaysLeft,
     refreshProfile,
+    subscriptionError,
+    subscriptionRefreshing,
     ownerSimulatedTier,
     setOwnerSimulatedTier,
     signOut,
@@ -295,17 +298,18 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     };
   }, [activities]);
 
-  const accountPro = account ? isProfilePro(account) : false;
   const lifetimePro = account ? isLifetimePro(account) : false;
   const trialPro = account ? isTrialPro(account) : false;
-  /** Owner and an active Pro plan both hide the upgrade button. */
-  const proActive = isOwner || accountPro;
+  /**
+   * `isPro` comes from the auth context and nowhere else: the sheet, the bottom
+   * navigation lock and the paywall must never compute the plan separately, or
+   * one of them shows "AKUN FREE" while the other unlocks Pro.
+   */
+  const proActive = isPro;
   const proExpiryLabel = useMemo(() => {
-    const raw = account?.proExpiresAt;
-    if (!raw) return null;
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) return null;
-    return date.toLocaleDateString('id-ID', {
+    const expiresAt = parseTimestamp(account?.proExpiresAt);
+    if (expiresAt === null) return null;
+    return new Date(expiresAt).toLocaleDateString('id-ID', {
       day: '2-digit',
       month: 'long',
       year: 'numeric',
@@ -484,7 +488,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                   <Crown size={9} />
                   OWNER
                 </span>
-              ) : accountPro ? (
+              ) : proActive ? (
                 <span className="flex items-center gap-1 rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#0D1112]">
                   <Crown size={9} />
                   AKUN PRO{trialPro ? ' • TRIAL' : ''}
@@ -565,6 +569,25 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                 Upgrade ke Pro
               </button>
             )}
+
+            {subscriptionError && (
+              <p
+                role="status"
+                className="mt-1.5 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2 py-1.5 text-[10px] leading-relaxed text-amber-200"
+              >
+                {subscriptionError}
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void refreshProfile()}
+              disabled={subscriptionRefreshing}
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-[#1E2E16]/60 py-1.5 text-[10px] font-semibold text-slate-300 transition active:scale-[0.99] disabled:opacity-60"
+            >
+              <RefreshCw size={11} className={subscriptionRefreshing ? 'animate-spin' : undefined} />
+              {subscriptionRefreshing ? 'Memperbarui status…' : 'Perbarui status langganan'}
+            </button>
 
             <dl className="mt-3 grid grid-cols-4 gap-1">
               <StatBox label="Total Jarak" value={stats.distanceKm.toFixed(1)} unit="km" />
