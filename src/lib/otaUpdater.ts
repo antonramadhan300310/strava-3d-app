@@ -29,6 +29,8 @@ const LEGACY_BUNDLE_ID_KEY = 'allmova_ota_bundle_id';
  */
 const MAX_APPLY_ATTEMPTS = 2;
 const HTTP_TIMEOUT_MS = 12000;
+const BUNDLE_TIMEOUT_MS = 30000;
+const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 
 export type OtaRelease = {
   otaVersion: string;
@@ -37,6 +39,8 @@ export type OtaRelease = {
   builtAt: string;
   minNativeVersion: string;
   bundleUrl: string;
+  /** SHA-256 hex of the zip. capgo refuses `download()` without it; '' means "not published". */
+  bundleChecksum: string;
   apkUrl: string;
   releaseNotes: string;
 };
@@ -201,6 +205,116 @@ async function getText(
   }
 }
 
+/** capgo requires a lowercase SHA-256 hex checksum for every bundle download. */
+export function normalizeOtaChecksum(value: unknown): string {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return CHECKSUM_PATTERN.test(raw) ? raw : '';
+}
+
+let downloadFailureDetail: string | null = null;
+let downloadFailureListenerBound = false;
+
+/**
+ * capgo rejects with only the URL (`call.reject(msg, ex)` drops the cause), so
+ * the native `downloadFailed` event is the only extra detail available.
+ */
+function bindDownloadFailureListener(): void {
+  if (downloadFailureListenerBound || !isNativeApp()) return;
+  downloadFailureListenerBound = true;
+  void CapacitorUpdater.addListener('downloadFailed', (info) => {
+    const version = typeof info?.version === 'string' && info.version ? ` v${info.version}` : '';
+    downloadFailureDetail = `event downloadFailed${version}`;
+    console.warn('[OTA] downloadFailed', info);
+  }).catch(() => {
+    // Older plugin builds may not expose the event; the reject still surfaces.
+  });
+}
+
+function digestToHex(digest: ArrayBuffer): string {
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function sha256Hex(data: ArrayBuffer | Uint8Array): Promise<string> {
+  try {
+    const view = data instanceof Uint8Array ? data : new Uint8Array(data);
+    const digest = await crypto.subtle.digest('SHA-256', view as unknown as BufferSource);
+    return digestToHex(digest);
+  } catch {
+    return '';
+  }
+}
+
+function base64ToBytes(base64: string): Uint8Array | null {
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Hashes the published zip. Manifests written before the checksum field existed
+ * still install because the plugin rejects any download without a checksum.
+ */
+async function computeRemoteChecksum(url: string): Promise<string> {
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (response.ok) {
+      const checksum = await sha256Hex(await response.arrayBuffer());
+      if (checksum) return checksum;
+    }
+  } catch {
+    // CORS or WebView cache miss: fall through to native HTTP.
+  }
+  try {
+    const response = await CapacitorHttp.get({
+      url,
+      responseType: 'arraybuffer',
+      connectTimeout: BUNDLE_TIMEOUT_MS,
+      readTimeout: BUNDLE_TIMEOUT_MS,
+    });
+    if (response.status < 200 || response.status >= 300) return '';
+    const base64 = typeof response.data === 'string' ? response.data : '';
+    const bytes = base64 ? base64ToBytes(base64) : null;
+    return bytes ? sha256Hex(bytes) : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Failure-path diagnostics: reachability, size and whether the bucket matches the manifest. */
+async function describeBundleUrl(url: string, expected: string): Promise<string> {
+  const parts: string[] = [];
+  try {
+    const head = await CapacitorHttp.request({
+      url,
+      method: 'HEAD',
+      connectTimeout: HTTP_TIMEOUT_MS,
+      readTimeout: HTTP_TIMEOUT_MS,
+    });
+    const headers = (head.headers ?? {}) as Record<string, string>;
+    const length = headers['content-length'] ?? headers['Content-Length'];
+    parts.push(`HEAD ${head.status}${length ? ` ${length} B` : ''}`);
+  } catch {
+    parts.push('HEAD gagal');
+  }
+
+  const actual = await computeRemoteChecksum(url);
+  if (actual && expected) {
+    parts.push(
+      actual === expected
+        ? 'sha256 cocok'
+        : `sha256 beda (${actual.slice(0, 12)}… vs ${expected.slice(0, 12)}…)`,
+    );
+  }
+  return parts.join(' · ');
+}
+
 function parseManifest(text: string): OtaRelease | null {
   let raw: Record<string, unknown>;
   try {
@@ -226,6 +340,7 @@ function parseManifest(text: string): OtaRelease | null {
     builtAt: String(raw.builtAt ?? ''),
     minNativeVersion: String(raw.minNativeVersion ?? '0.0.0'),
     bundleUrl,
+    bundleChecksum: normalizeOtaChecksum(raw.checksum ?? raw.bundleChecksum ?? raw.sha256),
     apkUrl: String(raw.apkUrl ?? ''),
     releaseNotes: String(raw.releaseNotes ?? ''),
   };
@@ -339,12 +454,27 @@ export async function downloadOtaBundle(release: OtaRelease): Promise<OtaDownloa
     return { ok: true, bundle: pending };
   }
 
+  bindDownloadFailureListener();
+  downloadFailureDetail = null;
+
+  // `checksum` is mandatory in capgo 6.53.0 (CapgoUpdater.requireBundleChecksum)
+  // and an empty string is treated as "missing", never as "skip verification".
+  const checksum = release.bundleChecksum || (await computeRemoteChecksum(release.bundleUrl));
+  if (!checksum) {
+    return {
+      ok: false,
+      detail:
+        'Checksum SHA-256 bundle tidak tersedia: manifest tidak memuat checksum dan verifikasi unduhan gagal.',
+    };
+  }
+
   try {
     // Every build publishes a new filename, so the manifest URL is immutable and
     // safe to download as is; adding `?t=` would only defeat CDN caching.
     const info: BundleInfo = await CapacitorUpdater.download({
       url: release.bundleUrl,
       version: release.otaVersion,
+      checksum,
     });
     const bundle: OtaBundle = {
       id: info.id,
@@ -356,7 +486,25 @@ export async function downloadOtaBundle(release: OtaRelease): Promise<OtaDownloa
     removeKey(LEGACY_BUNDLE_ID_KEY);
     return { ok: true, bundle };
   } catch (error) {
-    return { ok: false, detail: errorMessage(error) };
+    const probe = await describeBundleUrl(release.bundleUrl, checksum);
+    const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : '';
+    const detail = [
+      errorMessage(error) || 'tanpa pesan',
+      code ? `kode ${code}` : '',
+      `checksum ${checksum.slice(0, 12)}…`,
+      downloadFailureDetail ?? '',
+      probe,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    console.error('[OTA] unduhan bundle gagal', {
+      url: release.bundleUrl,
+      version: release.otaVersion,
+      checksum,
+      probe,
+      error,
+    });
+    return { ok: false, detail };
   }
 }
 

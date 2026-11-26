@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:ota": "node scripts/ota-updater.test.mjs"
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.24",

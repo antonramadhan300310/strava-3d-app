@@ -15,7 +15,12 @@ const config: CapacitorConfig = {
       launchAutoHide: true
     },
     CapacitorUpdater: {
-      autoUpdate: false
+      // Self-hosted: the plugin must never call api.capgo.app on its own. The
+      // app drives check → download → set() from `src/lib/otaUpdater.ts`.
+      autoUpdate: false,
+      // Idle socket timeout for the bundle GET; the default 20 s is tight for a
+      // ~700 KB zip on a rural mobile link.
+      responseTimeout: 60
     }
   }
 };
