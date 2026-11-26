@@ -1,0 +1,21 @@
+{
+  "Supabase_Service_Role_Key": "(?i)(?:supabase[_-]?service[_-]?role(?:[_-]?key)?|service_role_key)[\"']?\\s*[:=]\\s*[\"']?(?:eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}|[A-Za-z0-9_-]{32,})",
+  "Supabase_Service_Role_Claim": "(?i)[\"']role[\"']\\s*:\\s*[\"']service_role[\"']",
+  "JSON_Web_Token": "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}",
+  "Private_Key_Block": "-----BEGIN[ A-Z0-9_]{0,40}PRIVATE KEY(?: BLOCK)?-----",
+  "Amazon_AWS_Access_Key_ID": "\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b",
+  "Google_API_Key": "\\bAIza[0-9A-Za-z_-]{35}\\b",
+  "Stripe_Live_Secret": "\\bsk_live_[0-9a-zA-Z]{20,}",
+  "GitHub_Token": "\\bgh[pousr]_[A-Za-z0-9]{36,}\\b",
+  "Slack_Token": "xox[pboa]-[0-9]{10,13}-[0-9]{10,13}-[0-9]{10,13}-[a-z0-9]{32}",
+  "Slack_Webhook": "https://hooks\\.slack\\.com/services/T[a-zA-Z0-9_]{8,}/B[a-zA-Z0-9_]{8,}/[a-zA-Z0-9_]{20,}",
+  "Authorization_Bearer": "(?i)bearer\\s+[A-Za-z0-9._-]{20,}",
+  "Basic_Auth_Credentials": "[a-zA-Z]{3,10}://[^/\\s:@]{3,20}:[^/\\s:@]{3,20}@[^\\s\"']{3,}",
+  "Android_Keystore_Password": "(?i)(?:storePassword|keyPassword)\\s*[:=]\\s*[\"'][^\"'\\s]{4,}[\"']",
+  "SendGrid_API_Key": "\\bSG\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43}\\b",
+  "Twilio_API_Key": "\\bSK[0-9a-fA-F]{32}\\b",
+  "Mailgun_API_Key": "\\bkey-[0-9a-zA-Z]{32}\\b",
+  "OpenAI_API_Key": "\\bsk-[A-Za-z0-9]{20,}\\b",
+  "MapTiler_Key": "(?i)maptiler[_-]?key[\"']?\\s*[:=]\\s*[\"'][A-Za-z0-9]{20,}[\"']",
+  "Password_In_URL": "[a-zA-Z]{3,10}://[^/\\s:@]{3,20}:[^/\\s:@]{3,20}@.{1,100}"
+}

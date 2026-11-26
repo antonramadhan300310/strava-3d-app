@@ -26,9 +26,16 @@ android/.idea/
 /allmova-latest.apk
 /version.json
 
+# Security audit output (scripts/security writes here when run locally)
+/reports/
+
 # TypeScript incremental build info
 *.tsbuildinfo
 
 # Android signing keys (never commit)
 *.jks
 *.keystore
+
+# Python bytecode (scripts/security)
+__pycache__/
+*.pyc

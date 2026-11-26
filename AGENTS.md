@@ -154,6 +154,26 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   the `ota-latest` GitHub release as a backup channel. `minNativeVersion` tracks the
   `versionName "1.2.<run>"` line in `android/app/build.gradle`; raising it locks out older APKs.
 
+## Security audit
+
+- `.github/workflows/security-audit.yml` — separate from `build-apk.yml`; runs on
+  `pull_request` to `main` and on manual dispatch (`scan_built_apk`, default `true`).
+  Job 1 = gitleaks (`.gitleaks.toml`, full history) + semgrep (`p/typescript`,
+  `p/react`, `p/nextjs`, `p/owasp-top-ten`) + `npm audit --audit-level=high`.
+  Job 2 = mobsfscan on `android/`, manifest/capacitor config audit, secret scan of
+  `out/`, and — only on manual dispatch — apkleaks + `aapt2`/`apksigner` on the
+  latest `tracker-3d-apk` artifact (falling back to a local `assembleDebug`).
+  Job 3 merges everything into the `security-audit-reports` artifact (14 days).
+- `scripts/security/security_report.py` is the reporting engine: `config-audit`,
+  `scan-tree`, `scan-apk`, `apk-verify`, `classify-jwt`, `summary`, `fatal-gate`.
+  Only leaked credentials fail the run (`FATAL_GITLEAKS_RULES` plus any JWT whose
+  decoded `role` is `service_role`); medium/low findings are report-only.
+  `scripts/security/apkleaks-patterns.json` is the pattern set passed to apkleaks
+  (it is not allowed to fetch the upstream default from GitHub at runtime).
+- The audit never holds live Supabase credentials: the web bundle is built against
+  `http://127.0.0.1:9` so nothing can reach the real project, and a guard step fails
+  if `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` leak into the environment.
+
 ## Gotchas
 
 - `@capgo/capacitor-updater` pulls `androidx.work` 2.10+ / `lifecycle` 2.10+, which require
