@@ -50,21 +50,18 @@ export type PlanStatus = {
   expired: boolean;
 };
 
-/** Later of two ISO dates; an unparseable date defers to the other one. */
-function laterExpiry(a: string | null, b: string | null): string | null {
-  const aMs = a ? Date.parse(a) : Number.NaN;
-  const bMs = b ? Date.parse(b) : Number.NaN;
-  if (!Number.isFinite(aMs)) return b;
-  if (!Number.isFinite(bMs)) return a;
-  return aMs >= bMs ? a : b;
-}
-
 /**
  * Overlays a server signal onto the profile read from the row.
  *
- * - Promotion wins: a Pro signal from either source unlocks Pro, so a stale
- *   `tier = 'free'` cannot erase an activation written to `plan_tier`.
- * - A `null` expiry from a Pro source means lifetime and outranks any date.
+ * - Promotion wins for the *tier*: a Pro signal from either source unlocks Pro,
+ *   so a stale `tier = 'free'` cannot erase an activation written to `plan_tier`.
+ * - The expiry is never erased by a `null`. The RPC and the row describe the
+ *   same account, so a missing date on one side (an alias column the reader did
+ *   not see, a partial realtime echo, a cached snapshot written before the
+ *   activation) must not turn a dated plan into "Pro aktif selamanya". Only two
+ *   `null`s mean lifetime.
+ * - The verdict's date is preferred, never the later of the two: an admin who
+ *   shortens the expiry from 30 days to 4 must see 4 days in the app.
  * - A server `pro` verdict is not re-checked against the device clock: the
  *   server already downgraded expired plans (`downgraded`), so a phone with a
  *   wrong date must not turn an active plan into Free locally.
@@ -76,21 +73,17 @@ export function mergePlanSignal(
 ): AthleteProfile {
   const signalPro = signal.tier === 'pro' && signal.downgraded !== true;
   const rowPro = profile.tier === 'pro';
+  const isPro = signalPro || rowPro;
 
-  const proExpiries: (string | null)[] = [];
-  if (signalPro) proExpiries.push(signal.proExpiresAt);
-  if (rowPro) proExpiries.push(profile.proExpiresAt);
-
-  const proExpiresAt =
-    proExpiries.length === 0
-      ? null
-      : proExpiries.includes(null)
-        ? null
-        : proExpiries.reduce((latest, current) => laterExpiry(latest, current));
+  const proExpiresAt = !isPro
+    ? null
+    : signalPro
+      ? signal.proExpiresAt ?? profile.proExpiresAt
+      : profile.proExpiresAt;
 
   const merged: AthleteProfile = {
     ...profile,
-    tier: proExpiries.length > 0 ? 'pro' : 'free',
+    tier: isPro ? 'pro' : 'free',
     proExpiresAt,
     isOwner: signal.isOwner || profile.isOwner,
     activeDeviceId: signal.activeDeviceId ?? profile.activeDeviceId,
@@ -102,6 +95,23 @@ export function mergePlanSignal(
   if (signalPro) return merged;
   if (signal.downgraded === true) return { ...merged, tier: 'free' };
   return withTrustedTier(merged, now);
+}
+
+/**
+ * Which verdict may be applied on top of a row read.
+ *
+ * A successful cloud read already carries the newest server values, so a cached
+ * verdict must not be replayed over it: an old snapshot could otherwise restore
+ * an expiry the admin just shortened, or erase a date the server just wrote.
+ * The cached verdict is only a fallback when the row itself could not be read.
+ */
+export function pickPlanSignal(
+  fetched: FetchedProfile,
+  fresh: PlanSignal | null,
+  cached: PlanSignal | null,
+): PlanSignal | null {
+  if (fresh) return fresh;
+  return fetched.cloud ? null : cached;
 }
 
 /**

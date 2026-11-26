@@ -120,12 +120,18 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   `tier = 'free'` cannot erase an admin activation written to `plan_tier`.
   `supabase/migrations/20261127010000_profile_plan_aliases.sql` makes the two RPCs read the
   same aliases server-side.
-- `src/lib/planState.ts` is the single plan resolver: `mergePlanSignal` / `resolvePlanProfile`
-  / `describePlan`. The row and the RPC are always merged (never one instead of the other), a
-  server `pro` verdict is final because the server already ran the expiry check
-  (`serverVerifiedAt`), and `downgraded: true` beats the leftover `plan_tier` value. Every
-  consumer reads `isPro`/`tier` from `useAuth()` — `AthleteProfileSheet` must not recompute the
-  plan, or the badge and the nav lock disagree.
+- `src/lib/planState.ts` is the single plan resolver: `mergePlanSignal` / `pickPlanSignal` /
+  `resolvePlanProfile` / `describePlan`. The row and the RPC are always merged (never one
+  instead of the other), a server `pro` verdict is final because the server already ran the
+  expiry check (`serverVerifiedAt`), and `downgraded: true` beats the leftover `plan_tier`
+  value. The expiry follows the verdict and is never erased by a `null`: only two `null`s mean
+  lifetime, and the verdict's date is preferred instead of the later of the two, so an admin
+  shortening the plan lands immediately. `pickPlanSignal` lets a cached verdict speak only when
+  the row could not be read. Every consumer reads `isPro`/`tier` from `useAuth()` —
+  `AthleteProfileSheet` must not recompute the plan, or the badge and the nav lock disagree.
+  `refreshProfile()` always refetches `profiles` + the RPC (no ref/cache short-circuit), merges
+  the verdict onto the last server row (`serverProfileRef`) and resolves with
+  `{ ok, error }` so the sheet can show its toast.
 - Timestamps are normalised by `parseTimestamp`/`toIsoTimestamp` in `src/lib/subscription.ts`
   before any date maths: PostgREST returns `2026-12-09 23:32:40.194014+00` (space separator,
   six fractional digits, `+00`), which is outside ISO-8601 and only parses on V8's legacy
