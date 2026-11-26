@@ -446,7 +446,12 @@ def cmd_apk_verify(args):
         if "DOES NOT VERIFY" in signature:
             items.append(item("apk-verify", "signature-invalid", "high",
                               "apksigner: verifikasi signature gagal."))
-        dn = re.search(r"Signer #1 certificate DN: (.+)", signature)
+        elif re.search(r"^Verifies$", signature, re.M):
+            items.append(item("apk-verify", "signature-verified", "info",
+                              "apksigner: signature valid."))
+        # apksigner prints "Signer #1 certificate DN:" for JAR (v1) signers and
+        # "V2 Signer: certificate DN:" / "V3 Signer:" for the newer schemes.
+        dn = re.search(r"(?:Signer #\d+|V\d Signer):? certificate DN: (.+)", signature)
         if dn:
             subject = dn.group(1).strip()
             if "Android Debug" in subject:
@@ -456,9 +461,13 @@ def cmd_apk_verify(args):
                 items.append(item("apk-verify", "release-signature", "info",
                                   "APK ditandatangani: %s" % subject))
         schemes = re.findall(r"Verified using (v[0-9.]+) scheme \([^)]*\): (true|false)", signature)
+        used = sorted(set(re.findall(r"^(V\d) Signer:", signature, re.M)))
         if schemes:
             items.append(item("apk-verify", "signature-schemes", "info",
                               ", ".join("%s=%s" % (name, value) for name, value in schemes)))
+        elif used:
+            items.append(item("apk-verify", "signature-schemes", "info",
+                              "scheme aktif: %s" % ", ".join(used)))
         elif not dn:
             items.append(item("apk-verify", "signature-unparsed", "medium",
                               "Tidak ada informasi signer pada output apksigner."))
