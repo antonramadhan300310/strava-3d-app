@@ -174,12 +174,25 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   no query string — and the download is a direct HTTP 200 with no cross-domain redirect.
   `otaVersion` is `1.3.<run_number>` (semver) with a matching `buildNumber`; a bundle that
   fails to boot twice is remembered in `allmova_ota_rejected_version` and skipped.
-  The Athlete Profile shows the native/bundle version and a manual "Cek Pembaruan" button.
+  capgo 6.53.0 requires a SHA-256 for every manual download: `CapacitorUpdaterPlugin.download`
+  → `CapgoUpdater.download` → `requireBundleChecksum` throws `IOException("Checksum required")`
+  when `checksum` is empty, and `call.reject(msg, ex)` drops the cause, so the JS error is only
+  `Failed to download from: <url>` whatever the URL is. `version.json` therefore publishes
+  `checksum` (sha256 of the zip, computed in CI) and `downloadOtaBundle` derives it from the
+  zip when an older manifest lacks it — it must never send `checksum: ''`.
+  The Athlete Profile shows the native/bundle version and a manual "Cek Pembaruan" button;
+  `OtaUpdateManager` shows a dismissible banner with the technical detail on failure, and
+  `downloadOtaBundle` adds the `downloadFailed` event, the checksum and a HEAD/checksum probe
+  to the message. `npm run test:ota` covers the download path (real source, faked native
+  bridge), `node scripts/verify-ota-bundle.mjs` checks a published manifest + zip.
 - `.github/workflows/build-apk.yml` zips `out/` into `allmova-ota-1.3.<run>.zip` (with
-  `index.html` verified at the zip root), writes `version.json` pointing at the Supabase
+  `index.html` verified at the zip root), writes `version.json` (including the zip's
+  `checksum`) pointing at the Supabase
   public object URL, and uploads both to the `ota-updates` bucket with `curl`
   (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `x-upsert: true`, `cache-control: max-age=0`,
-  non-2xx fails the job). The same artifacts plus `allmova-latest.apk` are still mirrored to
+  non-2xx fails the job). After publishing, a verification step re-reads the public manifest
+  and the zip to prove the checksum matches and `index.html` is at the root. The same artifacts
+  plus `allmova-latest.apk` are still mirrored to
   the `ota-latest` GitHub release as a backup channel. `minNativeVersion` tracks the
   `versionName "1.2.<run>"` line in `android/app/build.gradle`; raising it locks out older APKs.
 

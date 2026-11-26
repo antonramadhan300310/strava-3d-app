@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Download, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, Download, RefreshCw, X } from 'lucide-react';
 import {
   applyOtaBundle,
   checkOtaUpdate,
@@ -25,6 +25,8 @@ export default function OtaUpdateManager() {
   const [readyBundle, setReadyBundle] = useState<OtaBundle | null>(null);
   const [applying, setApplying] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [failureDismissed, setFailureDismissed] = useState(false);
 
   useEffect(() => {
     if (!isNativeApp()) return;
@@ -60,6 +62,11 @@ export default function OtaUpdateManager() {
         setRequiredRelease(outcome.release);
       } else if (outcome.status === 'ready') {
         setReadyBundle(outcome.bundle);
+      } else if (outcome.status === 'error') {
+        // A silent failure is undebuggable on a device with no adb attached.
+        const detail = `${outcome.reason}${outcome.detail ? ` · ${outcome.detail}` : ''}`;
+        console.warn('[OTA] pemeriksaan pembaruan gagal', detail);
+        setFailure(detail);
       }
     })();
 
@@ -99,6 +106,28 @@ export default function OtaUpdateManager() {
               onClick={() => setBannerDismissed(true)}
               aria-label="Tutup pemberitahuan pembaruan"
               className="rounded-full p-1 text-slate-400 active:bg-white/10"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {failure && !failureDismissed && (
+        <div className="pointer-events-none fixed inset-x-3 top-[calc(env(safe-area-inset-top)+0.75rem)] z-[90] flex justify-center">
+          <div className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-red-500/40 bg-[#2A1416]/95 px-3 py-2 shadow-xl backdrop-blur">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-400" />
+            <div className="flex-1">
+              <p className="text-[11px] font-semibold text-red-200">Pembaruan OTA gagal</p>
+              <p className="mt-0.5 break-words font-mono text-[10px] leading-relaxed text-red-200/80">
+                {failure}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFailureDismissed(true)}
+              aria-label="Tutup detail kegagalan pembaruan"
+              className="rounded-full p-1 text-red-300/80 active:bg-white/10"
             >
               <X size={14} />
             </button>

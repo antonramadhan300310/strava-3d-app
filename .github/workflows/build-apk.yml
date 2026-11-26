@@ -87,6 +87,10 @@ jobs:
           echo "OTA_BUNDLE=$OTA_BUNDLE" >> "$GITHUB_ENV"
           rm -f "$OTA_BUNDLE"
           ( cd out && zip -r -q "../$OTA_BUNDLE" . )
+          # capgo 6.53.0 refuses `CapacitorUpdater.download()` without a SHA-256
+          # (CapgoUpdater.requireBundleChecksum), so the manifest must publish it.
+          OTA_CHECKSUM=$(sha256sum "$OTA_BUNDLE" | awk '{print $1}')
+          echo "OTA_CHECKSUM=$OTA_CHECKSUM" >> "$GITHUB_ENV"
           # capgo unzips the bundle as the web root: index.html must sit at the
           # top level, never inside dist/ or out/, or `download` rejects it.
           python3 - "$OTA_BUNDLE" <<'PY'
@@ -109,11 +113,19 @@ jobs:
             "minNativeVersion": "1.2.0",
             "url": "${OTA_PUBLIC_BASE}/${OTA_BUNDLE}",
             "bundleUrl": "${OTA_PUBLIC_BASE}/${OTA_BUNDLE}",
+            "checksum": "${OTA_CHECKSUM}",
             "apkUrl": "https://github.com/${{ github.repository }}/releases/download/ota-latest/allmova-latest.apk",
             "releaseNotes": "Pembaruan otomatis ALLMOVA (build ${{ github.run_number }})."
           }
           EOF
-          python3 -c "import json;print('manifest OK:', json.load(open('version.json'))['otaVersion'])"
+          python3 - <<'PY'
+          import json
+          manifest = json.load(open('version.json'))
+          checksum = manifest.get('checksum', '')
+          if len(checksum) != 64 or any(c not in '0123456789abcdef' for c in checksum):
+              raise SystemExit('version.json checksum is not a SHA-256 hex digest: %r' % checksum)
+          print('manifest OK:', manifest['otaVersion'], checksum)
+          PY
           if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
             cp android/app/build/outputs/apk/debug/app-debug.apk allmova-latest.apk
           else
@@ -156,6 +168,30 @@ jobs:
           upload_object "$OTA_BUNDLE" "$OTA_BUNDLE" "application/zip"
           upload_object version.json version.json "application/json"
           echo "OTA $OTA_VERSION published to Supabase Storage (bucket ota-updates)."
+
+      - name: Verify published OTA (checksum + zip root)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          # What the device will actually download must match the manifest the
+          # device reads; a stale CDN object would fail the native checksum gate.
+          python3 - <<'PY'
+          import hashlib, io, json, os, time, urllib.request, zipfile
+          base = 'https://adnboduimzesbvbejdwr.supabase.co/storage/v1/object/public/ota-updates'
+          with urllib.request.urlopen(f"{base}/version.json?t={int(time.time())}", timeout=30) as res:
+              manifest = json.load(res)
+          expected_version = os.environ['OTA_VERSION']
+          if manifest.get('otaVersion') != expected_version:
+              raise SystemExit(f"published manifest is {manifest.get('otaVersion')!r}, expected {expected_version!r}")
+          with urllib.request.urlopen(manifest['url'], timeout=60) as res:
+              body = res.read()
+          actual = hashlib.sha256(body).hexdigest()
+          if actual != manifest.get('checksum'):
+              raise SystemExit(f"bundle sha256 {actual} != manifest checksum {manifest.get('checksum')}")
+          names = zipfile.ZipFile(io.BytesIO(body)).namelist()
+          if 'index.html' not in names:
+              raise SystemExit(f'bundle is missing index.html at its root: {names[:5]}')
+          print(f"published OTA OK: {expected_version}, {len(body)} bytes, sha256 {actual}, {len(names)} entries")
+          PY
 
       - name: Publish OTA release (ota-latest)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
