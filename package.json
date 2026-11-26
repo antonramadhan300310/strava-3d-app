@@ -8,8 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "test:ota": "node scripts/ota-updater.test.mjs",
+    "test:gpx": "node scripts/gpx.test.mjs",
     "test:subscription": "node scripts/subscription-plan.test.mjs",
-    "test": "npm run test:subscription && npm run test:ota"
+    "test": "npm run test:subscription && npm run test:gpx && npm run test:ota"
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.24",

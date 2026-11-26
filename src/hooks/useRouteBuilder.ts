@@ -14,8 +14,8 @@ import {
   type RoutingMode,
   type SportEstimate,
 } from '@/lib/routePlannerEngine';
-import { buildGpx, gpxFileName, parseGpx } from '@/lib/gpx';
-import { exportGpxFile } from '@/lib/exportGpx';
+import { buildGpx, gpxFileName, readGpxFile } from '@/lib/gpx';
+import { exportGpxFile, gpxExportMessage } from '@/lib/exportGpx';
 import { isSupabaseConfigured, savePlannedRoute } from '@/lib/supabase';
 import type { LngLat, LngLatEle } from '@/lib/polyline';
 import type { MapViewHandle } from '@/components/MapView';
@@ -150,14 +150,16 @@ export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
   const importGpx = useCallback(
     async (file: File) => {
       setError(null);
+      setInfo(null);
       try {
-        const parsed = parseGpx(await file.text());
+        const parsed = await readGpxFile(file);
         setWaypoints([]);
         setRouted(null);
         setImported({ coordinates: parsed.coordinates, name: parsed.name });
         setInfo(`GPX diimpor: ${parsed.name ?? file.name} (${parsed.coordinates.length} titik).`);
         mapRef.current?.fitCoordinates(parsed.coordinates);
       } catch (cause) {
+        setImported(null);
         setError(cause instanceof Error ? cause.message : 'GPX gagal dibaca.');
       }
     },
@@ -172,7 +174,7 @@ export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
       }
       setError(null);
       try {
-        await exportGpxFile(
+        const result = await exportGpxFile(
           gpxFileName(title),
           buildGpx(title, coordinates, {
             sportType: activityType,
@@ -181,9 +183,13 @@ export function useRouteBuilder(mapRef: React.RefObject<MapViewHandle | null>) {
             durationSeconds: metrics?.durationSeconds,
           }),
         );
-        setInfo('File GPX siap dibagikan.');
-      } catch {
-        setError('Gagal mengekspor GPX. Coba lagi.');
+        setInfo(gpxExportMessage(result));
+      } catch (cause) {
+        setError(
+          cause instanceof Error
+            ? `Gagal mengekspor GPX: ${cause.message}`
+            : 'Gagal mengekspor GPX. Coba lagi.',
+        );
       }
     },
     [coordinates, activityType, metrics],

@@ -154,12 +154,16 @@ export default function RouteBuilderOverlay({
       <input
         ref={fileInputRef}
         type="file"
-        accept=".gpx,application/gpx+xml"
+        // Android's picker hides `.gpx` behind `application/gpx+xml` because the
+        // MIME type is often unregistered; accepting everything and validating
+        // the extension/tag in JS keeps the file selectable on every device.
+        accept=".gpx,.xml,application/gpx+xml,application/xml,text/xml,application/octet-stream,*/*"
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file) void builder.importGpx(file);
+          // Clear before reading so picking the same file again still fires.
           event.target.value = '';
+          if (file) void builder.importGpx(file);
         }}
       />
 

@@ -12,6 +12,11 @@ type AllmovaTrackingPlugin = {
   stopTrackingService(): Promise<void>;
   openExternalUrl(options: { url: string }): Promise<void>;
   saveMediaToGallery(options: { filePath: string; mimeType: string }): Promise<SavedMedia>;
+  saveFileToDownloads(options: {
+    filePath: string;
+    fileName?: string;
+    mimeType?: string;
+  }): Promise<SavedMedia>;
 };
 
 /**
@@ -60,6 +65,34 @@ export async function saveMediaToGallery(options: {
     return await AllmovaTracking.saveMediaToGallery(options);
   } catch {
     return null;
+  }
+}
+
+export type DownloadSaveResult =
+  | { ok: true; uri: string; path: string }
+  | { ok: false; error: string };
+
+/**
+ * Writes a cached export into the public `Download/ALLMOVA` folder through
+ * MediaStore. Returns a result instead of throwing so the caller can fall back
+ * to the share sheet while still reporting why the save failed.
+ */
+export async function saveFileToDownloads(options: {
+  filePath: string;
+  fileName?: string;
+  mimeType?: string;
+}): Promise<DownloadSaveResult> {
+  if (!isNativeAndroid()) {
+    return { ok: false, error: 'folder Download hanya tersedia di Android' };
+  }
+  try {
+    const saved = await AllmovaTracking.saveFileToDownloads(options);
+    return { ok: true, uri: saved.uri, path: saved.path };
+  } catch (cause) {
+    return {
+      ok: false,
+      error: cause instanceof Error ? cause.message : 'plugin penyimpanan tidak tersedia',
+    };
   }
 }
 
