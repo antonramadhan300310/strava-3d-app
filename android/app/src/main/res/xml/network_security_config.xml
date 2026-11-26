@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rilis: semua trafik wajib TLS. Sesi Supabase, tile MapTiler, Open-Meteo,
+  Valhalla/OSRM dan OTA semuanya HTTPS, jadi tidak ada cleartext yang hilang.
+  Live-reload Capacitor (http://localhost) diizinkan hanya lewat
+  android/app/src/debug/res/xml/network_security_config.xml.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

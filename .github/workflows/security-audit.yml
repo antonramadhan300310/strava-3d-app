@@ -1,0 +1,394 @@
+name: Security Audit
+
+# Audit keamanan terpisah dari build-apk.yml: SAST (gitleaks + semgrep + npm
+# audit) dan audit mobile/APK (mobsfscan + apkleaks + verifikasi manifest).
+# Semua temuan medium/low bersifat report-only; hanya kebocoran kredensial
+# fatal (service_role key, private key, token cloud) yang menggagalkan job.
+on:
+  workflow_dispatch:
+    inputs:
+      scan_built_apk:
+        description: 'Bedah APK hasil build (artifact Build Android APK / build lokal)'
+        type: boolean
+        default: true
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_VERSION: '8.30.1'
+  SEMGREP_VERSION: '1.187.0'
+  MOBSFSCAN_VERSION: '1.2.0'
+  APKLEAKS_VERSION: '2.6.3'
+  JADX_VERSION: '1.5.7'
+  SEMGREP_SEND_METRICS: 'off'
+  # Placeholder tak-terjangkau: build audit tidak pernah memakai kredensial live.
+  SUPABASE_OFFLINE_URL: 'http://127.0.0.1:9'
+
+jobs:
+  sast-code-audit:
+    name: SAST - kode, secret & dependensi
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AUDIT_MODE: ${{ github.event_name == 'pull_request' && 'pull_request' || 'workflow_dispatch' }}
+    steps:
+      - name: Checkout (riwayat penuh untuk gitleaks)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Siapkan folder laporan
+        run: mkdir -p reports
+
+      - name: Pasang gitleaks
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base="gitleaks_${GITLEAKS_VERSION}_linux_x64"
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${base}.tar.gz"
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --ignore-missing -c "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "${base}.tar.gz" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Gitleaks - kode & riwayat commit (redacted)
+        continue-on-error: true
+        run: |
+          gitleaks git . \
+            --config .gitleaks.toml \
+            --report-format json \
+            --report-path reports/gitleaks.json \
+            --redact \
+            --no-banner \
+            --exit-code 0 \
+            --log-opts="--all"
+
+      - name: Gitleaks - klasifikasi JWT (role anon vs service_role)
+        continue-on-error: true
+        run: |
+          # Laporan mentah hanya hidup di $RUNNER_TEMP (tidak pernah di-upload)
+          # supaya role JWT bisa dibaca tanpa membocorkan secret ke artifact.
+          gitleaks git . \
+            --config .gitleaks.toml \
+            --report-format json \
+            --report-path "$RUNNER_TEMP/gitleaks-raw.json" \
+            --no-banner \
+            --exit-code 0 \
+            --log-opts="--all"
+          python3 scripts/security/security_report.py classify-jwt \
+            --input "$RUNNER_TEMP/gitleaks-raw.json" \
+            --out reports/jwt-roles.json
+          rm -f "$RUNNER_TEMP/gitleaks-raw.json"
+
+      - name: Pasang semgrep
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/semgrep-venv"
+          "$RUNNER_TEMP/semgrep-venv/bin/pip" install --quiet --disable-pip-version-check "semgrep==${SEMGREP_VERSION}"
+          echo "$RUNNER_TEMP/semgrep-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Semgrep - p/typescript p/react p/nextjs p/owasp-top-ten
+        continue-on-error: true
+        run: |
+          semgrep scan \
+            --config p/typescript \
+            --config p/react \
+            --config p/nextjs \
+            --config p/owasp-top-ten \
+            --sarif \
+            --output reports/semgrep.sarif \
+            --metrics=off \
+            --disable-version-check \
+            --exclude node_modules \
+            --exclude out \
+            --exclude .next \
+            --exclude android \
+            src
+
+      - name: Dependency audit - npm audit
+        run: |
+          set +e
+          npm audit --audit-level=high --json > reports/npm-audit.json
+          status=$?
+          if [ ! -s reports/npm-audit.json ]; then
+            echo "::warning::npm audit tidak menghasilkan laporan (status $status)."
+          fi
+          python3 - <<'PY'
+          import json
+          try:
+              data = json.load(open('reports/npm-audit.json'))
+          except Exception as error:
+              print('npm audit: laporan tidak bisa dibaca:', error)
+              raise SystemExit(0)
+          meta = data.get('metadata', {}).get('vulnerabilities', {})
+          print('npm audit: critical %s, high %s, moderate %s, low %s (total %s)'
+                % (meta.get('critical', 0), meta.get('high', 0), meta.get('moderate', 0),
+                   meta.get('low', 0), meta.get('total', 0)))
+          for name, vuln in sorted(data.get('vulnerabilities', {}).items()):
+              if vuln.get('severity') in ('critical', 'high'):
+                  titles = [v.get('title', '') if isinstance(v, dict) else str(v)
+                            for v in (vuln.get('via') or [])]
+                  print('  - %s [%s] %s' % (name, vuln.get('severity'),
+                                            '; '.join(t for t in titles if t)[:200]))
+          PY
+          exit 0
+
+      - name: Rangkuman (Step Summary)
+        if: always()
+        run: |
+          python3 scripts/security/security_report.py summary \
+            --reports reports --job sast >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload laporan mentah SAST
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-raw-sast
+          path: reports/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Gate - gagalkan job bila ada kebocoran secret fatal
+        if: always()
+        run: python3 scripts/security/security_report.py fatal-gate --reports reports
+
+  mobile-apk-audit:
+    name: Mobile & APK security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AUDIT_MODE: "${{ github.event_name == 'pull_request' && 'pull_request (tanpa APK)' || format('workflow_dispatch (APK: {0})', inputs.scan_built_apk) }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Java 17 (jadx/apkleaks)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Siapkan folder laporan
+        run: mkdir -p reports
+
+      - name: Guard - audit tanpa kredensial Supabase live
+        run: |
+          set -euo pipefail
+          echo "Audit hanya membaca file (statis); tidak ada aplikasi yang dijalankan."
+          for var in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY; do
+            if [ -n "${!var:-}" ]; then
+              echo "::error::$var terisi; audit wajib berjalan tanpa kredensial live."
+              exit 1
+            fi
+          done
+          echo "OK: 0 kredensial live di environment audit (target: ${SUPABASE_OFFLINE_URL:-offline})."
+
+      - name: Pasang mobsfscan & apkleaks
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/mobile-venv"
+          "$RUNNER_TEMP/mobile-venv/bin/pip" install --quiet --disable-pip-version-check \
+            "mobsfscan==${MOBSFSCAN_VERSION}" "apkleaks==${APKLEAKS_VERSION}"
+          echo "$RUNNER_TEMP/mobile-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Pasang jadx (dipakai apkleaks untuk dekompilasi)
+        run: |
+          set -euo pipefail
+          curl -sSLo "$RUNNER_TEMP/jadx.zip" \
+            "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-${JADX_VERSION}.zip"
+          sudo python3 -c "import zipfile; zipfile.ZipFile('$RUNNER_TEMP/jadx.zip').extractall('/opt/jadx')"
+          sudo chmod +x /opt/jadx/bin/jadx
+          sudo ln -sf /opt/jadx/bin/jadx /usr/local/bin/jadx
+          jadx --version
+
+      - name: mobsfscan - konfigurasi native android/
+        continue-on-error: true
+        run: |
+          mobsfscan --type android --sarif --output reports/mobsfscan.sarif --no-fail android
+
+      - name: Audit AndroidManifest.xml + capacitor.config.ts
+        continue-on-error: true
+        run: |
+          python3 scripts/security/security_report.py config-audit \
+            --android android --capacitor capacitor.config.ts \
+            --out reports/config-audit.json
+
+      - name: Build web bundle (offline, tanpa kredensial)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ env.SUPABASE_OFFLINE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ''
+          NEXT_PUBLIC_MAPTILER_KEY: ''
+          NEXT_PUBLIC_ORS_API_KEY: ''
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Scan secret di web bundle (out/)
+        continue-on-error: true
+        run: |
+          python3 scripts/security/security_report.py scan-tree \
+            --root out --out reports/bundle-secrets.json
+
+      - name: Ambil APK terbaru dari artifact Build Android APK
+        id: fetch_apk
+        if: github.event_name == 'workflow_dispatch' && inputs.scan_built_apk
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p apk-artifact
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-apk.yml \
+            --status success --limit 20 --json databaseId,headBranch \
+            --jq 'map(select(.headBranch == "main"))[0].databaseId' 2>/dev/null || true)
+          if [ -n "$run_id" ]; then
+            echo "Mengunduh artifact tracker-3d-apk dari run $run_id"
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+              --name tracker-3d-apk --dir apk-artifact || true
+          fi
+          apk_path=$(find apk-artifact -name '*.apk' 2>/dev/null | head -n 1 || true)
+          echo "apk_path=$apk_path" >> "$GITHUB_OUTPUT"
+          echo "APK dari artifact: ${apk_path:-tidak tersedia}"
+
+      - name: Build APK lokal (artifact tidak tersedia)
+        id: build_apk
+        if: github.event_name == 'workflow_dispatch' && inputs.scan_built_apk && steps.fetch_apk.outputs.apk_path == ''
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          npx cap sync android
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          apk_path=$(find "$PWD/app/build/outputs/apk" -name '*.apk' | head -n 1)
+          echo "apk_path=$apk_path" >> "$GITHUB_OUTPUT"
+          echo "APK hasil build lokal: $apk_path"
+
+      - name: Tentukan APK target
+        id: apk
+        if: always()
+        run: |
+          apk="${{ steps.fetch_apk.outputs.apk_path }}"
+          if [ -z "$apk" ]; then
+            apk="${{ steps.build_apk.outputs.apk_path }}"
+          fi
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          echo "APK target: ${apk:-tidak ada (audit statis saja)}"
+
+      - name: APKLeaks - endpoint & secret di dalam APK
+        if: steps.apk.outputs.path != ''
+        continue-on-error: true
+        run: |
+          set +e
+          apkleaks -f "${{ steps.apk.outputs.path }}" \
+            -o reports/apkleaks.json --json \
+            -p scripts/security/apkleaks-patterns.json \
+            -a "--threads-count 4" 2>&1 | tail -n 40
+          echo "apkleaks exit: ${PIPESTATUS[0]}"
+          # apkleaks menghapus file output bila tidak ada kecocokan; tulis
+          # laporan kosong supaya rangkuman mencatat "0 temuan", bukan "dilewati".
+          if [ ! -f reports/apkleaks.json ]; then
+            echo '{"package":"unknown","results":[]}' > reports/apkleaks.json
+          fi
+
+      - name: Verifikasi APK (debuggable, manifest, signature)
+        if: steps.apk.outputs.path != ''
+        continue-on-error: true
+        run: |
+          set +e
+          apk="${{ steps.apk.outputs.path }}"
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          build_tools=$(ls -d "$sdk"/build-tools/* 2>/dev/null | sort -V | tail -n 1)
+          echo "build-tools: $build_tools"
+          "$build_tools/aapt2" dump badging "$apk" > reports/apk-badging.txt 2> reports/apk-badging.err
+          if [ ! -s reports/apk-badging.txt ]; then
+            "$build_tools/aapt" dump badging "$apk" > reports/apk-badging.txt 2>&1
+          fi
+          "$build_tools/apksigner" verify --print-certs "$apk" > reports/apk-signature.txt 2>&1
+          echo "apksigner exit: $?"
+          python3 scripts/security/security_report.py apk-verify \
+            --badging reports/apk-badging.txt \
+            --signature reports/apk-signature.txt \
+            --out reports/apk-verify.json
+
+      - name: Scan secret di dalam APK (assets/ + dex)
+        if: steps.apk.outputs.path != ''
+        continue-on-error: true
+        run: |
+          python3 scripts/security/security_report.py scan-apk \
+            --apk "${{ steps.apk.outputs.path }}" --out reports/apk-scan.json
+
+      - name: Rangkuman (Step Summary)
+        if: always()
+        run: |
+          python3 scripts/security/security_report.py summary \
+            --reports reports --job mobile >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload laporan mentah mobile/APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-raw-mobile
+          path: reports/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Gate - gagalkan job bila ada kebocoran secret fatal
+        if: always()
+        run: python3 scripts/security/security_report.py fatal-gate --reports reports
+
+  security-report:
+    name: Laporan gabungan
+    needs: [ sast-code-audit, mobile-apk-audit ]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AUDIT_MODE: "${{ github.event_name == 'pull_request' && 'pull_request' || format('workflow_dispatch (APK: {0})', inputs.scan_built_apk) }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ambil laporan mentah kedua job
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: security-raw-*
+          path: reports
+          merge-multiple: true
+
+      - name: Tulis rangkuman gabungan
+        if: always()
+        run: |
+          mkdir -p reports
+          python3 scripts/security/security_report.py summary \
+            --reports reports --job combined --out reports/security-summary.md \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact security-audit-reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-reports
+          path: reports/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Gate akhir - kebocoran secret fatal
+        if: always()
+        run: python3 scripts/security/security_report.py fatal-gate --reports reports

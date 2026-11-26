@@ -1,0 +1,73 @@
+# Gitleaks config for ALLMOVA (strava-3d-app).
+#
+# Default rules stay enabled; this file only:
+#   * allows the public, intentionally client-side keys (Supabase anon /
+#     publishable key, MapTiler, ORS) so they are not reported as leaks;
+#   * adds strict rules for the secrets that must never reach the repo:
+#     Supabase service_role keys and Android keystore passwords.
+#
+# Rule ids are consumed by scripts/security/security_report.py, which fails the
+# workflow only for the fatal ones (see FATAL_RULES there).
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Extra rules
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "supabase-service-role-key"
+description = "Supabase service_role key (bypasses RLS) committed to the repository."
+regex = '''(?i)(?:supabase[_-]?service[_-]?role(?:[_-]?key)?|service_role_key|service_role_jwt)\s*[:=]\s*['"]?(?:eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}|[A-Za-z0-9_\-]{32,})'''
+keywords = ["service_role", "service-role"]
+
+[[rules]]
+id = "supabase-service-role-inline"
+description = "Literal service_role role string, typical of a leaked Supabase admin JWT."
+regex = '''(?i)["']role["']\s*:\s*["']service_role["']'''
+keywords = ["service_role"]
+
+[[rules]]
+id = "android-keystore-password"
+description = "Hardcoded Android keystore/key password."
+regex = '''(?i)(?:storePassword|keyPassword)\s*[:=]\s*['"][^'"\s]{4,}['"]'''
+keywords = ["storepassword", "keypassword"]
+
+# ---------------------------------------------------------------------------
+# Allowlists
+# ---------------------------------------------------------------------------
+
+# Files that never carry first-party secrets: dependency lockfiles, generated
+# web/Android build output and the OTA artifacts.
+[[allowlists]]
+description = "Generated and vendored files"
+paths = [
+  '''package-lock\.json''',
+  '''node_modules/''',
+  '''(^|/)out/''',
+  '''(^|/)\.next/''',
+  '''android/app/build/''',
+  '''android/app/src/main/assets/public/''',
+  '''android/\.gradle/''',
+  '''\.openhands/''',
+]
+
+# Client-side keys are public by design: they ship inside the web bundle and the
+# APK. They are allowlisted only when the surrounding line names the
+# NEXT_PUBLIC_* variable, so a bare service_role JWT on its own line still
+# fails the audit.
+[[allowlists]]
+description = "Public NEXT_PUBLIC_* client keys (Supabase anon, MapTiler, ORS)"
+regexTarget = "line"
+regexes = [
+  '''(?i)NEXT_PUBLIC_[A-Z0-9_]*(?:ANON|PUBLISHABLE|MAPTILER|ORS|PUBLIC)[A-Z0-9_]*''',
+]
+
+# localStorage key names look like API keys to the generic-api-key rule.
+[[allowlists]]
+description = "App storage key names (allmova_* / tracker3d_*)"
+regexTarget = "line"
+regexes = [
+  '''(?i)[A-Z0-9_]*KEY\s*=\s*['"](?:allmova|tracker3d)_[a-z0-9_]+['"]''',
+]
