@@ -17,6 +17,12 @@
  * the plan state used to be re-derived from the device clock, so a phone with a
  * wrong date turned an active plan into Free.
  *
+ * It also covers the follow-up report: the same account (dated 30 Nov 2026, 4
+ * days left) rendered "Pro aktif selamanya (tanpa kadaluarsa)" because a `null`
+ * expiry from one Pro source erased the dated one, because the *later* of two
+ * dates was always kept (so an admin shortening the plan never landed), and
+ * because a `lifetime` tier alias discarded the date the server actually had.
+ *
  * Only the Supabase client factory is stubbed (the network boundary); every
  * module under test is the real source, transpiled on the fly.
  *
@@ -61,6 +67,38 @@ const LIVE_RPC = {
 
 const LIVE_NOW = Date.parse('2026-11-26T04:14:00Z');
 const LIVE_EXPIRY_MS = Date.parse('2026-12-09T23:32:40.194Z');
+
+/**
+ * The reported account: `tier`/`plan_tier` = pro, `is_owner` = false and a
+ * `pro_expires_at` of 30 Nov 2026 05:00 UTC — four days out, not lifetime.
+ */
+const FOUR_DAY_TEXT = '2026-11-30 05:00:00+00';
+const FOUR_DAY_ISO = '2026-11-30T05:00:00.000Z';
+const FOUR_DAY_NOW = Date.parse('2026-11-26T05:00:00Z');
+
+const DATED_ROW = {
+  id: '8253b8aa-6487-42fc-9fe4-625292b2e65f',
+  email: 'newgatessystem@gmail.com',
+  display_name: 'New Gates',
+  tier: 'pro',
+  plan_tier: 'pro',
+  is_owner: false,
+  pro_expires_at: FOUR_DAY_TEXT,
+  active_device_id: null,
+  rider_profile: null,
+  personal_goals: null,
+};
+
+const DATED_RPC = {
+  tier: 'pro',
+  plan_tier: 'pro',
+  pro_expires_at: FOUR_DAY_ISO,
+  plan_expires_at: FOUR_DAY_ISO,
+  is_owner: false,
+  active_device_id: null,
+  downgraded: false,
+  server_now: '2026-11-26T05:00:00.123456+00:00',
+};
 
 const tempDir = await mkdtemp(path.join(tmpdir(), 'allmova-plan-test-'));
 const transpile = async (name) => {
@@ -115,10 +153,11 @@ try {
     toAthleteProfile,
     isProfilePro,
     isTrialPro,
+    isLifetimePro,
     readProfileTier,
     readProfileExpiry,
   } = await import(pathToFileURL(path.join(tempDir, 'subscription.mjs')).href);
-  const { describePlan, mergePlanSignal, resolvePlanProfile } = await import(
+  const { describePlan, mergePlanSignal, pickPlanSignal, resolvePlanProfile } = await import(
     pathToFileURL(path.join(tempDir, 'planState.mjs')).href
   );
   const { getTrustedCurrentTimeMs, recordServerNow } = await import(
@@ -148,6 +187,23 @@ try {
     assert.equal(parseTimestamp('bukan tanggal'), null);
     assert.equal(parseTimestamp(null), null);
     assert.equal(parseTimestamp(Number.NaN), null);
+  });
+
+  await check('a Postgres timestamp without seconds still parses', () => {
+    assert.equal(parseTimestamp('2026-11-30 12:00+00'), Date.parse('2026-11-30T12:00:00Z'));
+    assert.equal(parseTimestamp('2026-11-30T12:00'), Date.parse('2026-11-30T12:00:00Z'));
+  });
+
+  await check('a date the admin panel typed by hand is read, not dropped', () => {
+    const localNoon = new Date(2026, 10, 30, 12, 0, 0, 0).getTime();
+    assert.equal(parseTimestamp('30/11/2026, 12.00'), localNoon);
+    assert.equal(parseTimestamp('30/11/2026 12:00'), localNoon);
+    assert.equal(
+      parseTimestamp('30/11/2026'),
+      new Date(2026, 10, 30, 23, 59, 59, 999).getTime(),
+    );
+    assert.equal(parseTimestamp('31/02/2026'), null);
+    assert.equal(toIsoTimestamp('30/11/2026, 12.00'), new Date(localNoon).toISOString());
   });
 
   await check('the live profiles row reads as Pro', () => {
@@ -255,6 +311,133 @@ try {
       getTrustedCurrentTimeMs(deviceClockBehind),
       Date.parse(LIVE_RPC.server_now),
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Reported bug: a Pro account dated 30 Nov 2026 (4 days left) rendered as
+  // "Pro aktif selamanya (tanpa kadaluarsa)".
+  // ---------------------------------------------------------------------------
+  const datedProfile = toAthleteProfile(DATED_ROW, DATED_ROW.email, 'New Gates');
+  const datedSignal = {
+    tier: 'pro',
+    proExpiresAt: toIsoTimestamp(readProfileExpiry(DATED_RPC)),
+    isOwner: false,
+    activeDeviceId: null,
+    downgraded: false,
+  };
+  const datedFetch = { profile: datedProfile, cloud: true, error: null };
+
+  await check('a Pro account dated 30 Nov 2026 is dated, not lifetime (Postgres text)', () => {
+    assert.equal(readProfileExpiry(DATED_ROW), FOUR_DAY_TEXT);
+    assert.equal(datedProfile.tier, 'pro');
+    assert.equal(datedProfile.proExpiresAt, FOUR_DAY_ISO);
+    assert.equal(isLifetimePro(datedProfile), false);
+
+    const status = describePlan(datedProfile, FOUR_DAY_NOW);
+    assert.equal(status.isPro, true);
+    assert.equal(status.isLifetime, false);
+    assert.equal(status.isTrial, true);
+    assert.equal(status.daysLeft, 4);
+  });
+
+  await check('the ISO form of the same date reads identically', () => {
+    const isoProfile = toAthleteProfile(
+      { ...DATED_ROW, pro_expires_at: FOUR_DAY_ISO },
+      DATED_ROW.email,
+      'New Gates',
+    );
+    assert.equal(isoProfile.proExpiresAt, FOUR_DAY_ISO);
+    const status = describePlan(isoProfile, FOUR_DAY_NOW);
+    assert.equal(status.isLifetime, false);
+    assert.equal(status.daysLeft, 4);
+  });
+
+  await check('a hand-typed id-ID date still reads as a dated plan', () => {
+    const dmyProfile = toAthleteProfile(
+      { ...DATED_ROW, pro_expires_at: '30/11/2026, 12.00' },
+      DATED_ROW.email,
+      'New Gates',
+    );
+    assert.notEqual(dmyProfile.proExpiresAt, null);
+    const status = describePlan(dmyProfile, FOUR_DAY_NOW);
+    assert.equal(status.isLifetime, false);
+    assert.ok(status.daysLeft >= 4, `daysLeft was ${status.daysLeft}`);
+  });
+
+  await check('a null expiry from the RPC never erases the dated row', () => {
+    const resolved = resolvePlanProfile(
+      datedFetch,
+      { ...datedSignal, proExpiresAt: null },
+      FOUR_DAY_NOW,
+    );
+    assert.equal(resolved.tier, 'pro');
+    assert.equal(resolved.proExpiresAt, FOUR_DAY_ISO);
+    const status = describePlan(resolved, FOUR_DAY_NOW);
+    assert.equal(status.isLifetime, false);
+    assert.equal(status.daysLeft, 4);
+  });
+
+  await check('an admin shortening 30 days to 4 days lands immediately', () => {
+    const thirtyDays = {
+      ...datedProfile,
+      proExpiresAt: '2026-12-26T05:00:00.000Z',
+      serverVerifiedAt: FOUR_DAY_NOW,
+    };
+    assert.equal(describePlan(thirtyDays, FOUR_DAY_NOW).daysLeft, 30);
+
+    const shortened = resolvePlanProfile(datedFetch, datedSignal, FOUR_DAY_NOW);
+    assert.equal(shortened.proExpiresAt, FOUR_DAY_ISO);
+    assert.equal(describePlan(shortened, FOUR_DAY_NOW).daysLeft, 4);
+
+    // The same holds when the verdict is merged onto the profile on screen.
+    const merged = mergePlanSignal(thirtyDays, datedSignal, FOUR_DAY_NOW);
+    assert.equal(merged.proExpiresAt, FOUR_DAY_ISO);
+    assert.equal(describePlan(merged, FOUR_DAY_NOW).daysLeft, 4);
+  });
+
+  await check('lifetime turned into a dated plan replaces the local lifetime state', () => {
+    const lifetime = { ...datedProfile, proExpiresAt: null, serverVerifiedAt: FOUR_DAY_NOW };
+    assert.equal(describePlan(lifetime, FOUR_DAY_NOW).isLifetime, true);
+
+    const resolved = resolvePlanProfile(
+      { profile: lifetime, cloud: true, error: null },
+      datedSignal,
+      FOUR_DAY_NOW,
+    );
+    assert.equal(resolved.proExpiresAt, FOUR_DAY_ISO);
+    const status = describePlan(resolved, FOUR_DAY_NOW);
+    assert.equal(status.isLifetime, false);
+    assert.equal(status.daysLeft, 4);
+  });
+
+  await check('only a real owner reads as lifetime', () => {
+    const owner = toAthleteProfile(
+      { ...DATED_ROW, is_owner: true, pro_expires_at: FOUR_DAY_TEXT },
+      DATED_ROW.email,
+      'Owner',
+    );
+    assert.equal(owner.proExpiresAt, null);
+    assert.equal(describePlan(owner, FOUR_DAY_NOW).isLifetime, true);
+
+    // A `lifetime` tier alias must not throw the server date away.
+    const lifetimeTier = toAthleteProfile(
+      { ...DATED_ROW, plan_tier: 'lifetime' },
+      DATED_ROW.email,
+      'New Gates',
+    );
+    assert.equal(lifetimeTier.tier, 'pro');
+    assert.equal(lifetimeTier.proExpiresAt, FOUR_DAY_ISO);
+    assert.equal(describePlan(lifetimeTier, FOUR_DAY_NOW).isLifetime, false);
+  });
+
+  await check('a cached verdict cannot override the row the server just returned', () => {
+    const cachedThirtyDays = { ...datedSignal, proExpiresAt: '2026-12-26T05:00:00.000Z' };
+    assert.equal(pickPlanSignal(datedFetch, null, cachedThirtyDays), null);
+    assert.equal(pickPlanSignal(datedFetch, datedSignal, cachedThirtyDays), datedSignal);
+
+    // Offline, the cached verdict is still the only plan signal there is.
+    const offline = { profile: datedProfile, cloud: false, error: 'offline' };
+    assert.equal(pickPlanSignal(offline, null, cachedThirtyDays), cachedThirtyDays);
   });
 } finally {
   await rm(tempDir, { recursive: true, force: true });

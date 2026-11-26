@@ -56,6 +56,7 @@ type Props = {
 type SyncState = 'cloud' | 'local';
 
 const SAVED_NOTICE_MS = 2500;
+const SUBSCRIPTION_NOTICE_MS = 4000;
 
 /** Safe starting FTP when the athlete has no power meter data yet. */
 const DEFAULT_ESTIMATED_FTP_WATTS = 150;
@@ -130,6 +131,11 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   );
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+  const [subscriptionNotice, setSubscriptionNotice] = useState<{
+    tone: 'ok' | 'error';
+    text: string;
+  } | null>(null);
+  const subscriptionNoticeTimerRef = useRef<number | null>(null);
   const [otaVersions, setOtaVersions] = useState<{ native: string; bundle: string } | null>(null);
   const [otaChecking, setOtaChecking] = useState(false);
   const [otaNotice, setOtaNotice] = useState<OtaNotice | null>(null);
@@ -173,14 +179,38 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     setDeleteModalOpen(false);
     setDeleteConfirmText('');
     setDeleteError(null);
+    setSubscriptionNotice(null);
   }, [open]);
 
   // Opening the Athlete Profile re-reads the `profiles` row: an admin tier
   // change (or a device takeover) shows up without restarting the app.
   useEffect(() => {
     if (!open) return;
+    setSubscriptionNotice(null);
     void refreshProfile();
   }, [open, refreshProfile]);
+
+  /**
+   * The tap always forces a fresh `profiles` + RPC read (the context never
+   * serves it from a ref) and always reports back, so the button can never feel
+   * like it did nothing.
+   */
+  const handleRefreshSubscription = async () => {
+    setSubscriptionNotice(null);
+    const result = await refreshProfile();
+    setSubscriptionNotice(
+      result.ok
+        ? { tone: 'ok', text: 'Status langganan diperbarui.' }
+        : { tone: 'error', text: result.error ?? 'Gagal memperbarui status langganan.' },
+    );
+    if (subscriptionNoticeTimerRef.current !== null) {
+      window.clearTimeout(subscriptionNoticeTimerRef.current);
+    }
+    subscriptionNoticeTimerRef.current = window.setTimeout(
+      () => setSubscriptionNotice(null),
+      SUBSCRIPTION_NOTICE_MS,
+    );
+  };
 
   // Reads the APK version and the OTA bundle actually running on this device.
   useEffect(() => {
@@ -283,6 +313,9 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   useEffect(() => {
     return () => {
       if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+      if (subscriptionNoticeTimerRef.current !== null) {
+        window.clearTimeout(subscriptionNoticeTimerRef.current);
+      }
     };
   }, []);
 
@@ -311,7 +344,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     if (expiresAt === null) return null;
     return new Date(expiresAt).toLocaleDateString('id-ID', {
       day: '2-digit',
-      month: 'long',
+      month: 'short',
       year: 'numeric',
     });
   }, [account?.proExpiresAt]);
@@ -570,7 +603,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               </button>
             )}
 
-            {subscriptionError && (
+            {subscriptionError && !subscriptionNotice && (
               <p
                 role="status"
                 className="mt-1.5 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2 py-1.5 text-[10px] leading-relaxed text-amber-200"
@@ -581,13 +614,28 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
 
             <button
               type="button"
-              onClick={() => void refreshProfile()}
+              onClick={() => void handleRefreshSubscription()}
               disabled={subscriptionRefreshing}
+              aria-busy={subscriptionRefreshing}
               className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-[#1E2E16]/60 py-1.5 text-[10px] font-semibold text-slate-300 transition active:scale-[0.99] disabled:opacity-60"
             >
               <RefreshCw size={11} className={subscriptionRefreshing ? 'animate-spin' : undefined} />
-              {subscriptionRefreshing ? 'Memperbarui status…' : 'Perbarui status langganan'}
+              {subscriptionRefreshing ? 'Memperbarui…' : 'Perbarui status langganan'}
             </button>
+
+            {subscriptionNotice && (
+              <p
+                role="status"
+                aria-live="polite"
+                className={`mt-1.5 rounded-lg border px-2 py-1.5 text-[10px] leading-relaxed ${
+                  subscriptionNotice.tone === 'ok'
+                    ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200'
+                    : 'border-amber-400/25 bg-amber-400/10 text-amber-200'
+                }`}
+              >
+                {subscriptionNotice.text}
+              </p>
+            )}
 
             <dl className="mt-3 grid grid-cols-4 gap-1">
               <StatBox label="Total Jarak" value={stats.distanceKm.toFixed(1)} unit="km" />

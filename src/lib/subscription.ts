@@ -55,7 +55,6 @@ export type ProfileUpdate = {
 export const PROFILE_COLUMNS = '*';
 
 const PRO_TIERS = new Set(['pro', 'lifetime', 'owner', 'premium']);
-const LIFETIME_TIERS = new Set(['lifetime', 'owner']);
 
 const TIER_KEYS = ['plan_tier', 'tier', 'subscription_tier'];
 const EXPIRY_KEYS = [
@@ -99,7 +98,38 @@ export function readProfileExpiry(row: Record<string, unknown>): string | null {
  * Normalise once, here, before any date maths.
  */
 const PG_TIMESTAMP =
-  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/;
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?(?:\.(\d{1,9}))?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/;
+
+/**
+ * The admin panel renders dates as `30/11/2026, 12.00` (id-ID) and a hand-typed
+ * value can reach a text column in exactly that shape. `Date.parse` returns
+ * `NaN` for it on every engine, which silently dropped the expiry and reported
+ * a dated Pro account as "Pro aktif selamanya". Read it as local wall clock —
+ * a bare date covers the whole day.
+ */
+const DMY_TIMESTAMP =
+  /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:[,\s]+(\d{1,2})[.:](\d{2})(?:[.:](\d{2}))?)?$/;
+
+function parseDayMonthYear(raw: string): number | null {
+  const match = DMY_TIMESTAMP.exec(raw);
+  if (!match) return null;
+
+  const [, day, month, year, hour, minute, second] = match;
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  const h = hour === undefined ? 23 : Number(hour);
+  const min = minute === undefined ? 59 : Number(minute);
+  const s = second === undefined ? (hour === undefined ? 59 : 0) : Number(second);
+  const ms = hour === undefined ? 999 : 0;
+
+  const date = new Date(y, m - 1, d, h, min, s, ms);
+  // Rejects 31/02 and any other impossible calendar day.
+  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
+    return null;
+  }
+  return date.getTime();
+}
 
 function normalizeOffset(offset: string): string {
   if (/^[+-]\d{2}$/.test(offset)) return `${offset}:00`;
@@ -117,17 +147,18 @@ export function parseTimestamp(value: unknown): number | null {
 
   const match = PG_TIMESTAMP.exec(raw);
   if (match) {
-    const [, date, time, fraction, offset] = match;
+    const [, date, hourMinute, seconds, fraction, offset] = match;
     const millis = fraction ? fraction.slice(0, 3).padEnd(3, '0') : '000';
     // Postgres omits the offset for a `timestamp` (no time zone) column; the
     // server writes UTC, so a missing offset is read as UTC rather than local.
     const zone = offset === undefined ? 'Z' : offset === 'Z' ? 'Z' : normalizeOffset(offset);
-    const parsed = Date.parse(`${date}T${time}.${millis}${zone}`);
+    const parsed = Date.parse(`${date}T${hourMinute}:${seconds ?? '00'}.${millis}${zone}`);
     return Number.isFinite(parsed) ? parsed : null;
   }
 
   const direct = Date.parse(raw);
-  return Number.isFinite(direct) ? direct : null;
+  if (Number.isFinite(direct)) return direct;
+  return parseDayMonthYear(raw);
 }
 
 /** Canonical ISO-8601 string, so every downstream `new Date()` is portable. */
@@ -166,17 +197,18 @@ export function toAthleteProfile(
 
   const tierKey = readProfileTier(record);
   const isOwner = record.is_owner === true;
-  // Lifetime/owner tiers never carry an expiry, so an admin row with both a
-  // "lifetime" tier and a leftover date still reads as permanent Pro.
-  const isLifetime = isOwner || LIFETIME_TIERS.has(tierKey);
-  const tier: PlanTier = isLifetime || isProTierKey(tierKey) ? 'pro' : 'free';
+  const tier: PlanTier = isOwner || isProTierKey(tierKey) ? 'pro' : 'free';
 
   return {
     id,
     email: email ?? fallbackEmail,
     displayName,
     tier,
-    proExpiresAt: isLifetime ? null : normalizeExpiry(readProfileExpiry(record)),
+    // Only an owner is permanent by definition. Every other account keeps the
+    // date the server actually holds: forcing `null` here for a
+    // `lifetime`/`owner` tier alias is what turned a dated Pro row into
+    // "Pro aktif selamanya".
+    proExpiresAt: isOwner ? null : normalizeExpiry(readProfileExpiry(record)),
     isOwner,
     activeDeviceId:
       typeof record.active_device_id === 'string' && record.active_device_id.length > 0
@@ -198,7 +230,7 @@ export function isProfilePro(profile: AthleteProfile, now: number = Date.now()):
   return expiresAt !== null && expiresAt > now;
 }
 
-/** Owner and lifetime Pro never expire; both show the crown badge. */
+/** Owner, or Pro with no date from the server: permanent, shows the crown badge. */
 export function isLifetimePro(profile: AthleteProfile): boolean {
   return profile.isOwner || (profile.tier === 'pro' && profile.proExpiresAt === null);
 }

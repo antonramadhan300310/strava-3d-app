@@ -25,6 +25,7 @@ import {
 import {
   describePlan,
   mergePlanSignal,
+  pickPlanSignal,
   resolvePlanProfile,
   type FetchedProfile,
   type PlanSignal,
@@ -86,6 +87,13 @@ export type SaveAthleteProfileResult = {
   synced: boolean;
 };
 
+/** Outcome of a forced `profiles` + RPC read, so the sheet can show a toast. */
+export type RefreshProfileResult = {
+  ok: boolean;
+  /** Indonesian reason the read/sync failed; `null` when it succeeded. */
+  error: string | null;
+};
+
 type AuthContextValue = {
   status: AuthStatus;
   isConfigured: boolean;
@@ -117,8 +125,8 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   /** Permanently deletes the account (UU PDP) and clears every local cache. */
   deleteAccount: () => Promise<void>;
-  /** Re-reads `profiles` + the sync RPC and reports the outcome. */
-  refreshProfile: () => Promise<void>;
+  /** Forces a fresh `profiles` + RPC read and reports the outcome. */
+  refreshProfile: () => Promise<RefreshProfileResult>;
   /** True while `refreshProfile()` is in flight (drives the sheet spinner). */
   subscriptionRefreshing: boolean;
   /**
@@ -366,6 +374,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadedUserIdRef = useRef<string | null>(null);
   const authEventSeenRef = useRef(false);
   const latestSyncRef = useRef<PlanSignal | null>(null);
+  /** Last profile built from a server row: the base every verdict merges onto. */
+  const serverProfileRef = useRef<AthleteProfile | null>(null);
+  /** In-flight `refreshProfile()`; a second tap joins it instead of no-opping. */
+  const refreshInFlightRef = useRef<Promise<RefreshProfileResult> | null>(null);
   const claimedAtRef = useRef(0);
   const kickedRef = useRef(false);
   const oauthCallbackHandledRef = useRef(false);
@@ -376,12 +388,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Applies a server verdict to the profile in state. `mergePlanSignal` never
    * demotes a Pro row and never lets a stale `tier = 'free'` erase a `plan_tier`
    * activation, so this is the only write path a sync needs.
+   *
+   * The verdict is merged onto the last *server row* rather than onto the values
+   * already on screen, so a cached date can never outlive the row it came from:
+   * a shortened or extended expiry from the admin panel always lands.
    */
   const applySyncResult = useCallback((userId: string, result: PlanSignal) => {
     latestSyncRef.current = result;
     setProfile((previous) => {
       if (!previous || previous.id !== userId) return previous;
-      const next = mergePlanSignal(previous, result, getTrustedCurrentTimeMs());
+      const base =
+        serverProfileRef.current && serverProfileRef.current.id === userId
+          ? serverProfileRef.current
+          : previous;
+      const merged = mergePlanSignal(base, result, getTrustedCurrentTimeMs());
+      // Local-only fields (display name, rider profile) stay with the screen.
+      const next: AthleteProfile = {
+        ...previous,
+        tier: merged.tier,
+        proExpiresAt: merged.proExpiresAt,
+        isOwner: merged.isOwner,
+        activeDeviceId: merged.activeDeviceId,
+        serverVerifiedAt: merged.serverVerifiedAt,
+      };
+      serverProfileRef.current = merged;
       writeSubscriptionSnapshot(userId, next);
       return next;
     });
@@ -390,10 +420,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /** Row -> context profile, with the same merge rule as a sync result. */
   const applyProfileRow = useCallback(
     (row: ProfileRow | Record<string, unknown>, nameFallback: string): AthleteProfile => {
-      return withTrustedTier(
+      const next = withTrustedTier(
         toAthleteProfile(row, session?.user?.email ?? null, nameFallback),
         getTrustedCurrentTimeMs(),
       );
+      serverProfileRef.current = next;
+      return next;
     },
     [session],
   );
@@ -435,6 +467,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     loadedUserIdRef.current = null;
+    latestSyncRef.current = null;
+    serverProfileRef.current = null;
     setActiveUserId(null);
     setProfile(null);
     setSession(null);
@@ -493,6 +527,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === 'SIGNED_OUT' || !next) {
         loadedUserIdRef.current = null;
         latestSyncRef.current = null;
+        serverProfileRef.current = null;
         setActiveUserId(null);
         setProfile(null);
         setStatus('unauthenticated');
@@ -615,11 +650,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((fetched) => {
         if (loadedUserIdRef.current !== user.id) return;
         seedLocalCache(fetched.profile);
+        // `latestSyncRef` only holds a verdict from this session (it is cleared
+        // on sign-out), so its date cannot be older than the row just read; it
+        // keeps the server-verified flag when the RPC answered first.
         const synced = resolvePlanProfile(
           fetched,
           latestSyncRef.current,
           getTrustedCurrentTimeMs(),
         );
+        serverProfileRef.current = fetched.profile;
         writeSubscriptionSnapshot(user.id, synced);
         setProfile(synced);
         setSubscriptionError(fetched.error);
@@ -802,6 +841,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetAuthState = useCallback(() => {
     loadedUserIdRef.current = null;
     latestSyncRef.current = null;
+    serverProfileRef.current = null;
+    refreshInFlightRef.current = null;
     kickedRef.current = false;
     setCachedActiveDeviceId(null);
     setActiveUserId(null);
@@ -856,41 +897,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [session, resetAuthState]);
 
   /**
-   * Re-reads the plan on demand (opening the Athlete Profile, tapping
-   * "Perbarui status"). The row and the RPC are fetched in parallel and always
-   * merged, so a failed `profiles` read still promotes to Pro from the RPC
-   * verdict, and a failure is reported instead of falling back silently.
+   * Forces a fresh read on demand (opening the Athlete Profile, tapping
+   * "Perbarui status langganan"). Nothing is served from a ref or a cache: the
+   * `profiles` row and the RPC are always fetched, in parallel, and the row's
+   * newest values replace the ones on screen — the admin panel is the source of
+   * truth, so a shortened expiry or a downgrade must land on the next tap.
+   *
+   * Resolves with the outcome instead of swallowing it, so the sheet can show
+   * "Status langganan diperbarui" or the exact failure. A second tap while a
+   * request is in flight joins that request rather than returning early.
    */
-  const refreshProfile = useCallback(async () => {
+  const refreshProfile = useCallback(async (): Promise<RefreshProfileResult> => {
     const user = session?.user;
-    if (!user) return;
-
-    setSubscriptionRefreshing(true);
-    try {
-      const [fetched, signal] = await Promise.all([
-        loadProfile(user, null),
-        syncSubscriptionAndDevice(),
-      ]);
-      if (loadedUserIdRef.current !== user.id) return;
-
-      if (signal) {
-        latestSyncRef.current = signal;
-        await handleForeignDevice(signal.activeDeviceId);
-        if (loadedUserIdRef.current !== user.id) return;
-      }
-
-      const now = getTrustedCurrentTimeMs();
-      const synced = resolvePlanProfile(fetched, signal ?? latestSyncRef.current, now);
-      writeSubscriptionSnapshot(user.id, synced);
-      setProfile(synced);
-
-      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      setSubscriptionError(
-        fetched.error ?? (signal || offline ? null : SYNC_FAILED),
-      );
-    } finally {
-      if (loadedUserIdRef.current === user.id) setSubscriptionRefreshing(false);
+    if (!user) {
+      return { ok: false, error: 'Sesi login tidak ditemukan. Masuk kembali untuk memperbarui.' };
     }
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+
+    const run = (async (): Promise<RefreshProfileResult> => {
+      setSubscriptionRefreshing(true);
+      try {
+        const [fetched, signal] = await Promise.all([
+          loadProfile(user, null),
+          syncSubscriptionAndDevice(),
+        ]);
+
+        // A cached verdict may only fill in for a row that could not be read.
+        const verdict = pickPlanSignal(fetched, signal, latestSyncRef.current);
+        if (signal) latestSyncRef.current = signal;
+
+        if (verdict) await handleForeignDevice(verdict.activeDeviceId);
+
+        // Signed out or taken over while the request was in flight: never write
+        // this session's plan onto a different (or no) account.
+        if (loadedUserIdRef.current !== user.id) {
+          return { ok: false, error: 'Sesi login berubah saat memperbarui status langganan.' };
+        }
+
+        const now = getTrustedCurrentTimeMs();
+        const synced = resolvePlanProfile(fetched, verdict, now);
+        serverProfileRef.current = fetched.profile;
+        writeSubscriptionSnapshot(user.id, synced);
+        setProfile(synced);
+
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        const error = fetched.error ?? (verdict || offline ? null : SYNC_FAILED);
+        setSubscriptionError(error);
+        return { ok: error === null, error };
+      } catch (cause) {
+        const error = profileReadError(cause);
+        setSubscriptionError(error);
+        return { ok: false, error };
+      } finally {
+        setSubscriptionRefreshing(false);
+        refreshInFlightRef.current = null;
+      }
+    })();
+
+    refreshInFlightRef.current = run;
+    return run;
   }, [handleForeignDevice, loadProfile, session]);
 
   const updateProfile = useCallback(
