@@ -1,13 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   AlertTriangle,
   Bike,
+  BookOpen,
   Check,
   Cloud,
   CloudOff,
   Crown,
+  ExternalLink,
   Gauge,
   Loader2,
   LogOut,
@@ -43,6 +46,7 @@ import {
   type RiderProfile,
 } from '@/lib/riderProfile';
 import { isLifetimePro, parseTimestamp } from '@/lib/subscription';
+import { TUTORIAL_URL, openTutorial } from '@/lib/tutorial';
 import ProPaywallSheet from './ProPaywallSheet';
 import PrivacyPolicyLink from './PrivacyPolicyLink';
 
@@ -508,6 +512,31 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               {savedNotice}
             </p>
           )}
+
+          <a
+            href={TUTORIAL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(event) => {
+              if (!Capacitor.isNativePlatform()) return;
+              event.preventDefault();
+              void openTutorial();
+            }}
+            className="mb-3 flex items-center gap-2.5 rounded-xl border border-[#B9F51E]/30 bg-[#1E2E16]/60 px-3 py-2.5 text-left transition active:scale-[0.99] active:bg-[#1E2E16]"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#B9F51E]/15 text-[#B9F51E]">
+              <BookOpen size={16} aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[12px] font-semibold text-slate-100">
+                Panduan Penggunaan
+              </span>
+              <span className="block truncate text-[10px] text-slate-400">
+                Cara pakai fitur ALLMOVA
+              </span>
+            </span>
+            <ExternalLink size={13} className="shrink-0 text-[#B9F51E]" aria-hidden="true" />
+          </a>
 
           <section className="rounded-xl border border-white/10 bg-[#151B1D]/70 p-3">
             <div className="flex items-center justify-between gap-2">
