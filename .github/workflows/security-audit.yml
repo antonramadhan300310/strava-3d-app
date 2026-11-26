@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      AUDIT_MODE: ${{ github.event_name == 'pull_request' && 'pull_request (tanpa APK)' || 'workflow_dispatch' }}
+      AUDIT_MODE: "${{ github.event_name == 'pull_request' && 'pull_request (tanpa APK)' || format('workflow_dispatch (APK: {0})', inputs.scan_built_apk) }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -358,6 +358,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      AUDIT_MODE: "${{ github.event_name == 'pull_request' && 'pull_request' || format('workflow_dispatch (APK: {0})', inputs.scan_built_apk) }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
