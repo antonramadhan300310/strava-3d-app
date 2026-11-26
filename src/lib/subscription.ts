@@ -9,6 +9,8 @@ export type ProfileRow = {
   pro_expires_at: string | null;
   is_owner: boolean | null;
   active_device_id: string | null;
+  /** How the plan was granted: `trial`, `paid`, `manual_admin`, … */
+  subscription_source?: string | null;
   rider_profile: unknown;
   personal_goals: unknown;
   /** Aliases written by the admin panel and older schemas. */
@@ -28,6 +30,8 @@ export type AthleteProfile = {
   proExpiresAt: string | null;
   isOwner: boolean;
   activeDeviceId: string | null;
+  /** Lower-cased `subscription_source` from the row, or `null` when unset. */
+  subscriptionSource: string | null;
   riderProfile: unknown;
   personalGoals: unknown;
   /**
@@ -87,6 +91,20 @@ export function isProTierKey(value: string | null | undefined): boolean {
 /** First non-empty expiry column, whatever the admin panel named it. */
 export function readProfileExpiry(row: Record<string, unknown>): string | null {
   return firstStringValue(row, EXPIRY_KEYS);
+}
+
+/** Lower-cased `subscription_source`; `null` when the column is empty. */
+export function readProfileSubscriptionSource(row: Record<string, unknown>): string | null {
+  const value = firstStringValue(row, ['subscription_source']);
+  return value === null ? null : value.toLowerCase();
+}
+
+/**
+ * Only a trial grant earns the "• TRIAL" badge. A paid subscription or an
+ * admin activation also carries a `pro_expires_at`, but it is not a trial.
+ */
+export function isTrialSubscriptionSource(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'trial';
 }
 
 /**
@@ -214,6 +232,7 @@ export function toAthleteProfile(
       typeof record.active_device_id === 'string' && record.active_device_id.length > 0
         ? record.active_device_id
         : null,
+    subscriptionSource: readProfileSubscriptionSource(record),
     riderProfile: record.rider_profile ?? null,
     personalGoals: record.personal_goals ?? null,
     serverVerifiedAt: null,

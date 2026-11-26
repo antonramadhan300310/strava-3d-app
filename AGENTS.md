@@ -127,7 +127,10 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   value. The expiry follows the verdict and is never erased by a `null`: only two `null`s mean
   lifetime, and the verdict's date is preferred instead of the later of the two, so an admin
   shortening the plan lands immediately. `pickPlanSignal` lets a cached verdict speak only when
-  the row could not be read. Every consumer reads `isPro`/`tier` from `useAuth()` —
+  the row could not be read. `isTrial` is true only for a dated Pro account whose
+  `subscription_source` is `trial` (lower-cased by `readProfileSubscriptionSource`), so paid
+  and `manual_admin` plans show `AKUN PRO`; the date and days left still show for both. Every
+  consumer reads `isPro`/`isTrial`/`tier` from `useAuth()` —
   `AthleteProfileSheet` must not recompute the plan, or the badge and the nav lock disagree.
   `refreshProfile()` always refetches `profiles` + the RPC (no ref/cache short-circuit), merges
   the verdict onto the last server row (`serverProfileRef`) and resolves with

@@ -48,6 +48,7 @@ const LIVE_ROW = {
   plan: 'pro',
   is_owner: false,
   pro_expires_at: '2026-12-09 23:32:40.194014+00',
+  subscription_source: 'trial',
   active_device_id: null,
   rider_profile: null,
   personal_goals: null,
@@ -60,6 +61,7 @@ const LIVE_RPC = {
   pro_expires_at: '2026-12-09T23:32:40.194014+00:00',
   plan_expires_at: '2026-12-09T23:32:40.194014+00:00',
   is_owner: false,
+  subscription_source: 'trial',
   active_device_id: null,
   downgraded: false,
   server_now: '2026-11-26T04:14:00.123456+00:00',
@@ -84,6 +86,7 @@ const DATED_ROW = {
   plan_tier: 'pro',
   is_owner: false,
   pro_expires_at: FOUR_DAY_TEXT,
+  subscription_source: 'trial',
   active_device_id: null,
   rider_profile: null,
   personal_goals: null,
@@ -95,6 +98,7 @@ const DATED_RPC = {
   pro_expires_at: FOUR_DAY_ISO,
   plan_expires_at: FOUR_DAY_ISO,
   is_owner: false,
+  subscription_source: 'trial',
   active_device_id: null,
   downgraded: false,
   server_now: '2026-11-26T05:00:00.123456+00:00',
@@ -428,6 +432,83 @@ try {
     assert.equal(lifetimeTier.tier, 'pro');
     assert.equal(lifetimeTier.proExpiresAt, FOUR_DAY_ISO);
     assert.equal(describePlan(lifetimeTier, FOUR_DAY_NOW).isLifetime, false);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Reported bug: every dated Pro account showed "AKUN PRO • TRIAL", including
+  // paid subscriptions and admin activations.
+  // ---------------------------------------------------------------------------
+  await check('a manual_admin Pro account is dated but not a trial', () => {
+    const adminRow = { ...DATED_ROW, subscription_source: 'manual_admin' };
+    const adminProfile = toAthleteProfile(adminRow, adminRow.email, 'New Gates');
+    assert.equal(adminProfile.subscriptionSource, 'manual_admin');
+
+    const status = describePlan(adminProfile, FOUR_DAY_NOW);
+    assert.equal(status.isPro, true);
+    assert.equal(status.isOwner, false);
+    assert.equal(status.isTrial, false);
+    assert.equal(status.daysLeft, 4);
+
+    // The badge decision survives a refresh: the RPC does not echo the source,
+    // so the row value must be kept through the merge.
+    const resolved = resolvePlanProfile(
+      { profile: adminProfile, cloud: true, error: null },
+      datedSignal,
+      FOUR_DAY_NOW,
+    );
+    assert.equal(resolved.subscriptionSource, 'manual_admin');
+    assert.equal(describePlan(resolved, FOUR_DAY_NOW).isTrial, false);
+
+    const merged = mergePlanSignal(
+      { ...adminProfile, proExpiresAt: null, serverVerifiedAt: FOUR_DAY_NOW },
+      datedSignal,
+      FOUR_DAY_NOW,
+    );
+    assert.equal(merged.subscriptionSource, 'manual_admin');
+    assert.equal(describePlan(merged, FOUR_DAY_NOW).isTrial, false);
+  });
+
+  await check('a trial Pro account keeps the TRIAL badge', () => {
+    const trialRow = { ...DATED_ROW, subscription_source: 'trial' };
+    const trialProfile = toAthleteProfile(trialRow, trialRow.email, 'New Gates');
+    assert.equal(trialProfile.subscriptionSource, 'trial');
+
+    const status = describePlan(trialProfile, FOUR_DAY_NOW);
+    assert.equal(status.isPro, true);
+    assert.equal(status.isOwner, false);
+    assert.equal(status.isTrial, true);
+    assert.equal(status.daysLeft, 4);
+
+    const resolved = resolvePlanProfile(
+      { profile: trialProfile, cloud: true, error: null },
+      datedSignal,
+      FOUR_DAY_NOW,
+    );
+    assert.equal(describePlan(resolved, FOUR_DAY_NOW).isTrial, true);
+
+    // A server echo of the source wins over the row it was merged onto.
+    const echoed = mergePlanSignal(
+      toAthleteProfile(
+        { ...DATED_ROW, subscription_source: 'manual_admin' },
+        DATED_ROW.email,
+        'New Gates',
+      ),
+      { ...datedSignal, subscriptionSource: 'trial' },
+      FOUR_DAY_NOW,
+    );
+    assert.equal(echoed.subscriptionSource, 'trial');
+    assert.equal(describePlan(echoed, FOUR_DAY_NOW).isTrial, true);
+  });
+
+  await check('a dated Pro account with no source is not labelled TRIAL', () => {
+    const untagged = toAthleteProfile(
+      { ...DATED_ROW, subscription_source: null },
+      DATED_ROW.email,
+      'New Gates',
+    );
+    assert.equal(untagged.subscriptionSource, null);
+    assert.equal(describePlan(untagged, FOUR_DAY_NOW).isPro, true);
+    assert.equal(describePlan(untagged, FOUR_DAY_NOW).isTrial, false);
   });
 
   await check('a cached verdict cannot override the row the server just returned', () => {

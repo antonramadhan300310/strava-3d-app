@@ -3,6 +3,7 @@ import {
   isProTierKey,
   parseTimestamp,
   readProfileExpiry,
+  readProfileSubscriptionSource,
   readProfileTier,
   toIsoTimestamp,
   type PlanTier,
@@ -143,6 +144,7 @@ export type SubscriptionSyncResult = {
   proExpiresAt: string | null;
   isOwner: boolean;
   activeDeviceId: string | null;
+  subscriptionSource: string | null;
   serverNow: string | null;
   downgraded: boolean;
 };
@@ -178,6 +180,7 @@ function normalizeRpcResult(data: unknown): SubscriptionSyncResult | null {
     proExpiresAt: toIsoTimestamp(readProfileExpiry(raw)),
     isOwner: raw.is_owner === true,
     activeDeviceId: asString(raw.active_device_id),
+    subscriptionSource: readProfileSubscriptionSource(raw),
     serverNow,
     downgraded,
   };
@@ -269,6 +272,7 @@ export type SubscriptionSnapshot = {
   proExpiresAt: string | null;
   isOwner: boolean;
   activeDeviceId: string | null;
+  subscriptionSource: string | null;
 };
 
 /** Offline copy of the plan fields, so expiry is still enforced without signal. */
@@ -284,6 +288,7 @@ export function readSubscriptionSnapshot(userId: string): SubscriptionSnapshot |
       proExpiresAt: toIsoTimestamp(asString(record.proExpiresAt)),
       isOwner: record.isOwner === true,
       activeDeviceId: asString(record.activeDeviceId),
+      subscriptionSource: asString(record.subscriptionSource)?.toLowerCase() ?? null,
     };
   } catch {
     return null;
@@ -302,6 +307,7 @@ export function writeSubscriptionSnapshot(
       proExpiresAt: snapshot.proExpiresAt,
       isOwner: snapshot.isOwner,
       activeDeviceId: snapshot.activeDeviceId,
+      subscriptionSource: snapshot.subscriptionSource,
     }),
   );
 }

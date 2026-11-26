@@ -2,7 +2,7 @@ import {
   isLifetimePro,
   isProfilePro,
   isTrialExpired,
-  isTrialPro,
+  isTrialSubscriptionSource,
   trialDaysLeft,
   withTrustedTier,
   type AthleteProfile,
@@ -27,6 +27,8 @@ export type PlanSignal = {
   proExpiresAt: string | null;
   isOwner: boolean;
   activeDeviceId: string | null;
+  /** `subscription_source` echoed by the server, when it returns the column. */
+  subscriptionSource?: string | null;
   /** True when the server itself downgraded the plan on this call. */
   downgraded?: boolean;
   serverNow?: string | null;
@@ -87,6 +89,9 @@ export function mergePlanSignal(
     proExpiresAt,
     isOwner: signal.isOwner || profile.isOwner,
     activeDeviceId: signal.activeDeviceId ?? profile.activeDeviceId,
+    // The row is the only source of `subscription_source` in practice; a
+    // server echo is preferred when the RPC returns it.
+    subscriptionSource: signal.subscriptionSource ?? profile.subscriptionSource,
     // Only a `pro` verdict marks the plan as server-checked; a `free` verdict
     // (or an offline copy) falls back to the trusted-clock expiry check.
     serverVerifiedAt: signalPro ? now : null,
@@ -141,12 +146,17 @@ export function describePlan(profile: AthleteProfile | null, now: number): PlanS
     };
   }
 
+  const isPro = isProfilePro(profile, now);
+
   return {
     tier: profile.tier,
-    isPro: isProfilePro(profile, now),
+    isPro,
     isOwner: profile.isOwner,
     isLifetime: isLifetimePro(profile),
-    isTrial: isTrialPro(profile, now),
+    // A dated Pro plan is only a *trial* when the row says so: monthly/yearly
+    // subscriptions and admin activations also expire, but are not trials.
+    isTrial:
+      isPro && !profile.isOwner && isTrialSubscriptionSource(profile.subscriptionSource),
     daysLeft: trialDaysLeft(profile, now),
     expired: isTrialExpired(profile, now),
   };
