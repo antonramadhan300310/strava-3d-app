@@ -35,16 +35,31 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   zeroes offline); `elevationGainOf` smooths before summing so DEM steps do not inflate
   the climb. `estimateSportMetrics` holds the speed/pace/Naismith formulas and feeds both
   the Routes summary card and the duration saved with a route.
+- `src/lib/routeCoordinates.ts` — `normalizeRouteCoordinates(raw)` is the single reader for a
+  stored polyline: `[lat,lng]` tuples (what the `allmova-landing` admin panel writes),
+  `[lng,lat]` tuples, `{ lat, lng }` / `{ latitude, longitude }` / `{ lat, lon }` objects,
+  JSON strings and GeoJSON (geometry, Feature, FeatureCollection, MultiLineString). Axis order
+  is decided by out-of-range values first (`|v| > 90` can only be a longitude), then by sign,
+  then by source order; a wrong guess loses points to the range check and the other reading
+  wins. Output is always GeoJSON `[lng, lat, ele]`. `isValidLngLat` / `isValidRouteCoordinates`
+  guard every MapLibre call: `new LngLat()` throws above 90° latitude, which is what blanked
+  the screen when a `[lat, lng]` row reached the map.
 - `src/lib/curatedRoutes.ts` + `src/hooks/useCuratedRoutes.ts` — the `Rekomendasi` sub-tab
   reads `curated_routes` (`is_active = true`, `created_at desc`, sport chips + name/city
-  search). `toCuratedRoute` accepts a GeoJSON geometry, a plain `[[lng,lat,ele], …]` array
-  or hex WKB, derives a missing distance/difficulty, and drops rows without a polyline.
+  search). `toCuratedRoute` runs the raw value through `normalizeRouteCoordinates` (hex WKB
+  falls back to `parseActivityGeometry`), derives a missing distance/difficulty, and drops
+  rows without a polyline; `fetchCuratedRoutes` returns `{ routes, invalidCount }` so the list
+  can warn "N rute disembunyikan…" instead of rendering a broken card. `miniRoutePolyline`
+  centres a zero-span axis and degrades to a centred dash when every point is identical, so
+  the SVG preview never becomes a vertical line or a NaN `points` attribute.
   `toCuratedGuideRoute` converts to the lat-first `GuideRoute` so "Ikuti Rute" reuses the
   Follow Route engine; "Simpan" copies the row into `activities` via `savePlannedRoute`
   with `curated_route_id` in the GeoJSON properties for duplicate detection. Migration:
   `supabase/migrations/20261126010000_curated_routes.sql` (public read of active rows,
   no client writes). The Routes tab's segmented control lives in `RouteBuilderOverlay`
   (`RoutesSubTab`), and AppShell gates map taps to the `Rute Saya` sub-tab.
+  `CuratedRouteList` validates the coordinates on every follow/save (toast "Koordinat rute
+  tidak valid") and wraps the cards in an error boundary.
 - `src/hooks/useFlyoverPlayback.ts` — `requestAnimationFrame` driver. Map updates go through
   `onFrame` every frame; React state (HUD, scrubber) is throttled to ~16 Hz.
 - `src/components/FlyoverMap.tsx` — imperative `applyFrame` handle; owns the map, marker,
@@ -97,13 +112,27 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   (`allmova_last_server_ms` = newest `server_now`, so a rolled-back phone clock cannot extend
   a trial), cached `active_device_id`, per-account plan snapshot, and the two RPC wrappers.
   Every network call resolves to `null` instead of throwing: offline recording always wins.
-- `AuthContext` calls `sync_subscription_and_device` on launch, on foreground and from the
+- Plan columns are read flexibly in `src/lib/subscription.ts`: `PROFILE_COLUMNS = '*'`,
+  tier from `plan_tier ?? tier ?? subscription_tier` (`pro | lifetime | owner | premium` all
+  unlock Pro) and expiry from `pro_expires_at ?? plan_expires_at ?? subscription_expires_at ??
+  expires_at ?? pro_until`. `is_owner` is lifetime Pro with no expiry. The RPC result is
+  merged, never substituted: a Pro signal from the row or from the RPC is kept, so a stale
+  `tier = 'free'` cannot erase an admin activation written to `plan_tier`.
+  `supabase/migrations/20261127010000_profile_plan_aliases.sql` makes the two RPCs read the
+  same aliases server-side.
+- Client writes to `profiles` go through an allowlist (`display_name`, `rider_profile`,
+  `personal_goals`) in `AuthContext`; `tier`/`plan_tier`/`is_owner`/expiry columns are never
+  sent, because a stale client would reset an admin activation back to Free.
+- `AuthContext` calls `sync_subscription_and_device` on launch, on foreground
+  (`visibilitychange`, `focus`, `online` and Capacitor `appStateChange`) and from the
   athlete profile; an expired trial downgrades to `free` locally even offline.
   `claim_active_device` only runs on a *real* sign-in — Supabase also emits `SIGNED_IN` when
   it restores a stored session, and claiming there would overwrite the device that logged in
   later and defeat last-login-wins. Realtime `postgres_changes` + sync results feed
   `handleForeignDevice`, which signs out with `scope: 'local'` only when the server returns a
   non-empty id that differs from this device (never offline, never during a claim, 12 s grace).
+  `AthleteProfileSheet` calls `refreshProfile()` on open and shows `OWNER` / `AKUN PRO`
+  (with the expiry date and days left) instead of the upgrade button.
 - `TrialExpiredModal` / `SessionKickedModal` are mounted by `AccountGuardModals` above the auth
   gate. The trial flag `allmova_trial_expired_notified_${userId}` is written when the modal is
   shown, not when it is dismissed.

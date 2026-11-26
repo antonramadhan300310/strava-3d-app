@@ -30,6 +30,7 @@ import {
   type CuratedRoute,
 } from '@/lib/curatedRoutes';
 import { guideToLngLat, toGuideRoute } from '@/lib/guideRoute';
+import { isValidRouteCoordinates } from '@/lib/routeCoordinates';
 import { readMapProvider, writeMapProvider, type MapProvider } from '@/lib/mapProvider';
 import { isNativeApp, notifyAppReady } from '@/lib/otaUpdater';
 import { buildElevationProfile } from '@/lib/routePlannerEngine';
@@ -174,6 +175,10 @@ function TrackerApp() {
   // becomes the guide and the Record tab takes over.
   const followCuratedRoute = useCallback(
     (route: CuratedRoute) => {
+      if (!isValidRouteCoordinates(route.coordinates)) {
+        setNotice('Koordinat rute tidak valid');
+        return;
+      }
       const guideRoute = toCuratedGuideRoute(route);
       if (!guideRoute) {
         setNotice('Rute rekomendasi ini belum punya cukup titik untuk dipandu.');
@@ -211,6 +216,9 @@ function TrackerApp() {
         throw new Error('Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.');
       }
       if (!user) throw new Error('Sesi login tidak ditemukan. Silakan masuk kembali.');
+      if (!isValidRouteCoordinates(route.coordinates)) {
+        throw new Error('Koordinat rute tidak valid');
+      }
 
       await savePlannedRoute({
         userId: user.id,
@@ -349,6 +357,7 @@ function TrackerApp() {
           onFollowCuratedRoute={followCuratedRoute}
           onSaveCuratedRoute={saveCuratedRoute}
           onRequirePro={requireProForCurated}
+          onNotice={setNotice}
         />
       )}
       {isRecord && (

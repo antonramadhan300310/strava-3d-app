@@ -42,9 +42,11 @@ export function toGuideRoute(activity: ActivityRecord): GuideRoute | null {
   };
 }
 
-/** MapLibre wants lng/lat, the guide stores lat/lng. */
+/** MapLibre wants lng/lat, the guide stores lat/lng. Broken fixes are dropped. */
 export function guideToLngLat(coordinates: LatLng[]): LngLat[] {
-  return coordinates.map(([lat, lng]) => [lng, lat]);
+  return coordinates
+    .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng))
+    .map(([lat, lng]) => [lng, lat]);
 }
 
 /** Metres per degree of longitude at a given latitude. */

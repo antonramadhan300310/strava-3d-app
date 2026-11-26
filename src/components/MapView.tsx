@@ -31,6 +31,7 @@ import {
 } from '@/lib/mapStyleSanitizer';
 import { updateRouteEndpointMarkers } from '@/lib/routeEndpoints';
 import { createGuideEndpointElement } from '@/lib/guideRoute';
+import { isValidLngLat } from '@/lib/routeCoordinates';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const TERRAIN_SOURCE_ID = 'terrain-source';
@@ -477,14 +478,17 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     const map = mapRef.current;
     if (!map) return;
 
-    applyGuideRoute(map, guideRoute);
+    // A single bad pair would make `LngLat` throw and blank the whole app, so
+    // the guide is filtered before it ever reaches MapLibre.
+    const safeGuide = (guideRoute ?? []).filter(([lng, lat]) => isValidLngLat(lng, lat));
+    applyGuideRoute(map, safeGuide.length > 1 ? safeGuide : null);
 
     for (const marker of guideMarkersRef.current) marker.remove();
     guideMarkersRef.current = [];
 
-    if (!guideRoute || guideRoute.length < 2) return;
-    const first = guideRoute[0];
-    const last = guideRoute[guideRoute.length - 1];
+    if (safeGuide.length < 2) return;
+    const first = safeGuide[0];
+    const last = safeGuide[safeGuide.length - 1];
     const create = (role: 'start' | 'finish', coordinate: LngLat) =>
       new maplibregl.Marker({
         element: createGuideEndpointElement(role),
@@ -549,16 +553,20 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
 
   const fitCoordinates = useCallback((coordinates: (LngLat | LngLatEle)[]) => {
     const map = mapRef.current;
-    if (!map || coordinates.length === 0) return;
+    if (!map) return;
 
-    const bounds = coordinates.reduce(
-      (acc, [lng, lat]) => acc.extend([lng, lat] as LngLat),
-      new maplibregl.LngLatBounds(
-        [coordinates[0][0], coordinates[0][1]],
-        [coordinates[0][0], coordinates[0][1]],
-      ),
-    );
-    map.fitBounds(bounds, { padding: 64, maxZoom: 16, duration: 1200 });
+    const safe = coordinates.filter(([lng, lat]) => isValidLngLat(lng, lat));
+    if (safe.length === 0) return;
+
+    try {
+      const bounds = safe.reduce(
+        (acc, [lng, lat]) => acc.extend([lng, lat] as LngLat),
+        new maplibregl.LngLatBounds([safe[0][0], safe[0][1]], [safe[0][0], safe[0][1]]),
+      );
+      map.fitBounds(bounds, { padding: 64, maxZoom: 16, duration: 1200 });
+    } catch {
+      // Out-of-range data is dropped above; a throw here must not kill the map.
+    }
   }, []);
 
   // Smart zoom: framing the whole guide route on selection. Once recording

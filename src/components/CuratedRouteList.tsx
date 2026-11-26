@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Component, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Bike,
@@ -30,6 +30,7 @@ import {
   type CuratedRoute,
 } from '@/lib/curatedRoutes';
 import type { CuratedRoutesState } from '@/hooks/useCuratedRoutes';
+import { isValidRouteCoordinates } from '@/lib/routeCoordinates';
 import type { ActivityType } from '@/lib/valhalla';
 
 const SPORT_ICONS: Record<ActivityType, React.ReactNode> = {
@@ -59,7 +60,46 @@ type Props = {
   onFollow: (route: CuratedRoute) => void;
   onSave: (route: CuratedRoute) => Promise<void>;
   onRequirePro: () => void;
+  /** App-level toast, used for invalid coordinates instead of a crash. */
+  onNotice?: (message: string) => void;
 };
+
+const INVALID_COORDINATES_NOTICE = 'Koordinat rute tidak valid';
+
+/**
+ * Last line of defence: a single malformed row must never blank the whole
+ * screen. The feed already drops unreadable rows, and every action validates
+ * before touching the map, so this only catches the unforeseen.
+ */
+class CuratedListBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-white/10 bg-[#151B1D]/95 px-4 py-8 text-center">
+          <AlertTriangle size={26} className="text-amber-400" />
+          <p className="text-sm font-semibold text-slate-100">{INVALID_COORDINATES_NOTICE}</p>
+          <p className="max-w-[17rem] text-[11px] text-slate-400">
+            Data rute ini rusak sehingga tidak bisa digambar. Coba muat ulang daftar.
+          </p>
+          <button
+            type="button"
+            onClick={() => this.setState({ failed: false })}
+            className="mt-1 rounded-full border border-white/15 px-3 py-1.5 text-[11px] font-semibold text-slate-200 active:bg-[#1E2E16]"
+          >
+            Coba Lagi
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 /** Rekomendasi sub-tab: curated routes from `curated_routes`, ready to follow. */
 export default function CuratedRouteList({
@@ -69,6 +109,7 @@ export default function CuratedRouteList({
   onFollow,
   onSave,
   onRequirePro,
+  onNotice,
 }: Props) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<string[]>([]);
@@ -77,7 +118,14 @@ export default function CuratedRouteList({
   const isSaved = (route: CuratedRoute) =>
     savedIds.includes(curatedRouteKey(route)) || isCuratedRouteSaved(route, savedRoutes);
 
+  const hasUsableCoordinates = (route: CuratedRoute) => {
+    if (isValidRouteCoordinates(route.coordinates)) return true;
+    onNotice?.(INVALID_COORDINATES_NOTICE);
+    return false;
+  };
+
   const handleFollow = (route: CuratedRoute) => {
+    if (!hasUsableCoordinates(route)) return;
     if (route.isPro && !isPro) {
       onRequirePro();
       return;
@@ -88,6 +136,7 @@ export default function CuratedRouteList({
   const handleSave = async (route: CuratedRoute) => {
     const key = curatedRouteKey(route);
     if (savingId !== null || isSaved(route)) return;
+    if (!hasUsableCoordinates(route)) return;
     setSavingId(key);
     setSaveError(null);
     try {
@@ -170,6 +219,15 @@ export default function CuratedRouteList({
           </p>
         )}
 
+        {state.invalidCount > 0 && (
+          <p className="mb-2 flex items-start gap-1.5 rounded-xl bg-amber-500/15 px-3 py-2 text-[11px] font-medium text-amber-300">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+            <span>
+              {state.invalidCount} rute disembunyikan karena koordinatnya tidak valid.
+            </span>
+          </p>
+        )}
+
         {state.loading && state.routes.length === 0 && <SkeletonList />}
 
         {!state.loading && state.error && (
@@ -209,23 +267,25 @@ export default function CuratedRouteList({
           </div>
         )}
 
-        <ul className="flex flex-col gap-2">
-          {state.filtered.map((route) => {
-            const key = curatedRouteKey(route);
-            return (
-              <li key={key}>
-                <CuratedRouteCard
-                  route={route}
-                  saved={isSaved(route)}
-                  saving={savingId === key}
-                  locked={route.isPro && !isPro}
-                  onFollow={() => handleFollow(route)}
-                  onSave={() => void handleSave(route)}
-                />
-              </li>
-            );
-          })}
-        </ul>
+        <CuratedListBoundary>
+          <ul className="flex flex-col gap-2">
+            {state.filtered.map((route) => {
+              const key = curatedRouteKey(route);
+              return (
+                <li key={key}>
+                  <CuratedRouteCard
+                    route={route}
+                    saved={isSaved(route)}
+                    saving={savingId === key}
+                    locked={route.isPro && !isPro}
+                    onFollow={() => handleFollow(route)}
+                    onSave={() => void handleSave(route)}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </CuratedListBoundary>
       </div>
     </div>
   );
@@ -255,7 +315,7 @@ function CuratedRouteCard({
         <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-[#0D1112]">
           <svg
             viewBox="0 0 100 56"
-            preserveAspectRatio="none"
+            preserveAspectRatio="xMidYMid meet"
             className="h-full w-full"
             aria-hidden="true"
           >
