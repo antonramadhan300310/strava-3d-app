@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.database.Cursor;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
@@ -202,6 +203,147 @@ public class AllmovaTrackingPlugin extends Plugin {
             return;
         }
         saveMediaToGallery(call);
+    }
+
+    /**
+     * Writes a cached export into the public Download folder (Download/ALLMOVA).
+     *
+     * API 29+ uses `MediaStore.Downloads` with IS_PENDING, which is the only
+     * scoped-storage way to publish a file outside the app sandbox. API 23–28
+     * writes to the legacy public directory with the runtime permission and
+     * announces the file through the media scanner.
+     */
+    @PluginMethod
+    public void saveFileToDownloads(PluginCall call) {
+        String filePath = call.getString("filePath");
+        if (filePath == null || filePath.trim().isEmpty()) {
+            call.reject("filePath wajib diisi.");
+            return;
+        }
+
+        File source = resolveSourceFile(filePath);
+        if (source == null || !source.isFile() || source.length() == 0) {
+            call.reject("Berkas ekspor tidak ditemukan di cache aplikasi.");
+            return;
+        }
+
+        String requestedName = call.getString("fileName");
+        String fileName = requestedName == null || requestedName.trim().isEmpty()
+                ? sanitizeFileName(source.getName())
+                : sanitizeFileName(requestedName);
+
+        String mimeType = call.getString("mimeType", "application/octet-stream");
+        if (mimeType == null || mimeType.trim().isEmpty()) {
+            mimeType = "application/octet-stream";
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && getPermissionState("storage") != PermissionState.GRANTED) {
+            requestPermissionForAlias("storage", call, "downloadsStorageCallback");
+            return;
+        }
+
+        writeToDownloads(call, source, fileName, mimeType);
+    }
+
+    @PermissionCallback
+    private void downloadsStorageCallback(PluginCall call) {
+        if (getPermissionState("storage") != PermissionState.GRANTED) {
+            call.reject("Izin penyimpanan diperlukan untuk menulis ke folder Download.");
+            return;
+        }
+        saveFileToDownloads(call);
+    }
+
+    private void writeToDownloads(PluginCall call, File source, String fileName, String mimeType) {
+        ContentResolver resolver = getContext().getContentResolver();
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+        values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+
+        Uri target = null;
+        String savedName = fileName;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(
+                        MediaStore.MediaColumns.RELATIVE_PATH,
+                        Environment.DIRECTORY_DOWNLOADS + "/" + ALBUM_NAME);
+                values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+
+                target = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (target == null) {
+                    call.reject("Gagal membuat entri MediaStore untuk folder Download.");
+                    return;
+                }
+
+                copyToOutput(source, resolver.openOutputStream(target));
+
+                ContentValues done = new ContentValues();
+                done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                resolver.update(target, done, null, null);
+
+                // MediaStore may rename a duplicate, so report the real name.
+                String actualName = displayNameOf(resolver, target);
+                if (actualName != null && !actualName.trim().isEmpty()) savedName = actualName;
+            } else {
+                File downloadDir = new File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                        ALBUM_NAME);
+                if (!downloadDir.isDirectory() && !downloadDir.mkdirs()) {
+                    call.reject("Gagal membuat folder " + ALBUM_NAME + " di Download.");
+                    return;
+                }
+
+                File destination = uniqueFile(downloadDir, fileName);
+                copyToOutput(source, new FileOutputStream(destination));
+                savedName = destination.getName();
+
+                // MediaStore.Downloads only exists from API 29, so the legacy
+                // path publishes a plain file URI plus a media scan.
+                target = Uri.fromFile(destination);
+
+                MediaScannerConnection.scanFile(
+                        getContext(),
+                        new String[]{destination.getAbsolutePath()},
+                        new String[]{mimeType},
+                        null);
+            }
+
+            JSObject result = new JSObject();
+            result.put("uri", target.toString());
+            result.put("path", "Download/" + ALBUM_NAME + "/" + savedName);
+            call.resolve(result);
+        } catch (Exception error) {
+            if (target != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // A pending row with no data would linger in the Downloads list.
+                try {
+                    resolver.delete(target, null, null);
+                } catch (Exception ignored) {
+                    // Nothing else can be done once the insert failed.
+                }
+            }
+            call.reject("Gagal menyimpan berkas ke folder Download.", error);
+        }
+    }
+
+    /** Strips path separators/control characters and forces a `.gpx` suffix. */
+    private static String sanitizeFileName(String name) {
+        String cleaned = name
+                .replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_")
+                .trim();
+        if (cleaned.isEmpty()) return "rute.gpx";
+        return cleaned.toLowerCase().endsWith(".gpx") ? cleaned : cleaned + ".gpx";
+    }
+
+    /** Reads back the stored display name (MediaStore appends " (1)" on clashes). */
+    private static String displayNameOf(ContentResolver resolver, Uri uri) {
+        try (Cursor cursor = resolver.query(
+                uri, new String[]{MediaStore.MediaColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) return cursor.getString(0);
+        } catch (Exception ignored) {
+            // The name is cosmetic; the file itself was already written.
+        }
+        return null;
     }
 
     /** Accepts a `file://` URI or a path relative to the app cache directory. */

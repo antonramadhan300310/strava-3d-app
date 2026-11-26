@@ -44,6 +44,25 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   wins. Output is always GeoJSON `[lng, lat, ele]`. `isValidLngLat` / `isValidRouteCoordinates`
   guard every MapLibre call: `new LngLat()` throws above 90° latitude, which is what blanked
   the screen when a `[lat, lng]` row reached the map.
+- `src/lib/gpx.ts` — import/export of GPX. `parseGpx` is a DOM-free tolerant scanner (not
+  `DOMParser`, so it also runs in the Node tests): it accepts any namespace prefix and reads
+  `<trkpt>`, `<rtept>` and `<wpt>` (self-closing points included), then normalises through
+  `normalizeRouteCoordinates` so the output is `[lng, lat, ele]` and out-of-range points are
+  dropped. Empty text, a missing `<gpx>` root, zero points and fewer than two valid points
+  each raise a distinct Indonesian message. `readGpxFile` adds the 25 MB guard and decides
+  validity from the `.gpx` extension **or** the `<gpx>` tag, because Android reports GPX files
+  as `application/octet-stream`; the picker's `accept` therefore lists `.gpx,.xml,…` plus
+  `*/*` and the overlay clears `input.value` before reading so the same file can be picked
+  again. `buildGpx` writes GPX 1.1 (`trkpt` + `ele` + `<allmova:*>` extensions) and
+  `gpxFileName` slugs the title.
+- `src/lib/exportGpx.ts` — native exports never rely on `<a download>` (the WebView blocks
+  blob downloads): the file is written to `Directory.Cache`, then `saveFileToDownloads`
+  (native bridge → `AllmovaTrackingPlugin.saveFileToDownloads`, MediaStore `Downloads` with
+  `RELATIVE_PATH Download/ALLMOVA` on API 29+, legacy public dir + media scan below that)
+  publishes it. `exportGpxFile` resolves `{ location: 'downloads' | 'share' | 'browser' }`
+  and falls back to the share sheet when the bridge is unavailable; `gpxExportMessage` turns
+  that into the toast, and `shareGpxFile` is the explicit Strava/WhatsApp share action.
+  Web keeps `Blob` + `<a download>`.
 - `src/lib/curatedRoutes.ts` + `src/hooks/useCuratedRoutes.ts` — the `Rekomendasi` sub-tab
   reads `curated_routes` (`is_active = true`, `created_at desc`, sport chips + name/city
   search). `toCuratedRoute` runs the raw value through `normalizeRouteCoordinates` (hex WKB
@@ -221,11 +240,13 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 
 ```bash
 npm run test:subscription   # plan state + Postgres timestamp parsing (scripts/subscription-plan.test.mjs)
+npm run test:gpx            # GPX parser + generator (scripts/gpx.test.mjs)
 npm run test:ota            # OTA download path (scripts/ota-updater.test.mjs)
 ```
 
-Both transpile the real `src/lib/*.ts` with the `typescript` package and stub only the
-platform boundary (Supabase client factory / Capacitor bridge).
+All three transpile the real `src/lib/*.ts` with the `typescript` package and stub only the
+platform boundary (Supabase client factory / Capacitor bridge). The GPX tests need no stub:
+the parser avoids `DOMParser` on purpose.
 
 ## Security audit
 

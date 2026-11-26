@@ -17,6 +17,7 @@ import {
   Navigation,
   Play,
   RefreshCw,
+  Share2,
   Trash2,
   UserRound,
   X,
@@ -25,7 +26,7 @@ import { useAuth } from '@/context/AuthContext';
 import { ACTIVITY_FILTERS, type ActivitiesState } from '@/hooks/useActivities';
 import { formatActivityDate, type ActivityRecord } from '@/lib/activity';
 import { buildGpx, gpxFileName } from '@/lib/gpx';
-import { exportGpxFile } from '@/lib/exportGpx';
+import { exportGpxFile, gpxExportMessage, shareGpxFile } from '@/lib/exportGpx';
 import { formatDistanceKm, formatDuration } from '@/lib/metrics';
 import { getPRHolderIds } from '@/lib/activityAnalytics';
 import {
@@ -136,10 +137,31 @@ export default function ActivitiesPanel({
 
   const exportActivity = async (activity: ActivityRecord) => {
     try {
-      await exportGpxFile(gpxFileName(activity.title), buildGpx(activity.title, activity.coordinates));
-      onNotice('File GPX siap dibagikan.');
-    } catch {
-      onNotice('Gagal mengekspor GPX. Coba lagi.');
+      const result = await exportGpxFile(
+        gpxFileName(activity.title),
+        buildGpx(activity.title, activity.coordinates),
+      );
+      onNotice(gpxExportMessage(result));
+    } catch (cause) {
+      onNotice(
+        cause instanceof Error
+          ? `Gagal mengekspor GPX: ${cause.message}`
+          : 'Gagal mengekspor GPX. Coba lagi.',
+      );
+    }
+  };
+
+  const shareActivity = async (activity: ActivityRecord) => {
+    try {
+      const result = await shareGpxFile(
+        gpxFileName(activity.title),
+        buildGpx(activity.title, activity.coordinates),
+      );
+      onNotice(result ? gpxExportMessage(result) : 'GPX siap dibagikan.');
+    } catch (cause) {
+      onNotice(
+        cause instanceof Error ? `Gagal membagikan GPX: ${cause.message}` : 'Gagal membagikan GPX.',
+      );
     }
   };
 
@@ -313,6 +335,9 @@ export default function ActivitiesPanel({
                   onExport={() =>
                     isPro ? void exportActivity(activity) : requirePro('Export GPX khusus Pro.')
                   }
+                  onShare={() =>
+                    isPro ? void shareActivity(activity) : requirePro('Bagikan GPX khusus Pro.')
+                  }
                   onDelete={() => setPendingDelete(activity)}
                   onFollowRoute={
                     activity.isPlannedRoute ? () => onFollowRoute(activity) : undefined
@@ -462,6 +487,7 @@ function ActivityCard({
   onOpen,
   onFlyover,
   onExport,
+  onShare,
   onDelete,
   onFollowRoute,
 }: {
@@ -471,6 +497,7 @@ function ActivityCard({
   onOpen: () => void;
   onFlyover: () => void;
   onExport: () => void;
+  onShare: () => void;
   onDelete: () => void;
   onFollowRoute?: () => void;
 }) {
@@ -523,6 +550,15 @@ function ActivityCard({
         <CardAction label="Export GPX" onClick={onExport}>
           <Download size={14} />
         </CardAction>
+        <button
+          type="button"
+          onClick={onShare}
+          aria-label="Bagikan GPX"
+          title="Bagikan GPX"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-200 transition active:scale-95 active:bg-[#1E2E16]"
+        >
+          <Share2 size={14} />
+        </button>
         {onFollowRoute && (
           <CardAction label="Ikuti Rute" onClick={onFollowRoute}>
             <Navigation size={14} />
