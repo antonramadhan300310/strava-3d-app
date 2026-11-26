@@ -276,12 +276,19 @@ export async function updateActivityProperties(
   );
 }
 
+export type CuratedRoutesResult = {
+  routes: CuratedRoute[];
+  /** Rows dropped because their `coordinates` could not be read. */
+  invalidCount: number;
+};
+
 /**
  * Active curated recommendations, newest first. `select('*')` keeps the client
  * compatible with editorial columns added later; rows without a usable
- * polyline are dropped by the mapper instead of failing the whole feed.
+ * polyline are dropped by the mapper instead of failing the whole feed, and the
+ * count is reported so the UI can warn instead of rendering a black screen.
  */
-export async function fetchCuratedRoutes(): Promise<CuratedRoute[]> {
+export async function fetchCuratedRoutes(): Promise<CuratedRoutesResult> {
   const supabase = getSupabaseClientOrNull();
   if (!supabase) {
     throw new Error('Server ALLMOVA belum dikonfigurasi. Hubungi admin aplikasi.');
@@ -308,9 +315,16 @@ export async function fetchCuratedRoutes(): Promise<CuratedRoute[]> {
     throw new Error('Gagal memuat rekomendasi rute. Periksa koneksi internetmu lalu coba lagi.');
   }
 
-  if (!Array.isArray(data)) return [];
+  if (!Array.isArray(data)) return { routes: [], invalidCount: 0 };
 
-  return (data as CuratedRouteRow[])
-    .map(toCuratedRoute)
-    .filter((route): route is CuratedRoute => route !== null);
+  const rows = data as CuratedRouteRow[];
+  const routes: CuratedRoute[] = [];
+  let invalidCount = 0;
+  for (const row of rows) {
+    const route = toCuratedRoute(row);
+    if (route) routes.push(route);
+    else invalidCount += 1;
+  }
+
+  return { routes, invalidCount };
 }

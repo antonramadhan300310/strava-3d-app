@@ -143,6 +143,23 @@ function hasRiderProfile(value: unknown): value is Record<string, unknown> {
   );
 }
 
+/**
+ * The only columns the client may write. `tier`, `plan_tier`, `is_owner` and
+ * every expiry column belong to the admin panel; a stale client write would
+ * silently reset an activation back to Free.
+ */
+const ATHLETE_PROFILE_KEYS = ['display_name', 'rider_profile', 'personal_goals'] as const;
+
+function athleteProfileColumns(patch: ProfileUpdate): ProfileUpdate {
+  const clean: ProfileUpdate = {};
+  const target = clean as Record<string, unknown>;
+  for (const key of ATHLETE_PROFILE_KEYS) {
+    const value = (patch as Record<string, unknown>)[key];
+    if (value !== undefined) target[key] = value;
+  }
+  return clean;
+}
+
 /** Reads the active account's offline copy, which is the newest local edit. */
 function readLocalRiderProfile(): RiderProfile | null {
   const raw = readScopedStorage(USER_STORAGE_KEYS.riderProfile);
@@ -188,22 +205,66 @@ function seedLocalCache(profile: AthleteProfile): void {
   }
 }
 
-/** Overlays a server RPC result onto a profile, then applies the trusted clock. */
+/** Later of two ISO dates; an unparseable date defers to the other one. */
+function laterExpiry(a: string | null, b: string | null): string | null {
+  const aMs = a ? Date.parse(a) : Number.NaN;
+  const bMs = b ? Date.parse(b) : Number.NaN;
+  if (!Number.isFinite(aMs)) return b;
+  if (!Number.isFinite(bMs)) return a;
+  return aMs >= bMs ? a : b;
+}
+
+/**
+ * Overlays a server RPC result onto a profile, then applies the trusted clock.
+ *
+ * The RPC and the `profiles` row are two views of the same account and either
+ * can be stale: the admin panel may write `plan_tier` while the RPC still
+ * reports `tier = 'free'`. Promotion therefore wins — a Pro signal from either
+ * source is kept — and the expiry is taken from the Pro sources only, so a
+ * Free row's empty date never turns into a lifetime plan.
+ */
 function mergeSyncResult(
   profile: AthleteProfile,
   result: SubscriptionSyncResult,
   now: number,
 ): AthleteProfile {
+  const proExpiries: (string | null)[] = [];
+  if (result.tier === 'pro') proExpiries.push(result.proExpiresAt);
+  if (profile.tier === 'pro') proExpiries.push(profile.proExpiresAt);
+
+  // `null` from a Pro source means lifetime, which outranks any dated plan.
+  const proExpiresAt =
+    proExpiries.length === 0
+      ? null
+      : proExpiries.includes(null)
+        ? null
+        : proExpiries.reduce((latest, current) => laterExpiry(latest, current));
+
   return withTrustedTier(
     {
       ...profile,
-      tier: result.tier,
-      proExpiresAt: result.proExpiresAt,
-      isOwner: result.isOwner,
+      tier: proExpiries.length > 0 ? 'pro' : 'free',
+      proExpiresAt,
+      isOwner: result.isOwner || profile.isOwner,
       activeDeviceId: result.activeDeviceId ?? profile.activeDeviceId,
     },
     now,
   );
+}
+
+/**
+ * A freshly read cloud row is authoritative for the plan: it is the same row
+ * the admin panel edits. Only the offline fallback needs the RPC result, which
+ * may promote it (the server knows about an activation the cache missed) but
+ * never demote it.
+ */
+function resolveFetchedProfile(
+  fetched: FetchedProfile,
+  sync: SubscriptionSyncResult | null,
+  now: number,
+): AthleteProfile {
+  if (fetched.cloud || !sync) return withTrustedTier(fetched.profile, now);
+  return mergeSyncResult(fetched.profile, sync, now);
 }
 
 function isTrialNoticeSeen(userId: string): boolean {
@@ -224,13 +285,19 @@ function markTrialNoticeSeen(userId: string): void {
   }
 }
 
+type FetchedProfile = {
+  profile: AthleteProfile;
+  /** False when the cloud row could not be read and the offline copy is used. */
+  cloud: boolean;
+};
+
 async function fetchProfile(
   user: User,
   migration: LegacyMigration | null,
-): Promise<AthleteProfile> {
+): Promise<FetchedProfile> {
   const supabase = getSupabaseClientOrNull();
   const fallback = fallbackProfile(user);
-  if (!supabase) return fallback;
+  if (!supabase) return { profile: fallback, cloud: false };
 
   try {
     const { data, error } = await supabase
@@ -239,7 +306,7 @@ async function fetchProfile(
       .eq('id', user.id)
       .maybeSingle();
 
-    if (error) return fallback;
+    if (error) return { profile: fallback, cloud: false };
 
     if (data) {
       let profile = toAthleteProfile(data as ProfileRow, user.email ?? null, fallback.displayName);
@@ -279,7 +346,7 @@ async function fetchProfile(
             };
       }
 
-      return withTrustedTier(profile, getTrustedCurrentTimeMs());
+      return { profile: withTrustedTier(profile, getTrustedCurrentTimeMs()), cloud: true };
     }
 
     // A missing row is created without plan fields: the database trigger starts
@@ -300,13 +367,16 @@ async function fetchProfile(
       .maybeSingle();
 
     return created
-      ? withTrustedTier(
-          toAthleteProfile(created as ProfileRow, user.email ?? null, fallback.displayName),
-          getTrustedCurrentTimeMs(),
-        )
-      : fallback;
+      ? {
+          profile: withTrustedTier(
+            toAthleteProfile(created as ProfileRow, user.email ?? null, fallback.displayName),
+            getTrustedCurrentTimeMs(),
+          ),
+          cloud: true,
+        }
+      : { profile: fallback, cloud: false };
   } catch {
-    return fallback;
+    return { profile: fallback, cloud: false };
   }
 }
 
@@ -330,15 +400,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const oauthLastCallbackRef = useRef<string | null>(null);
   const oauthCancelTimerRef = useRef<number | null>(null);
 
+  /**
+   * True while the profile in state came from a freshly read `profiles` row.
+   * The row is then authoritative: an RPC result may still promote it (the
+   * server can know about an activation the read missed) but never demote it,
+   * so an admin downgrade is not undone by a stale `tier = 'pro'` column.
+   */
+  const profileFromCloudRef = useRef(false);
+
   const applySyncResult = useCallback((userId: string, result: SubscriptionSyncResult) => {
     latestSyncRef.current = result;
     setProfile((previous) => {
       if (!previous || previous.id !== userId) return previous;
-      const next = mergeSyncResult(previous, result, getTrustedCurrentTimeMs());
+      const now = getTrustedCurrentTimeMs();
+      const next =
+        profileFromCloudRef.current && result.tier !== 'pro'
+          ? withTrustedTier(
+              {
+                ...previous,
+                isOwner: previous.isOwner || result.isOwner,
+                activeDeviceId: result.activeDeviceId ?? previous.activeDeviceId,
+              },
+              now,
+            )
+          : mergeSyncResult(previous, result, now);
       writeSubscriptionSnapshot(userId, next);
       return next;
     });
   }, []);
+
+  /** Row -> context profile. The row is authoritative, so a downgrade sticks. */
+  const applyProfileRow = useCallback(
+    (row: ProfileRow | Record<string, unknown>, nameFallback: string): AthleteProfile => {
+      profileFromCloudRef.current = true;
+      return withTrustedTier(
+        toAthleteProfile(row, session?.user?.email ?? null, nameFallback),
+        getTrustedCurrentTimeMs(),
+      );
+    },
+    [session],
+  );
 
   const handleForeignDevice = useCallback(async (activeDeviceId: string | null) => {
     if (!activeDeviceId || activeDeviceId === getDeviceId()) return;
@@ -359,6 +460,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     loadedUserIdRef.current = null;
+    profileFromCloudRef.current = false;
     setActiveUserId(null);
     setProfile(null);
     setSession(null);
@@ -532,12 +634,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // user id, and dropping the in-flight profile fetch would leave the app on
     // the splash screen. Late results are ignored when the user id changed.
     void fetchProfile(user, migration)
-      .then((next) => {
+      .then((fetched) => {
         if (loadedUserIdRef.current !== user.id) return;
-        seedLocalCache(next);
-        const synced = latestSyncRef.current
-          ? mergeSyncResult(next, latestSyncRef.current, getTrustedCurrentTimeMs())
-          : withTrustedTier(next, getTrustedCurrentTimeMs());
+        seedLocalCache(fetched.profile);
+        const synced = resolveFetchedProfile(
+          fetched,
+          latestSyncRef.current,
+          getTrustedCurrentTimeMs(),
+        );
+        profileFromCloudRef.current = fetched.cloud;
         writeSubscriptionSnapshot(user.id, synced);
         setProfile(synced);
         setStatus('authenticated');
@@ -564,7 +669,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     document.addEventListener('visibilitychange', onForeground);
     window.addEventListener('focus', onForeground);
     window.addEventListener('online', onForeground);
+
+    // Android WebView pauses `visibilitychange` while a Custom Tab or the
+    // launcher is in front, so the native app-state signal drives the refresh
+    // that picks up an admin tier change.
+    let cancelled = false;
+    let removeNativeListener: (() => void) | null = null;
+    void (async () => {
+      try {
+        const { App } = await import('@capacitor/app');
+        const handle = await App.addListener('appStateChange', ({ isActive }) => {
+          if (isActive) void syncSubscription();
+        });
+        if (cancelled) {
+          void handle.remove();
+          return;
+        }
+        removeNativeListener = () => void handle.remove();
+      } catch {
+        // Web build without the native bridge: the DOM listeners cover it.
+      }
+    })();
+
     return () => {
+      cancelled = true;
+      removeNativeListener?.();
       document.removeEventListener('visibilitychange', onForeground);
       window.removeEventListener('focus', onForeground);
       window.removeEventListener('online', onForeground);
@@ -577,10 +706,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return;
 
     return subscribeToProfileChanges(user.id, (row) => {
-      const next = withTrustedTier(
-        toAthleteProfile(row, user.email ?? null, fallbackName(user)),
-        getTrustedCurrentTimeMs(),
-      );
+      // `row` may be a partial realtime payload; `toAthleteProfile` reads the
+      // plan columns flexibly and keeps the last Pro signal when the echo is
+      // older than a sync.
+      const next = applyProfileRow(row, fallbackName(user));
       setProfile((previous) => {
         if (!previous || previous.id !== user.id) return previous;
         const merged: AthleteProfile = {
@@ -595,7 +724,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (row.active_device_id) void handleForeignDevice(row.active_device_id);
     });
-  }, [session, handleForeignDevice]);
+  }, [applyProfileRow, session, handleForeignDevice]);
 
   // The one-time trial popup, gated per account in localStorage.
   useEffect(() => {
@@ -695,6 +824,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetAuthState = useCallback(() => {
     loadedUserIdRef.current = null;
     latestSyncRef.current = null;
+    profileFromCloudRef.current = false;
     kickedRef.current = false;
     setCachedActiveDeviceId(null);
     setActiveUserId(null);
@@ -753,10 +883,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await syncSubscription();
     if (loadedUserIdRef.current !== user.id) return;
 
-    const next = await fetchProfile(user, null);
-    const synced = latestSyncRef.current
-      ? mergeSyncResult(next, latestSyncRef.current, getTrustedCurrentTimeMs())
-      : withTrustedTier(next, getTrustedCurrentTimeMs());
+    const fetched = await fetchProfile(user, null);
+    const synced = resolveFetchedProfile(
+      fetched,
+      latestSyncRef.current,
+      getTrustedCurrentTimeMs(),
+    );
+    profileFromCloudRef.current = fetched.cloud;
     writeSubscriptionSnapshot(user.id, synced);
     setProfile(synced);
   }, [session, syncSubscription]);
@@ -769,9 +902,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Only send the editable fields: a fallback (offline) profile must never
       // overwrite the server-owned tier, expiry or device columns.
+      const columns = athleteProfileColumns(patch);
+      if (Object.keys(columns).length === 0) return;
+
       const { data, error } = await supabase
         .from('profiles')
-        .update(patch)
+        .update(columns)
         .eq('id', user.id)
         .select(PROFILE_COLUMNS)
         .maybeSingle();
@@ -780,14 +916,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (data) {
         setProfile(
-          withTrustedTier(
-            toAthleteProfile(
-              data as ProfileRow,
-              user.email ?? null,
-              profile?.displayName ?? fallbackName(user),
-            ),
-            getTrustedCurrentTimeMs(),
-          ),
+          applyProfileRow(data, profile?.displayName ?? fallbackName(user)),
         );
         return;
       }
@@ -799,7 +928,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             id: user.id,
             email: user.email ?? null,
             display_name: profile?.displayName ?? fallbackName(user),
-            ...patch,
+            ...columns,
           },
           { onConflict: 'id' },
         )
@@ -810,14 +939,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (created) {
         setProfile(
-          withTrustedTier(
-            toAthleteProfile(
-              created as ProfileRow,
-              user.email ?? null,
-              profile?.displayName ?? fallbackName(user),
-            ),
-            getTrustedCurrentTimeMs(),
-          ),
+          applyProfileRow(created, profile?.displayName ?? fallbackName(user)),
         );
         return;
       }
@@ -826,18 +948,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         previous
           ? {
               ...previous,
-              displayName: patch.display_name ?? previous.displayName,
+              displayName: columns.display_name ?? previous.displayName,
               riderProfile:
-                patch.rider_profile !== undefined ? patch.rider_profile : previous.riderProfile,
+                columns.rider_profile !== undefined
+                  ? columns.rider_profile
+                  : previous.riderProfile,
               personalGoals:
-                patch.personal_goals !== undefined
-                  ? patch.personal_goals
+                columns.personal_goals !== undefined
+                  ? columns.personal_goals
                   : previous.personalGoals,
             }
           : previous,
       );
     },
-    [profile, session],
+    [applyProfileRow, profile, session],
   );
 
   /**
@@ -878,12 +1002,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) return { profile: saved, synced: false };
 
         if (data) {
-          setProfile(
-            withTrustedTier(
-              toAthleteProfile(data as ProfileRow, user.email ?? null, saved.displayName),
-              getTrustedCurrentTimeMs(),
-            ),
-          );
+          setProfile(applyProfileRow(data, saved.displayName));
           return { profile: saved, synced: true };
         }
 
@@ -904,7 +1023,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { profile: saved, synced: false };
       }
     },
-    [session],
+    [applyProfileRow, session],
   );
 
   const isOwner = isOwnerEmail(session?.user?.email) || profile?.isOwner === true;

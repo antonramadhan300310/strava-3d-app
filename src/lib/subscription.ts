@@ -11,6 +11,13 @@ export type ProfileRow = {
   active_device_id: string | null;
   rider_profile: unknown;
   personal_goals: unknown;
+  /** Aliases written by the admin panel and older schemas. */
+  plan_tier?: string | null;
+  subscription_tier?: string | null;
+  plan_expires_at?: string | null;
+  subscription_expires_at?: string | null;
+  expires_at?: string | null;
+  pro_until?: string | null;
 };
 
 export type AthleteProfile = {
@@ -32,8 +39,55 @@ export type ProfileUpdate = {
   personal_goals?: unknown;
 };
 
-export const PROFILE_COLUMNS =
-  'id,email,display_name,tier,pro_expires_at,is_owner,active_device_id,rider_profile,personal_goals';
+/**
+ * `select('*')` on purpose: the admin panel (`allmova-landing`) writes the plan
+ * into whichever column its schema version has (`plan_tier`, `tier`,
+ * `subscription_tier`, …), and a named column list silently reads `null` for
+ * the others.
+ */
+export const PROFILE_COLUMNS = '*';
+
+const PRO_TIERS = new Set(['pro', 'lifetime', 'owner', 'premium']);
+const LIFETIME_TIERS = new Set(['lifetime', 'owner']);
+
+const TIER_KEYS = ['plan_tier', 'tier', 'subscription_tier'];
+const EXPIRY_KEYS = [
+  'pro_expires_at',
+  'plan_expires_at',
+  'subscription_expires_at',
+  'expires_at',
+  'pro_until',
+];
+
+function firstStringValue(row: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
+/** First non-empty tier column, lower-cased; `free` when none is set. */
+export function readProfileTier(row: Record<string, unknown>): string {
+  return (firstStringValue(row, TIER_KEYS) ?? 'free').toLowerCase();
+}
+
+/** `pro`, `lifetime`, `owner` and `premium` all unlock the Pro features. */
+export function isProTierKey(value: string | null | undefined): boolean {
+  if (typeof value !== 'string') return false;
+  return PRO_TIERS.has(value.trim().toLowerCase());
+}
+
+/** First non-empty expiry column, whatever the admin panel named it. */
+export function readProfileExpiry(row: Record<string, unknown>): string | null {
+  return firstStringValue(row, EXPIRY_KEYS);
+}
+
+/** A typo in an expiry column must not lock a paid account out of Pro. */
+function normalizeExpiry(value: string | null): string | null {
+  if (!value) return null;
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
 
 export const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL ?? '').trim().toLowerCase();
 
@@ -45,28 +99,38 @@ export function isOwnerEmail(email: string | null | undefined): boolean {
 }
 
 export function toAthleteProfile(
-  row: ProfileRow,
+  row: ProfileRow | Record<string, unknown>,
   fallbackEmail: string | null,
   fallbackName: string,
 ): AthleteProfile {
+  const record = row as Record<string, unknown>;
+  const id = typeof record.id === 'string' ? record.id : String(record.id ?? '');
+  const email = typeof record.email === 'string' ? record.email : fallbackEmail;
   const displayName =
-    typeof row.display_name === 'string' && row.display_name.trim().length > 0
-      ? row.display_name.trim()
+    typeof record.display_name === 'string' && record.display_name.trim().length > 0
+      ? record.display_name.trim()
       : fallbackName;
 
+  const tierKey = readProfileTier(record);
+  const isOwner = record.is_owner === true;
+  // Lifetime/owner tiers never carry an expiry, so an admin row with both a
+  // "lifetime" tier and a leftover date still reads as permanent Pro.
+  const isLifetime = isOwner || LIFETIME_TIERS.has(tierKey);
+  const tier: PlanTier = isLifetime || isProTierKey(tierKey) ? 'pro' : 'free';
+
   return {
-    id: row.id,
-    email: row.email ?? fallbackEmail,
+    id,
+    email: email ?? fallbackEmail,
     displayName,
-    tier: row.tier === 'pro' ? 'pro' : 'free',
-    proExpiresAt: typeof row.pro_expires_at === 'string' ? row.pro_expires_at : null,
-    isOwner: row.is_owner === true,
+    tier,
+    proExpiresAt: isLifetime ? null : normalizeExpiry(readProfileExpiry(record)),
+    isOwner,
     activeDeviceId:
-      typeof row.active_device_id === 'string' && row.active_device_id.length > 0
-        ? row.active_device_id
+      typeof record.active_device_id === 'string' && record.active_device_id.length > 0
+        ? record.active_device_id
         : null,
-    riderProfile: row.rider_profile ?? null,
-    personalGoals: row.personal_goals ?? null,
+    riderProfile: record.rider_profile ?? null,
+    personalGoals: record.personal_goals ?? null,
   };
 }
 

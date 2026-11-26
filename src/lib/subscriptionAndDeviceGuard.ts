@@ -1,5 +1,11 @@
 import { getSupabaseClientOrNull } from './supabase';
-import type { PlanTier, ProfileRow } from './subscription';
+import {
+  isProTierKey,
+  readProfileExpiry,
+  readProfileTier,
+  type PlanTier,
+  type ProfileRow,
+} from './subscription';
 
 /**
  * Device identity, server-clock anchoring and the two subscription RPCs.
@@ -134,8 +140,8 @@ function normalizeRpcResult(data: unknown): SubscriptionSyncResult | null {
   recordServerNow(serverNow);
 
   return {
-    tier: raw.tier === 'pro' ? 'pro' : 'free',
-    proExpiresAt: asString(raw.pro_expires_at),
+    tier: isProTierKey(readProfileTier(raw)) ? 'pro' : 'free',
+    proExpiresAt: readProfileExpiry(raw),
     isOwner: raw.is_owner === true,
     activeDeviceId: asString(raw.active_device_id),
     serverNow,
@@ -240,7 +246,7 @@ export function readSubscriptionSnapshot(userId: string): SubscriptionSnapshot |
     if (!parsed || typeof parsed !== 'object') return null;
     const record = parsed as Record<string, unknown>;
     return {
-      tier: record.tier === 'pro' ? 'pro' : 'free',
+      tier: isProTierKey(asString(record.tier)) ? 'pro' : 'free',
       proExpiresAt: asString(record.proExpiresAt),
       isOwner: record.isOwner === true,
       activeDeviceId: asString(record.activeDeviceId),

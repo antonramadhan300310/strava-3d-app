@@ -15,6 +15,7 @@ import { fetchCuratedRoutes } from '@/lib/supabase';
  */
 export function useCuratedRoutes(enabled = true) {
   const [routes, setRoutes] = useState<CuratedRoute[]>([]);
+  const [invalidCount, setInvalidCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sport, setSport] = useState<CuratedSportFilter>('all');
@@ -24,9 +25,12 @@ export function useCuratedRoutes(enabled = true) {
     setLoading(true);
     setError(null);
     try {
-      setRoutes(await fetchCuratedRoutes());
+      const result = await fetchCuratedRoutes();
+      setRoutes(result.routes);
+      setInvalidCount(result.invalidCount);
     } catch (cause) {
       setRoutes([]);
+      setInvalidCount(0);
       setError(
         cause instanceof Error
           ? cause.message
@@ -70,6 +74,7 @@ export function useCuratedRoutes(enabled = true) {
     routes,
     filtered,
     counts,
+    invalidCount,
     sport,
     setSport,
     query,

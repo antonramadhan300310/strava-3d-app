@@ -66,6 +66,8 @@ type Props = {
   onFollowCuratedRoute: (route: CuratedRoute) => void;
   onSaveCuratedRoute: (route: CuratedRoute) => Promise<void>;
   onRequirePro: () => void;
+  /** App-level toast for defensive validation failures. */
+  onNotice?: (message: string) => void;
 };
 
 export default function RouteBuilderOverlay({
@@ -83,6 +85,7 @@ export default function RouteBuilderOverlay({
   onFollowCuratedRoute,
   onSaveCuratedRoute,
   onRequirePro,
+  onNotice,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showSave, setShowSave] = useState(false);
@@ -216,6 +219,7 @@ export default function RouteBuilderOverlay({
             onFollow={onFollowCuratedRoute}
             onSave={onSaveCuratedRoute}
             onRequirePro={onRequirePro}
+            onNotice={onNotice}
           />
         </div>
       ) : (

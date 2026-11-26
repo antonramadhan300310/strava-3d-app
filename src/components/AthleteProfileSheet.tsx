@@ -42,7 +42,7 @@ import {
   type BikeType,
   type RiderProfile,
 } from '@/lib/riderProfile';
-import { isLifetimePro } from '@/lib/subscription';
+import { isLifetimePro, isProfilePro, isTrialPro } from '@/lib/subscription';
 import ProPaywallSheet from './ProPaywallSheet';
 import PrivacyPolicyLink from './PrivacyPolicyLink';
 
@@ -103,10 +103,9 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   const {
     user,
     profile: account,
-    isPro,
     isOwner,
     trialDaysLeft,
-    refreshSubscription,
+    refreshProfile,
     ownerSimulatedTier,
     setOwnerSimulatedTier,
     signOut,
@@ -173,11 +172,12 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     setDeleteError(null);
   }, [open]);
 
-  // Opening the Athlete Profile re-checks tier, expiry and the active device.
+  // Opening the Athlete Profile re-reads the `profiles` row: an admin tier
+  // change (or a device takeover) shows up without restarting the app.
   useEffect(() => {
     if (!open) return;
-    void refreshSubscription();
-  }, [open, refreshSubscription]);
+    void refreshProfile();
+  }, [open, refreshProfile]);
 
   // Reads the APK version and the OTA bundle actually running on this device.
   useEffect(() => {
@@ -295,8 +295,22 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     };
   }, [activities]);
 
+  const accountPro = account ? isProfilePro(account) : false;
   const lifetimePro = account ? isLifetimePro(account) : false;
-  const trialBadge = !lifetimePro && trialDaysLeft !== null;
+  const trialPro = account ? isTrialPro(account) : false;
+  /** Owner and an active Pro plan both hide the upgrade button. */
+  const proActive = isOwner || accountPro;
+  const proExpiryLabel = useMemo(() => {
+    const raw = account?.proExpiresAt;
+    if (!raw) return null;
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+  }, [account?.proExpiresAt]);
 
   const ftpValue = Number(ftp);
   const effectiveFtp =
@@ -465,14 +479,15 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Identitas
               </p>
-              {lifetimePro ? (
-                <span className="rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-2 py-0.5 text-[9px] font-bold text-[#0D1112]">
-                  👑 PRO
+              {isOwner ? (
+                <span className="flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-400 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#0D1112]">
+                  <Crown size={9} />
+                  OWNER
                 </span>
-              ) : trialBadge ? (
-                <span className="flex items-center gap-1 rounded-full border border-[#B9F51E] bg-[#B9F51E]/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#B9F51E]">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#B9F51E]" />
-                  PRO TRIAL • Sisa {trialDaysLeft} Hari
+              ) : accountPro ? (
+                <span className="flex items-center gap-1 rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#0D1112]">
+                  <Crown size={9} />
+                  AKUN PRO{trialPro ? ' • TRIAL' : ''}
                 </span>
               ) : (
                 <span className="rounded-full border border-slate-600 bg-[#1E2E16] px-2 py-0.5 text-[9px] font-bold text-slate-300">
@@ -530,26 +545,16 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
                 : 'Tersimpan Lokal (Offline)'}
             </p>
 
-            {trialBadge ? (
+            {proActive ? (
               <p className="mt-1 text-[10px] text-[#B9F51E]/80">
-                Trial Pro aktif hingga{' '}
-                {new Date(account?.proExpiresAt ?? '').toLocaleDateString('id-ID', {
-                  day: '2-digit',
-                  month: 'long',
-                  year: 'numeric',
-                })}
+                {lifetimePro
+                  ? 'Pro aktif selamanya (tanpa kadaluarsa).'
+                  : proExpiryLabel
+                    ? `Pro aktif hingga ${proExpiryLabel}${
+                        trialDaysLeft !== null ? ` • Sisa ${trialDaysLeft} hari` : ''
+                      }`
+                    : 'Pro aktif.'}
               </p>
-            ) : isPro ? (
-              account?.proExpiresAt && (
-                <p className="mt-1 text-[10px] text-amber-300/80">
-                  Pro aktif hingga{' '}
-                  {new Date(account.proExpiresAt).toLocaleDateString('id-ID', {
-                    day: '2-digit',
-                    month: 'long',
-                    year: 'numeric',
-                  })}
-                </p>
-              )
             ) : (
               <button
                 type="button"

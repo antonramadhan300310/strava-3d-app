@@ -1,6 +1,10 @@
 import { parseActivityGeometry, type ActivityRecord } from './activity';
 import type { GuideRoute, LatLng } from './guideRoute';
 import type { LngLat, LngLatEle } from './polyline';
+import {
+  isValidLngLat,
+  normalizeRouteCoordinates,
+} from './routeCoordinates';
 import { estimateSportMetrics, haversineMeters } from './routePlannerEngine';
 import { normalizeActivityType, type ActivityType } from './valhalla';
 
@@ -83,33 +87,20 @@ function firstNumber(...values: unknown[]): number | null {
   return null;
 }
 
-function fromCoordinateArray(value: unknown[]): LngLatEle[] {
-  const points: LngLatEle[] = [];
-  for (const item of value) {
-    if (!Array.isArray(item) || item.length < 2) return [];
-    const lng = Number(item[0]);
-    const lat = Number(item[1]);
-    const ele = Number(item[2]);
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return [];
-    points.push([lng, lat, Number.isFinite(ele) ? ele : 0]);
-  }
-  return points;
-}
-
-/** Accepts a GeoJSON geometry/feature, a plain coordinate array, or hex WKB. */
+/**
+ * Accepts a GeoJSON geometry/feature, a plain tuple array (either axis order),
+ * an object list or a JSON string, and falls back to hex WKB. The shared
+ * normaliser resolves `[lat, lng]` vs `[lng, lat]`, which the dashboard and the
+ * older seed rows disagree on.
+ */
 function readCuratedCoordinates(value: unknown): LngLatEle[] {
-  if (Array.isArray(value)) {
-    const direct = fromCoordinateArray(value);
-    if (direct.length >= 2) return direct;
-  }
-  if (value && typeof value === 'object') {
-    const nested = (value as { coordinates?: unknown }).coordinates;
-    if (Array.isArray(nested)) {
-      const direct = fromCoordinateArray(nested);
-      if (direct.length >= 2) return direct;
-    }
-  }
-  return parseActivityGeometry(value);
+  const normalized = normalizeRouteCoordinates(value);
+  if (normalized.length >= 2) return normalized;
+
+  const wkb = parseActivityGeometry(value);
+  if (wkb.length >= 2) return normalizeRouteCoordinates(wkb);
+
+  return normalized;
 }
 
 function polylineLengthMeters(coordinates: LngLatEle[]): number {
@@ -220,7 +211,11 @@ export function curatedRouteDurationSeconds(route: CuratedRoute): number {
 
 /** The Follow Route engine stores latitude first. */
 export function toCuratedGuideRoute(route: CuratedRoute): GuideRoute | null {
-  const coordinates: LatLng[] = route.coordinates.map(([lng, lat]) => [lat, lng]);
+  // `route.coordinates` is already normalised; only drop broken points so a
+  // single bad row cannot poison the whole guide.
+  const coordinates: LatLng[] = route.coordinates
+    .filter(([lng, lat]) => isValidLngLat(lng, lat))
+    .map(([lng, lat]) => [lat, lng]);
   if (coordinates.length < 2) return null;
 
   return {
@@ -235,6 +230,11 @@ export function toCuratedGuideRoute(route: CuratedRoute): GuideRoute | null {
  * Normalised SVG points for the card preview. Longitude is scaled by the
  * cosine of the mid latitude so the shape is not stretched, and the result is
  * fitted into the viewBox while keeping its aspect ratio.
+ *
+ * A route that runs exactly north–south (or east–west) has a zero span on one
+ * axis: that axis is centred instead of dividing by zero. When every point is
+ * identical the preview degrades to a short centred dash, never an empty or
+ * NaN `points` attribute.
  */
 export function miniRoutePolyline(
   coordinates: LngLatEle[],
@@ -242,49 +242,56 @@ export function miniRoutePolyline(
   height = 56,
   padding = 6,
 ): string {
-  if (coordinates.length < 2) return '';
+  const points = coordinates.filter(
+    ([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat),
+  );
+  if (points.length < 2) return '';
 
-  const step = Math.max(1, Math.ceil(coordinates.length / 180));
+  const step = Math.max(1, Math.ceil(points.length / 180));
   const sampled: LngLat[] = [];
-  for (let i = 0; i < coordinates.length; i += step) {
-    sampled.push([coordinates[i][0], coordinates[i][1]]);
+  for (let i = 0; i < points.length; i += step) {
+    sampled.push([points[i][0], points[i][1]]);
   }
-  const last = coordinates[coordinates.length - 1];
+  const last = points[points.length - 1];
   const tail = sampled[sampled.length - 1];
   if (tail[0] !== last[0] || tail[1] !== last[1]) sampled.push([last[0], last[1]]);
 
   let minLat = Infinity;
   let maxLat = -Infinity;
-  for (const [, lat] of sampled) {
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  for (const [lng, lat] of sampled) {
     if (lat < minLat) minLat = lat;
     if (lat > maxLat) maxLat = lat;
-  }
-  const cosLat = Math.max(0.01, Math.cos((((minLat + maxLat) / 2) * Math.PI) / 180));
-
-  let minX = Infinity;
-  let maxX = -Infinity;
-  for (const [lng] of sampled) {
-    const x = lng * cosLat;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
   }
 
-  const spanX = maxX - minX;
+  const midLat = (minLat + maxLat) / 2;
+  const cosLat = Math.max(0.01, Math.cos((midLat * Math.PI) / 180));
+  const spanX = (maxLng - minLng) * cosLat;
   const spanY = maxLat - minLat;
   const usableWidth = Math.max(1, width - padding * 2);
   const usableHeight = Math.max(1, height - padding * 2);
+
   const scale = Math.min(
     spanX > 0 ? usableWidth / spanX : Number.POSITIVE_INFINITY,
     spanY > 0 ? usableHeight / spanY : Number.POSITIVE_INFINITY,
   );
-  const safeScale = Number.isFinite(scale) ? scale : 1;
-  const offsetX = (width - spanX * safeScale) / 2;
-  const offsetY = (height - spanY * safeScale) / 2;
+
+  if (!Number.isFinite(scale)) {
+    const midX = width / 2;
+    const midY = height / 2;
+    return `${(midX - 6).toFixed(2)},${midY.toFixed(2)} ${(midX + 6).toFixed(2)},${midY.toFixed(2)}`;
+  }
+
+  const offsetX = (width - spanX * scale) / 2;
+  const offsetY = (height - spanY * scale) / 2;
 
   return sampled
     .map(([lng, lat]) => {
-      const x = offsetX + (lng * cosLat - minX) * safeScale;
-      const y = height - (offsetY + (lat - minLat) * safeScale);
+      const x = offsetX + (lng - minLng) * cosLat * scale;
+      const y = height - (offsetY + (lat - minLat) * scale);
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(' ');
