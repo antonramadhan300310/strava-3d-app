@@ -42,7 +42,7 @@ import {
   type BikeType,
   type RiderProfile,
 } from '@/lib/riderProfile';
-import { isLifetimePro, isTrialPro, parseTimestamp } from '@/lib/subscription';
+import { isLifetimePro, parseTimestamp } from '@/lib/subscription';
 import ProPaywallSheet from './ProPaywallSheet';
 import PrivacyPolicyLink from './PrivacyPolicyLink';
 
@@ -106,6 +106,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
     profile: account,
     isPro,
     isOwner,
+    isTrial,
     trialDaysLeft,
     refreshProfile,
     subscriptionError,
@@ -332,12 +333,9 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
   }, [activities]);
 
   const lifetimePro = account ? isLifetimePro(account) : false;
-  const trialPro = account ? isTrialPro(account) : false;
-  /**
-   * `isPro` comes from the auth context and nowhere else: the sheet, the bottom
-   * navigation lock and the paywall must never compute the plan separately, or
-   * one of them shows "AKUN FREE" while the other unlocks Pro.
-   */
+  // `isPro` and `isTrial` come from the auth context so the sheet, the nav lock
+  // and the paywall cannot disagree. `isTrial` is true only when the row's
+  // `subscription_source` is `trial`; a paid or admin activation is not a trial.
   const proActive = isPro;
   const proExpiryLabel = useMemo(() => {
     const expiresAt = parseTimestamp(account?.proExpiresAt);
@@ -524,7 +522,7 @@ export default function AthleteProfileSheet({ open, activities, onClose, onSaved
               ) : proActive ? (
                 <span className="flex items-center gap-1 rounded-full border border-[#B9F51E]/40 bg-[#B9F51E] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#0D1112]">
                   <Crown size={9} />
-                  AKUN PRO{trialPro ? ' • TRIAL' : ''}
+                  AKUN PRO{isTrial ? ' • TRIAL' : ''}
                 </span>
               ) : (
                 <span className="rounded-full border border-slate-600 bg-[#1E2E16] px-2 py-0.5 text-[9px] font-bold text-slate-300">

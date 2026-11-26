@@ -101,6 +101,8 @@ type AuthContextValue = {
   profile: AthleteProfile | null;
   isPro: boolean;
   isOwner: boolean;
+  /** True only for a dated Pro account whose `subscription_source` is `trial`. */
+  isTrial: boolean;
   tier: PlanTier;
   /** Whole days left in the Pro trial, or null when not on a trial. */
   trialDaysLeft: number | null;
@@ -204,6 +206,7 @@ function fallbackProfile(user: User): AthleteProfile {
       proExpiresAt: snapshot?.proExpiresAt ?? null,
       isOwner: snapshot?.isOwner ?? false,
       activeDeviceId: snapshot?.activeDeviceId ?? null,
+      subscriptionSource: snapshot?.subscriptionSource ?? null,
       riderProfile: local,
       personalGoals: null,
       serverVerifiedAt: null,
@@ -409,6 +412,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         proExpiresAt: merged.proExpiresAt,
         isOwner: merged.isOwner,
         activeDeviceId: merged.activeDeviceId,
+        subscriptionSource: merged.subscriptionSource,
         serverVerifiedAt: merged.serverVerifiedAt,
       };
       serverProfileRef.current = merged;
@@ -1095,6 +1099,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const plan = describePlan(profile, getTrustedCurrentTimeMs());
   const isOwner = isOwnerEmail(session?.user?.email) || plan.isOwner;
   const isPro = isOwner ? ownerSimulatedTier === 'pro' : plan.isPro;
+  const isTrial = !isOwner && plan.isTrial;
   const trialDays = plan.daysLeft;
   const tier: PlanTier = plan.tier;
 
@@ -1106,6 +1111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       isPro,
       isOwner,
+      isTrial,
       tier,
       trialDaysLeft: trialDays,
       trialExpiredNotice,
@@ -1137,6 +1143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       isPro,
       isOwner,
+      isTrial,
       tier,
       trialDays,
       trialExpiredNotice,
