@@ -61,12 +61,19 @@ public class AllmovaTrackingPlugin extends Plugin {
      * reference. Weak, because the activity (and with it the plugin) is
      * recreated on rotation while the service keeps recording.
      */
-    private static final WeakReference<AllmovaTrackingPlugin> instanceRef =
+    private static WeakReference<AllmovaTrackingPlugin> instanceRef =
             new WeakReference<>(null);
 
     @Override
     public void load() {
-        instanceRef.set(this);
+        instanceRef = new WeakReference<>(this);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        AllmovaTrackingPlugin current = instanceRef.get();
+        if (current == this) instanceRef = new WeakReference<>(null);
+        super.handleOnDestroy();
     }
 
     @PluginMethod

@@ -83,8 +83,10 @@ final class GpsFixBuffer {
     /**
      * Stores one fix. Non-increasing timestamps are dropped so the same position
      * reported by two providers cannot duplicate a point.
+     *
+     * @return the stored fix, or {@code null} when the fix was rejected.
      */
-    synchronized void append(
+    synchronized JSONObject append(
             double lat,
             double lng,
             double accuracy,
@@ -138,11 +140,7 @@ final class GpsFixBuffer {
         JSONArray result = new JSONArray();
         for (JSONObject fix : fixes) {
             if (fix.optLong("i", -1) < since) continue;
-            try {
-                result.put(fix);
-            } catch (JSONException ignored) {
-                // Skip a row that cannot be serialised; the rest still drain.
-            }
+            result.put(fix);
         }
         return result;
     }

@@ -194,15 +194,18 @@ public class AllmovaTrackingService extends Service {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 android.location.LocationRequest request =
-                        new android.location.LocationRequest.Builder(
-                                        LocationManager.GPS_PROVIDER, UPDATE_INTERVAL_MS)
+                        new android.location.LocationRequest.Builder(UPDATE_INTERVAL_MS)
                                 .setQuality(android.location.LocationRequest.QUALITY_HIGH_ACCURACY)
                                 .setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
                                 .setMaxUpdateDelayMillis(0L)
-                                .setWaitForAccurateLocation(false)
                                 .build();
+                // The (request, listener, looper) overload is @SystemApi; the
+                // public API 31 shape takes the provider and an executor.
                 locationManager.requestLocationUpdates(
-                        request, locationListener, Looper.getMainLooper());
+                        LocationManager.GPS_PROVIDER,
+                        request,
+                        ContextCompat.getMainExecutor(this),
+                        locationListener);
             } else {
                 requestProvider(LocationManager.GPS_PROVIDER);
                 requestProvider(LocationManager.NETWORK_PROVIDER);
@@ -254,13 +257,22 @@ public class AllmovaTrackingService extends Service {
         float accuracy = location.getAccuracy();
         if (accuracy <= 0 || accuracy > MAX_BUFFERED_ACCURACY_METERS) return;
 
+        Double altitude = null;
+        if (location.hasAltitude()) altitude = (double) location.getAltitude();
+
+        Double speed = null;
+        if (location.hasSpeed()) speed = (double) location.getSpeed();
+
+        Double bearing = null;
+        if (location.hasBearing()) bearing = (double) location.getBearing();
+
         JSONObject fix = GpsFixBuffer.get(this).append(
                 location.getLatitude(),
                 location.getLongitude(),
-                accuracy,
-                location.hasAltitude() ? location.getAltitude() : null,
-                location.hasSpeed() ? location.getSpeed() : null,
-                location.hasBearing() ? location.getBearing() : null,
+                (double) accuracy,
+                altitude,
+                speed,
+                bearing,
                 location.getTime());
         if (fix != null) AllmovaTrackingPlugin.emitLocation(fix);
     }
