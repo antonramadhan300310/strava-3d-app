@@ -41,6 +41,7 @@ import ProPaywallSheet from './ProPaywallSheet';
 import AllmovaLogo from './AllmovaLogo';
 import TrainingLogView from './TrainingLogView';
 import AthleteProfileSheet from './AthleteProfileSheet';
+import NotificationBell from './NotificationBell';
 
 const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
   cycling: <Bike size={20} />,
@@ -177,6 +178,7 @@ export default function ActivitiesPanel({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <NotificationBell variant="header" />
             <button
               type="button"
               onClick={() => void activities.refresh()}

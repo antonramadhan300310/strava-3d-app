@@ -168,7 +168,7 @@ export default function RouteBuilderOverlay({
       />
 
       <div className="pointer-events-none absolute inset-x-3 top-[calc(env(safe-area-inset-top)+1rem)] z-20 flex flex-col items-center gap-2">
-        <div className="pointer-events-auto w-full max-w-md">
+        <div className="pointer-events-auto w-full max-w-md pr-[4.5rem]">
           <RoutesSubTabs value={subTab} onChange={onChangeSubTab} />
         </div>
 

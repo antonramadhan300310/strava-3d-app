@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import AllmovaLogo from '@/components/AllmovaLogo';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { AnnouncementsProvider } from '@/context/AnnouncementsContext';
 import { GuideRouteProvider, useGuideRoute } from '@/context/GuideRouteContext';
 import AuthScreen from '@/components/AuthScreen';
 import ProPaywallSheet from '@/components/ProPaywallSheet';
@@ -16,6 +17,7 @@ import ActivityDetail from '@/components/ActivityDetail';
 import MapProviderModal from '@/components/MapProviderModal';
 import OtaUpdateManager from '@/components/OtaUpdateManager';
 import AccountGuardModals from '@/components/AccountGuardModals';
+import NotificationBell from '@/components/NotificationBell';
 import { useActivityRecorder } from '@/hooks/useActivityRecorder';
 import { useActivities } from '@/hooks/useActivities';
 import { useHeatmap } from '@/hooks/useHeatmap';
@@ -46,9 +48,11 @@ if (typeof window !== 'undefined' && isNativeApp()) void notifyAppReady();
 export default function AppShell() {
   return (
     <AuthProvider>
-      <OtaUpdateManager />
-      <AuthGate />
-      <AccountGuardModals />
+      <AnnouncementsProvider>
+        <OtaUpdateManager />
+        <AuthGate />
+        <AccountGuardModals />
+      </AnnouncementsProvider>
     </AuthProvider>
   );
 }
@@ -338,6 +342,7 @@ function TrackerApp() {
           heatmap={heatmapLayers}
           guideRoute={isRecord ? guideLngLat : null}
           guideFitToken={guideFitToken}
+          topRightAccessory={<NotificationBell />}
         />
       )}
 
