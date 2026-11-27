@@ -498,13 +498,13 @@ export function createGpsFilter(activityType: ActivityType = 'cycling'): GpsFilt
       }
 
       // Lateral spike: a hard sideways excursion at speed that no road makes.
-      const previous = accepted[accepted.length - 2];
-      if (previous && speedKmh >= LATERAL_SPIKE_MIN_SPEED_KMH) {
+      const beforeLast = accepted[accepted.length - 2];
+      if (beforeLast && speedKmh >= LATERAL_SPIKE_MIN_SPEED_KMH) {
         const turn = angleBetweenBearings(
-          bearingDegrees(previous, lastAcceptedRaw),
+          bearingDegrees(beforeLast, lastAcceptedRaw),
           bearingDegrees(lastAcceptedRaw, fix),
         );
-        const lateral = crossTrackMeters(fix, previous, lastAcceptedRaw);
+        const lateral = crossTrackMeters(fix, beforeLast, lastAcceptedRaw);
         const threshold = Math.max(LATERAL_SPIKE_MIN_METERS, fix.accuracy * 2.5);
         if (turn > LATERAL_TURN_DEGREES && lateral > threshold) {
           return reject('lateral');
