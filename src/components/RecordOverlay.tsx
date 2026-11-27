@@ -163,7 +163,7 @@ export default function RecordOverlay({
       {idle && (
         <div className="absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.2rem)] z-20 flex">
           {guideRoute ? (
-            <div className="flex max-w-[calc(100%-4rem)] items-center gap-1.5 rounded-full border border-sky-400/40 bg-[#151B1D]/90 py-1 pl-3 pr-1 text-[11px] font-semibold text-slate-100 shadow-lg backdrop-blur">
+            <div className="flex max-w-[calc(100%-5rem)] items-center gap-1.5 rounded-full border border-sky-400/40 bg-[#151B1D]/90 py-1 pl-3 pr-1 text-[11px] font-semibold text-slate-100 shadow-lg backdrop-blur">
               <Navigation size={13} className="shrink-0 text-sky-300" />
               <span className="truncate">{guideRoute.name}</span>
               <button
@@ -224,6 +224,20 @@ export default function RecordOverlay({
           </button>
         )}
 
+        {recorder.isAutoPaused && (
+          <div
+            className="mx-auto flex w-full max-w-md items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-2 text-[11px] font-medium text-amber-200 shadow-lg"
+            role="status"
+            aria-live="polite"
+          >
+            <Pause size={14} className="shrink-0" />
+            <span>
+              Jeda Otomatis aktif — timer berhenti sementara dan rekaman lanjut sendiri saat kamu
+              bergerak lagi.
+            </span>
+          </div>
+        )}
+
         {idle && (
           <div className="mx-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/90 p-2 shadow-2xl backdrop-blur">
             <p className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-wide text-slate-400">
@@ -247,6 +261,32 @@ export default function RecordOverlay({
                   </button>
                 );
               })}
+            </div>
+
+            <div className="mt-1 flex items-center justify-between gap-2 rounded-xl px-2 py-1.5">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-slate-200">Jeda Otomatis</p>
+                <p className="text-[9px] leading-tight text-slate-400">
+                  Timer berhenti saat kecepatan &lt; {recorder.autoPauseThresholdKmh} km/j selama 5
+                  detik, lalu lanjut sendiri.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={recorder.autoPauseEnabled}
+                aria-label="Jeda otomatis"
+                onClick={() => recorder.setAutoPauseEnabled(!recorder.autoPauseEnabled)}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors active:scale-95 ${
+                  recorder.autoPauseEnabled ? 'bg-[#B9F51E]' : 'bg-[#2A3538]'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                    recorder.autoPauseEnabled ? 'translate-x-[20px]' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
             </div>
           </div>
         )}
@@ -272,6 +312,27 @@ export default function RecordOverlay({
               >
                 <Pause size={22} />
                 Pause
+              </button>
+              <button
+                type="button"
+                onClick={() => void recorder.finish()}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-rose-500 py-4 text-base font-bold text-white shadow-2xl transition active:scale-[0.98]"
+              >
+                <Square size={20} />
+                Finish
+              </button>
+            </>
+          )}
+
+          {recorder.phase === 'auto-paused' && !finished && (
+            <>
+              <button
+                type="button"
+                onClick={() => void recorder.resume()}
+                className="flex flex-[2] items-center justify-center gap-2 rounded-2xl bg-[#B9F51E] py-4 text-base font-bold text-[#0D1112] shadow-2xl transition active:scale-[0.98]"
+              >
+                <Play size={22} />
+                Lanjutkan
               </button>
               <button
                 type="button"
@@ -436,7 +497,7 @@ function GuideHud({
     : `Sisa ${formatGuideDistance(progress?.remainingMeters ?? route.distanceMeters)}`;
 
   return (
-    <div className="absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.2rem)] z-20 flex justify-center">
+    <div className="absolute left-3 right-[4.6rem] top-[calc(env(safe-area-inset-top)+3.2rem)] z-20 flex justify-center">
       <div
         className={`relative flex h-9 w-full max-w-md items-center gap-2 overflow-hidden rounded-full border px-3 text-[11px] font-semibold shadow-lg backdrop-blur ${
           offRoute
@@ -483,6 +544,8 @@ function GuideHud({
 function TelemetryCard({ recorder }: { recorder: ActivityRecorderState }) {
   const { formatted } = recorder;
   const paused = recorder.isPaused;
+  const autoPaused = recorder.isAutoPaused;
+  const statusLabel = autoPaused ? 'Jeda Otomatis' : paused ? 'Dijeda' : 'Merekam';
 
   return (
     <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#151B1D]/90 px-4 py-3 text-slate-100 shadow-2xl backdrop-blur">
@@ -491,12 +554,12 @@ function TelemetryCard({ recorder }: { recorder: ActivityRecorderState }) {
           <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
             <span
               className={`h-2 w-2 rounded-full ${
-                paused ? 'bg-amber-400' : 'animate-pulse bg-emerald-400'
+                paused || autoPaused ? 'bg-amber-400' : 'animate-pulse bg-emerald-400'
               }`}
             />
-            {paused ? 'Dijeda' : 'Merekam'}
+            {statusLabel}
           </span>
-          {!paused && recorder.nativeTrackingActive && (
+          {!paused && !autoPaused && recorder.nativeTrackingActive && (
             <span className="inline-flex w-fit items-center gap-1 rounded-full bg-[#1E2E16] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#B9F51E]">
               <span className="h-1 w-1 rounded-full bg-[#B9F51E]" />
               GPS Latar Belakang Aktif

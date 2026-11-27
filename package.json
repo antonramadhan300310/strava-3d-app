@@ -10,7 +10,9 @@
     "test:ota": "node scripts/ota-updater.test.mjs",
     "test:gpx": "node scripts/gpx.test.mjs",
     "test:subscription": "node scripts/subscription-plan.test.mjs",
-    "test": "npm run test:subscription && npm run test:gpx && npm run test:ota"
+    "test:gps": "node scripts/gps-filter.test.mjs",
+    "test:announcements": "node scripts/announcements.test.mjs",
+    "test": "npm run test:subscription && npm run test:gpx && npm run test:ota && npm run test:gps && npm run test:announcements"
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.24",

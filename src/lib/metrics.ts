@@ -1,8 +1,12 @@
 import { distance as turfDistance } from '@turf/turf';
 import type { LngLat } from './polyline';
 
-/** Fixes worse than this are too noisy to trust for distance and speed. */
-export const MAX_ACCURACY_METERS = 20;
+/**
+ * Fixes worse than this are too noisy to trust for distance and speed. Above
+ * 25 m the phone is usually on a cell/Wi-Fi position rather than a satellite
+ * one, which is what drags the line off the road under a flyover.
+ */
+export const MAX_ACCURACY_METERS = 25;
 /** Minimum movement from the last accepted fix; below this is GPS jitter. */
 export const MIN_MOVEMENT_METERS = 3;
 /** Speed is reported as zero once no accepted fix has arrived for this long. */
@@ -35,24 +39,6 @@ export function gpsBadgeText(accuracyMeters: number | null): string {
   const rounded = Math.round(accuracyMeters);
   if (accuracyMeters > MAX_ACCURACY_METERS) return `Sinyal Lemah • Akurasi ${rounded}m`;
   return `GPS Siap • Akurasi ${rounded}m`;
-}
-
-/**
- * Returns why a fix must be dropped, or `null` when it is good enough to keep.
- *
- * Both rules matter for accuracy: the accuracy gate removes fixes taken under
- * tree cover or in a canyon, and the distance gate removes the drift that a
- * stationary phone reports as movement.
- */
-export function rejectReason(sample: AcceptedPoint, last: AcceptedPoint | null): string | null {
-  if (!Number.isFinite(sample.accuracy) || sample.accuracy > MAX_ACCURACY_METERS) {
-    return 'accuracy';
-  }
-  if (!last) return null;
-
-  const moved = turfDistance([last.lng, last.lat], [sample.lng, sample.lat], { units: 'meters' });
-  if (moved < MIN_MOVEMENT_METERS) return 'distance';
-  return null;
 }
 
 /** Cumulative great-circle length of the recorded track, in metres. */

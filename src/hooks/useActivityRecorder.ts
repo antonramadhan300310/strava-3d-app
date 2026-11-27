@@ -10,10 +10,18 @@ import {
   formatSpeed,
   averageSpeedKmh,
   paceSecondsPerKm,
-  rejectReason,
   totalDistanceMeters,
   type AcceptedPoint,
 } from '@/lib/metrics';
+import {
+  autoPauseSpeedKmh,
+  createAutoPauseTracker,
+  createGpsFilter,
+  smoothedElevationGain,
+  type AutoPauseTracker,
+  type GpsFilter,
+} from '@/lib/gpsFilter';
+import { isAutoPauseEnabled, setAutoPauseEnabled as persistAutoPausePreference } from '@/lib/recorderSettings';
 import {
   startLocationWatch,
   type LocationError,
@@ -29,7 +37,7 @@ import { fetchActivityWeather } from '@/lib/weatherService';
 import { timestampOf, type LngLat, type LngLatEle } from '@/lib/polyline';
 import { startNativeTrackingService, stopNativeTrackingService } from '@/lib/nativeTrackingService';
 
-export type SessionPhase = 'idle' | 'recording' | 'paused' | 'finishing';
+export type SessionPhase = 'idle' | 'recording' | 'paused' | 'auto-paused' | 'finishing';
 
 export type LiveMetrics = {
   activeSeconds: number;
@@ -51,17 +59,6 @@ export type FinishResult = {
 const TICK_MS = 1000;
 /** Watcher callbacks can arrive out of order; ignore fixes older than this. */
 const MAX_FIX_AGE_MS = 60000;
-
-function toAcceptedPoint(sample: LocationSample): AcceptedPoint {
-  return {
-    lng: sample.lng,
-    lat: sample.lat,
-    ele: sample.altitude,
-    time: sample.time,
-    accuracy: sample.accuracy,
-    speed: sample.speed,
-  };
-}
 
 function formatSavedAt(epochMs: number): string {
   return new Date(epochMs).toLocaleString('id-ID', {
@@ -97,6 +94,7 @@ export function useActivityRecorder() {
   const [finishResult, setFinishResult] = useState<FinishResult | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [nativeTrackingActive, setNativeTrackingActive] = useState(false);
+  const [autoPauseEnabled, setAutoPauseEnabledState] = useState(true);
 
   const watchRef = useRef<LocationWatch | null>(null);
   const pointsRef = useRef<AcceptedPoint[]>([]);
@@ -109,6 +107,9 @@ export function useActivityRecorder() {
   const runningSinceRef = useRef<number | null>(null);
   /** True while the Record tab is open, so the GPS badge has live data before Start. */
   const previewRef = useRef(false);
+  const filterRef = useRef<GpsFilter | null>(null);
+  const autoPauseRef = useRef<AutoPauseTracker | null>(null);
+  const autoPauseEnabledRef = useRef(true);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   pointsRef.current = points;
@@ -118,6 +119,23 @@ export function useActivityRecorder() {
   const currentActiveMs = useCallback(() => {
     const running = runningSinceRef.current;
     return activeMsRef.current + (running === null ? 0 : Date.now() - running);
+  }, []);
+
+  const getFilter = useCallback(() => {
+    if (!filterRef.current) filterRef.current = createGpsFilter(activityRef.current);
+    return filterRef.current;
+  }, []);
+
+  const getAutoPause = useCallback(() => {
+    if (!autoPauseRef.current) autoPauseRef.current = createAutoPauseTracker(activityRef.current);
+    return autoPauseRef.current;
+  }, []);
+
+  // The toggle is a device preference; it loads after hydration.
+  useEffect(() => {
+    const enabled = isAutoPauseEnabled();
+    autoPauseEnabledRef.current = enabled;
+    setAutoPauseEnabledState(enabled);
   }, []);
 
   const persist = useCallback(() => {
@@ -147,6 +165,35 @@ export function useActivityRecorder() {
     if (watch) await watch.stop();
   }, []);
 
+  const flushElapsed = useCallback(() => {
+    if (runningSinceRef.current === null) return;
+    const now = Date.now();
+    activeMsRef.current += now - runningSinceRef.current;
+    runningSinceRef.current = now;
+  }, []);
+
+  /**
+   * Auto-pause keeps the watcher and the wake lock alive: the session has to
+   * see the next fix to know the athlete started moving again.
+   */
+  const enterAutoPause = useCallback(() => {
+    if (phaseRef.current !== 'recording') return;
+    flushElapsed();
+    runningSinceRef.current = null;
+    setPhase('auto-paused');
+    phaseRef.current = 'auto-paused';
+    setNowMs(Date.now());
+    persist();
+  }, [flushElapsed, persist]);
+
+  const exitAutoPause = useCallback(() => {
+    if (phaseRef.current !== 'auto-paused') return;
+    runningSinceRef.current = Date.now();
+    setPhase('recording');
+    phaseRef.current = 'recording';
+    setNowMs(Date.now());
+  }, []);
+
   const handleSample = useCallback(
     (sample: LocationSample) => {
       if (Date.now() - sample.time > MAX_FIX_AGE_MS) return;
@@ -154,21 +201,37 @@ export function useActivityRecorder() {
       setLivePosition(sample);
       setGpsAccuracy(sample.accuracy);
 
+      const phase = phaseRef.current;
+      // Preview fixes (Record tab open, no session) and a manual pause must not
+      // touch the filter: the track would otherwise silently absorb the drift.
+      if (phase !== 'recording' && phase !== 'auto-paused') return;
+
+      const result = getFilter().push(sample);
+
+      // Auto-pause reads the filtered speed even when the fix itself is dropped:
+      // a stationary phone's fixes fail the drift gate, but its speed still has
+      // to reach the state machine so the timer can stop and start again.
+      if (autoPauseEnabledRef.current) {
+        const update = getAutoPause().update(result.speedKmh, sample.time);
+        if (update.changed) {
+          if (update.paused) enterAutoPause();
+          else exitAutoPause();
+        }
+      }
+
       if (phaseRef.current !== 'recording') return;
+      if (!result.accepted || !result.point) return;
 
-      const candidate = toAcceptedPoint(sample);
-      const last = pointsRef.current[pointsRef.current.length - 1] ?? null;
-      if (rejectReason(candidate, last)) return;
-
-      lastFixTimeRef.current = candidate.time;
+      const accepted = result.point;
+      lastFixTimeRef.current = accepted.time;
       setPoints((current) => {
-        const next = [...current, candidate];
+        const next = [...current, accepted];
         pointsRef.current = next;
         return next;
       });
       setGpsError(null);
     },
-    [],
+    [enterAutoPause, exitAutoPause, getAutoPause, getFilter],
   );
 
   const handleError = useCallback((error: LocationError) => {
@@ -193,17 +256,12 @@ export function useActivityRecorder() {
 
   const stopPreview = useCallback(async () => {
     previewRef.current = false;
-    // Only an in-flight recording outlives the Record tab; a paused session
-    // restarts its watcher when the tab is opened again.
-    if (phaseRef.current !== 'recording') await stopWatch();
+    // Only a running session (including auto-pause, which must keep sampling)
+    // outlives the Record tab; a paused session restarts its watcher on return.
+    if (phaseRef.current !== 'recording' && phaseRef.current !== 'auto-paused') {
+      await stopWatch();
+    }
   }, [stopWatch]);
-
-  const flushElapsed = useCallback(() => {
-    if (runningSinceRef.current === null) return;
-    const now = Date.now();
-    activeMsRef.current += now - runningSinceRef.current;
-    runningSinceRef.current = now;
-  }, []);
 
   // A single ticking clock drives the HUD; it only advances while recording.
   useEffect(() => {
@@ -231,6 +289,8 @@ export function useActivityRecorder() {
       clearSession();
       setActivityType(type);
       activityRef.current = type;
+      filterRef.current = createGpsFilter(type);
+      autoPauseRef.current = createAutoPauseTracker(type);
       setPoints([]);
       pointsRef.current = [];
       lastFixTimeRef.current = null;
@@ -254,22 +314,25 @@ export function useActivityRecorder() {
     if (phaseRef.current !== 'recording') return;
     flushElapsed();
     runningSinceRef.current = null;
+    getAutoPause().reset();
     setPhase('paused');
     phaseRef.current = 'paused';
     // The HUD memo is keyed on the wall clock, so nudge it to show frozen values.
     setNowMs(Date.now());
     persist();
     stopBackgroundService();
-  }, [flushElapsed, persist, stopBackgroundService]);
+  }, [flushElapsed, getAutoPause, persist, stopBackgroundService]);
 
   const resume = useCallback(async () => {
-    if (phaseRef.current !== 'paused') return;
+    if (phaseRef.current !== 'paused' && phaseRef.current !== 'auto-paused') return;
+    getAutoPause().reset();
     runningSinceRef.current = Date.now();
     setPhase('recording');
     phaseRef.current = 'recording';
+    setNowMs(Date.now());
     await startBackgroundService();
     await beginWatch();
-  }, [beginWatch, startBackgroundService]);
+  }, [beginWatch, getAutoPause, startBackgroundService]);
 
   const finish = useCallback(async (): Promise<FinishResult | null> => {
     if (phaseRef.current === 'idle' || phaseRef.current === 'finishing') return null;
@@ -306,10 +369,18 @@ export function useActivityRecorder() {
     const coordinates = snapped.coordinates;
     const usedGpsAltitude = snapped.usedGpsAltitude;
 
+    // Phone altitude is noisy enough to invent hundreds of metres of climb; the
+    // smoothed, deadbanded sum is only used when the DEM profile was unavailable.
+    const gpsAltitudeGain = smoothedElevationGain(
+      recorded
+        .map((point) => point.ele)
+        .filter((value): value is number => value !== null && Number.isFinite(value)),
+    );
+
     const result: FinishResult = {
       coordinates,
       distanceMeters: snapped.distanceMeters,
-      elevationGainMeters: snapped.elevationGainMeters,
+      elevationGainMeters: usedGpsAltitude ? gpsAltitudeGain : snapped.elevationGainMeters,
       durationSeconds: Math.round(activeMsRef.current / 1000),
       usedGpsAltitude,
     };
@@ -335,6 +406,8 @@ export function useActivityRecorder() {
     phaseRef.current = 'idle';
     setPoints([]);
     pointsRef.current = [];
+    filterRef.current = createGpsFilter(activityRef.current);
+    autoPauseRef.current = createAutoPauseTracker(activityRef.current);
     setFinishResult(null);
     activeMsRef.current = 0;
     runningSinceRef.current = null;
@@ -430,6 +503,9 @@ export function useActivityRecorder() {
     activeMsRef.current = saved.activeMs;
     startedAtRef.current = saved.startedAt;
     lastFixTimeRef.current = saved.points[saved.points.length - 1]?.time ?? null;
+    filterRef.current = createGpsFilter(saved.activityType);
+    filterRef.current.reset(saved.points);
+    autoPauseRef.current = createAutoPauseTracker(saved.activityType);
     setFinishResult(null);
     setNotice(`Sesi dipulihkan (${saved.points.length} titik, tersimpan ${formatSavedAt(saved.savedAt)}).`);
 
@@ -489,10 +565,40 @@ export function useActivityRecorder() {
     [metrics],
   );
 
+  const changeActivityType = useCallback(
+    (type: ActivityType) => {
+      setActivityType(type);
+      activityRef.current = type;
+      getFilter().setActivityType(type);
+      // The pause/resume thresholds are per sport, so the tracker is rebuilt.
+      autoPauseRef.current = createAutoPauseTracker(type);
+    },
+    [getFilter],
+  );
+
+  const setAutoPauseEnabled = useCallback(
+    (enabled: boolean) => {
+      autoPauseEnabledRef.current = enabled;
+      setAutoPauseEnabledState(enabled);
+      persistAutoPausePreference(enabled);
+      // Turning the option off while auto-paused would otherwise strand the
+      // session, because nothing is left to notice the speed rising again.
+      if (!enabled && phaseRef.current === 'auto-paused') {
+        getAutoPause().reset();
+        runningSinceRef.current = Date.now();
+        setPhase('recording');
+        phaseRef.current = 'recording';
+        setNowMs(Date.now());
+      }
+    },
+    [getAutoPause],
+  );
+
   return {
     phase,
     isRecording: phase === 'recording',
     isPaused: phase === 'paused',
+    isAutoPaused: phase === 'auto-paused',
     isFinishing: phase === 'finishing',
     activityType,
     points,
@@ -506,6 +612,8 @@ export function useActivityRecorder() {
     finishResult,
     notice,
     nativeTrackingActive,
+    autoPauseEnabled,
+    autoPauseThresholdKmh: autoPauseSpeedKmh(activityType),
     start,
     pause,
     resume,
@@ -516,7 +624,8 @@ export function useActivityRecorder() {
     dismissRestore,
     startPreview,
     stopPreview,
-    changeActivityType: setActivityType,
+    changeActivityType,
+    setAutoPauseEnabled,
     dismissNotice: useCallback(() => setNotice(null), []),
   };
 }

@@ -79,6 +79,34 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   (`RoutesSubTab`), and AppShell gates map taps to the `Rute Saya` sub-tab.
   `CuratedRouteList` validates the coordinates on every follow/save (toast "Koordinat rute
   tidak valid") and wraps the cards in an error boundary.
+- `src/lib/gpsFilter.ts` — the recording pipeline: accuracy gate at 25 m (a cell/Wi-Fi fix
+  under a flyover sits far off the road), spike rejection at 90 km/h cycling / 35 run /
+  20 walk-hike (implied speed over a 1 s floor plus an absolute jump cap inside 2 s), a 3 m
+  drift gate while standing still, then EMA smoothing whose weight grows with the offset
+  relative to the reported accuracy (`smoothingAlpha` 0.4 → 0.9), so jitter is calmed while a
+  corner is still followed. Altitudes go through a 5-fix average and `smoothedElevationGain`
+  sums only steps beyond a 2.5 m deadband, so a flat road adds no climb. The rejected
+  accuracy fix never becomes the speed reference, otherwise one cell fix would read as a
+  700 km/h jump. `createAutoPauseTracker` is the pure state machine: below 2.5 km/h (bike) or
+  1.5 (run/walk/hike) for 5 s → `paused`, resume needs +1 km/h of hysteresis.
+- `src/hooks/useActivityRecorder.ts` owns the `auto-paused` phase: the timer is flushed and
+  frozen, but the watcher, the foreground service and the wake lock keep running so the next
+  fix can resume the session by itself. Fixes that arrive while idle (preview) or manually
+  paused never enter the filter. `src/lib/recorderSettings.ts` stores the toggle
+  (`allmova_auto_pause`, default on); disabling it while auto-paused resumes immediately,
+  otherwise nothing would notice the speed rising again.
+- `src/lib/announcements.ts` + `src/context/AnnouncementsContext.tsx` +
+  `src/components/NotificationBell.tsx` — admin broadcasts from `public.announcements`
+  (`is_active`, `created_at desc`, limit 20). The mapper accepts the panel's aliases
+  (`message`/`published_at`/`level`), drops inactive or empty rows, and a row without a title
+  borrows the start of the body. `AnnouncementsProvider` fetches once the account is
+  authenticated (app open) and the sheet refetches on open; `lastSeenAnnouncement` lives in
+  per-account storage (`tracker3d_last_seen_announcement_v1`), is written when the sheet
+  opens (not when it closes) and drives the red badge on both bells. The bell is rendered as
+  `MapView`'s `topRightAccessory` and in the Activities header, so the two cannot disagree.
+  Migration: `supabase/migrations/20261128010000_announcements.sql` (idempotent, public read
+  of active rows, no client writes).
+
 - `src/hooks/useFlyoverPlayback.ts` — `requestAnimationFrame` driver. Map updates go through
   `onFrame` every frame; React state (HUD, scrubber) is throttled to ~16 Hz.
 - `src/components/FlyoverMap.tsx` — imperative `applyFrame` handle; owns the map, marker,
@@ -242,11 +270,15 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 npm run test:subscription   # plan state + Postgres timestamp parsing (scripts/subscription-plan.test.mjs)
 npm run test:gpx            # GPX parser + generator (scripts/gpx.test.mjs)
 npm run test:ota            # OTA download path (scripts/ota-updater.test.mjs)
+npm run test:gps            # recording filter + auto-pause (scripts/gps-filter.test.mjs)
+npm run test:announcements  # bell data mapping + unread badge (scripts/announcements.test.mjs)
+npm test                    # all of the above
 ```
 
-All three transpile the real `src/lib/*.ts` with the `typescript` package and stub only the
+All of them transpile the real `src/lib/*.ts` with the `typescript` package and stub only the
 platform boundary (Supabase client factory / Capacitor bridge). The GPX tests need no stub:
-the parser avoids `DOMParser` on purpose.
+the parser avoids `DOMParser` on purpose. The GPS tests import `@turf/turf` from the
+transpiled copy in `/tmp`, so the harness pins that specifier to `import.meta.resolve`.
 
 ## Security audit
 

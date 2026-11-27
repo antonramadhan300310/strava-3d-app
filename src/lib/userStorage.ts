@@ -18,6 +18,7 @@ export const USER_STORAGE_KEYS = {
   rpe: 'tracker3d_activity_rpe_v1',
   session: 'tracker3d:active-session:v1',
   offlineActivities: 'tracker3d_offline_activities_v1',
+  lastSeenAnnouncement: 'tracker3d_last_seen_announcement_v1',
 } as const;
 
 /** Device-wide keys written before accounts existed. */

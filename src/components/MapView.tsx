@@ -99,6 +99,8 @@ type Props = {
   guideRoute?: LngLat[] | null;
   /** Bumped when a guide route is (re)selected, to frame its full extent. */
   guideFitToken?: number;
+  /** Rendered above the map controls in the top-right column (the bell). */
+  topRightAccessory?: React.ReactNode;
 };
 
 export type HeatmapLayers = {
@@ -147,6 +149,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
     heatmap = null,
     guideRoute = null,
     guideFitToken = 0,
+    topRightAccessory = null,
   },
   ref,
 ) {
@@ -668,6 +671,7 @@ const MapView = forwardRef<MapViewHandle, Props>(function MapView(
       </div>
 
       <div className="absolute right-3 top-[calc(env(safe-area-inset-top)+1rem)] flex flex-col items-end gap-3">
+        {topRightAccessory}
         <button
           type="button"
           onClick={onProviderBadgeClick}
