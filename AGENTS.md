@@ -251,14 +251,17 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   cannot lose the track recorded with the screen locked. `getBufferedFixes({ since })` drains
   it by monotonic index, `clearFixBuffer` empties it on Start and after a save.
 - `src/lib/nativeTrackingService.ts` — the web-safe bridge; `useActivityRecorder` starts the
-  service on Start/Resume and stops it on Pause/Finish/Save/discard. `readNativeGpsBuffer` /
-  `clearNativeGpsBuffer` expose the native buffer (drained on `visibilitychange`, `focus`,
-  `online`, every 5 s while a session runs, and once more before Finish); buffered fixes skip
-  the 60 s live-freshness gate and duplicates are dropped by the filter's timestamp gate.
-  Also exposes `nativeTrackingActive` for the `GPS Latar Belakang Aktif` badge in
-  `RecordOverlay`, and `saveMediaToGallery` for the MediaStore gallery write
-  (`Pictures/ALLMOVA`, `Movies/ALLMOVA`; `IS_PENDING` on API 29+, legacy path + media scan
-  below that).
+  service on Start/Resume and stops it on Pause/Finish/Save/discard. `hasRecordingEngine`
+  tells the web layer whether this APK ships the native engine, and `addNativeLocationListener`
+  streams its fixes (`notifyListeners("location")`) so the service is the **single** GPS
+  source: one persistent notification, no duplicate `@capacitor-community/background-geolocation`
+  watcher. That plugin is now only the fallback for APKs built before the engine existed, and
+  still provides `openSettings`. `readNativeGpsBuffer` / `clearNativeGpsBuffer` expose the
+  native buffer (drained on `visibilitychange`, `focus`, `online`, every 5 s while a session
+  runs, and once more before Finish); buffered fixes skip the 60 s live-freshness gate and
+  duplicates are dropped by the filter's timestamp gate. Also exposes `saveMediaToGallery`
+  for the MediaStore gallery write (`Pictures/ALLMOVA`, `Movies/ALLMOVA`; `IS_PENDING` on
+  API 29+, legacy path + media scan below that).
 - `src/lib/otaUpdater.ts` + `src/components/OtaUpdateManager.tsx` — `@capgo/capacitor-updater`
   with `autoUpdate: false`. `AppShell` calls `notifyAppReady()` at module load (before React
   renders, so a crash in any screen cannot trigger capgo's auto-rollback). On launch the app

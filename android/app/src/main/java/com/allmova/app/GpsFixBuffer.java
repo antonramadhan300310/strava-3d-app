@@ -92,9 +92,9 @@ final class GpsFixBuffer {
             Double speed,
             Double bearing,
             long time) {
-        if (!Double.isFinite(lat) || !Double.isFinite(lng)) return;
-        if (!Double.isFinite(accuracy) || accuracy <= 0) return;
-        if (time <= 0 || time <= lastTime) return;
+        if (!Double.isFinite(lat) || !Double.isFinite(lng)) return null;
+        if (!Double.isFinite(accuracy) || accuracy <= 0) return null;
+        if (time <= 0 || time <= lastTime) return null;
 
         JSONObject fix = new JSONObject();
         try {
@@ -107,7 +107,7 @@ final class GpsFixBuffer {
             if (bearing != null && Double.isFinite(bearing)) fix.put("brg", bearing);
             fix.put("t", time);
         } catch (JSONException error) {
-            return;
+            return null;
         }
 
         nextIndex += 1;
@@ -115,6 +115,7 @@ final class GpsFixBuffer {
         fixes.add(fix);
         trim();
         appendToFile(fix);
+        return fix;
     }
 
     private void trim() {

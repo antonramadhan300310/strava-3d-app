@@ -10,6 +10,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
@@ -32,6 +33,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 
 @CapacitorPlugin(
         name = "AllmovaTracking",
@@ -53,6 +55,19 @@ public class AllmovaTrackingPlugin extends Plugin {
 
     /** Subfolder created inside Pictures/ and Movies/ for every export. */
     private static final String ALBUM_NAME = "ALLMOVA";
+
+    /**
+     * The service is not a plugin, so it reaches the WebView through this
+     * reference. Weak, because the activity (and with it the plugin) is
+     * recreated on rotation while the service keeps recording.
+     */
+    private static final WeakReference<AllmovaTrackingPlugin> instanceRef =
+            new WeakReference<>(null);
+
+    @Override
+    public void load() {
+        instanceRef.set(this);
+    }
 
     @PluginMethod
     public void startTrackingService(PluginCall call) {
@@ -138,6 +153,30 @@ public class AllmovaTrackingPlugin extends Plugin {
     public void clearFixBuffer(PluginCall call) {
         GpsFixBuffer.get(getContext()).clear();
         call.resolve();
+    }
+
+    /**
+     * Whether this APK ships the native recording engine. Older builds lack the
+     * method entirely, and the web layer falls back to the community plugin.
+     */
+    @PluginMethod
+    public void hasRecordingEngine(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("available", true);
+        call.resolve(result);
+    }
+
+    /** Called by the foreground service on the main thread for every fix. */
+    static void emitLocation(JSONObject fix) {
+        AllmovaTrackingPlugin plugin = instanceRef.get();
+        if (plugin == null || fix == null) return;
+        try {
+            JSObject payload = JSObject.fromJSONObject(fix);
+            plugin.notifyListeners("location", payload);
+        } catch (Exception error) {
+            // The WebView may be gone (frozen, killed): the fix is still buffered.
+            Log.w("AllmovaTracking", "Gagal mengirim fix ke WebView", error);
+        }
     }
 
     /**

@@ -26,6 +26,8 @@ import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
+import org.json.JSONObject;
+
 /**
  * Keeps the CPU, the GPS chip and the location callback alive while a recording
  * runs, so Android's battery optimisations cannot suspend tracking when the
@@ -235,7 +237,11 @@ public class AllmovaTrackingService extends Service {
         locationUpdatesActive = false;
     }
 
-    /** Buffers a fresh, accurate fix; cached and cell-tower fixes are dropped. */
+    /**
+     * Buffers a fresh, accurate fix; cached and cell-tower fixes are dropped.
+     * The same fix is pushed to the web layer when the WebView is awake, so a
+     * single location client feeds both the live HUD and the native buffer.
+     */
     private void handleLocation(Location location) {
         if (location == null) return;
 
@@ -248,7 +254,7 @@ public class AllmovaTrackingService extends Service {
         float accuracy = location.getAccuracy();
         if (accuracy <= 0 || accuracy > MAX_BUFFERED_ACCURACY_METERS) return;
 
-        GpsFixBuffer.get(this).append(
+        JSONObject fix = GpsFixBuffer.get(this).append(
                 location.getLatitude(),
                 location.getLongitude(),
                 accuracy,
@@ -256,6 +262,7 @@ public class AllmovaTrackingService extends Service {
                 location.hasSpeed() ? location.getSpeed() : null,
                 location.hasBearing() ? location.getBearing() : null,
                 location.getTime());
+        if (fix != null) AllmovaTrackingPlugin.emitLocation(fix);
     }
 
     private void acquireWakeLock() {

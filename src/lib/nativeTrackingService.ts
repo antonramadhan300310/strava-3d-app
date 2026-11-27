@@ -1,4 +1,4 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
 export type SavedMedia = {
   /** `content://media/...` URI of the new gallery row. */
@@ -21,6 +21,11 @@ type RawBufferedFix = {
 type AllmovaTrackingPlugin = {
   startTrackingService(): Promise<void>;
   stopTrackingService(): Promise<void>;
+  hasRecordingEngine(): Promise<{ available: boolean }>;
+  addListener(
+    eventName: 'location',
+    listener: (fix: RawBufferedFix) => void,
+  ): Promise<PluginListenerHandle>;
   getBufferedFixes(options: { since: number }): Promise<{
     fixes: RawBufferedFix[];
     nextIndex: number;
@@ -134,6 +139,47 @@ export async function clearNativeGpsBuffer(): Promise<void> {
     await AllmovaTracking.clearFixBuffer();
   } catch {
     // A stale buffer only wastes storage; it never corrupts a new recording.
+  }
+}
+
+/**
+ * Whether this APK ships the native recording engine (foreground service with
+ * its own high-accuracy location request plus the fix buffer). Builds before
+ * the engine existed do not answer the call at all, which is the signal to fall
+ * back to `@capacitor-community/background-geolocation`.
+ */
+export async function hasNativeRecordingEngine(): Promise<boolean> {
+  if (!isNativeAndroid()) return false;
+  try {
+    const result = await AllmovaTracking.hasRecordingEngine();
+    return result?.available === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Streams the fixes the native service receives while the WebView is awake.
+ * Resolves with a detach function, or `null` when the bridge is unavailable.
+ */
+export async function addNativeLocationListener(
+  listener: (fix: NativeBufferedFix) => void,
+): Promise<(() => Promise<void>) | null> {
+  if (!isNativeAndroid()) return null;
+  try {
+    const handle = await AllmovaTracking.addListener('location', (raw) => {
+      const fix = toBufferedFix(raw);
+      if (fix) listener(fix);
+    });
+    return async () => {
+      try {
+        await handle.remove();
+      } catch {
+        // The bridge may already be gone (activity destroyed).
+      }
+    };
+  } catch {
+    return null;
   }
 }
 
