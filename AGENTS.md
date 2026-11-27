@@ -79,22 +79,38 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   (`RoutesSubTab`), and AppShell gates map taps to the `Rute Saya` sub-tab.
   `CuratedRouteList` validates the coordinates on every follow/save (toast "Koordinat rute
   tidak valid") and wraps the cards in an error boundary.
-- `src/lib/gpsFilter.ts` — the recording pipeline: accuracy gate at 25 m (a cell/Wi-Fi fix
-  under a flyover sits far off the road), spike rejection at 90 km/h cycling / 35 run /
-  20 walk-hike (implied speed over a 1 s floor plus an absolute jump cap inside 2 s), a 3 m
-  drift gate while standing still, then EMA smoothing whose weight grows with the offset
-  relative to the reported accuracy (`smoothingAlpha` 0.4 → 0.9), so jitter is calmed while a
-  corner is still followed. Altitudes go through a 5-fix average and `smoothedElevationGain`
-  sums only steps beyond a 2.5 m deadband, so a flat road adds no climb. The rejected
-  accuracy fix never becomes the speed reference, otherwise one cell fix would read as a
-  700 km/h jump. `createAutoPauseTracker` is the pure state machine: below 2.5 km/h (bike) or
-  1.5 (run/walk/hike) for 5 s → `paused`, resume needs +1 km/h of hysteresis.
-- `src/hooks/useActivityRecorder.ts` owns the `auto-paused` phase: the timer is flushed and
-  frozen, but the watcher, the foreground service and the wake lock keep running so the next
-  fix can resume the session by itself. Fixes that arrive while idle (preview) or manually
-  paused never enter the filter. `src/lib/recorderSettings.ts` stores the toggle
-  (`allmova_auto_pause`, default on); disabling it while auto-paused resumes immediately,
-  otherwise nothing would notice the speed rising again.
+- `src/lib/gpsFilter.ts` — the recording pipeline: an **adaptive** accuracy gate (`25 m`
+  before the initial lock and while standing still, `45 m` while moving so a phone in a
+  jacket pocket keeps recording; cell/Wi-Fi fixes at 50–100 m are still refused), spike
+  rejection at 90 km/h cycling / 35 run / 20 walk-hike (implied speed over a 1 s floor plus
+  an absolute jump cap inside 2 s), a lateral-spike gate (>75° turn with >12 m of cross-track
+  offset at speed is multipath, not a road), a 3 m drift gate while standing still, then a
+  predictor–corrector smoother: the last smoothed velocity is extrapolated (damped 0.5, capped
+  at 4 s / 40 m) and the measurement is blended in with `smoothingAlpha` (0.4 → 0.9, weighted
+  by `coords.accuracy`, so a 40 m fix is smoothed harder than a 5 m one). Altitudes go
+  through a 5-fix average and `smoothedElevationGain` sums only steps beyond a 2.5 m
+  deadband, so a flat road adds no climb. The rejected accuracy fix never becomes the speed
+  reference, otherwise one cell fix would read as a 700 km/h jump. When `coords.speed` is
+  `null` **or 0** the speed is measured from net displacement (min of a 1 s and a 3 s window,
+  before the drift gate) — Android reports 0 both for "standing" and "no Doppler", and this
+  is what lets auto-pause notice a restart. `GpsFilterResult.instantSpeedKmh` is the
+  unsmoothed value the state machine consumes; `speedKmh` is the smoothed one for the HUD.
+  `cleanupRecordedPolyline` collapses a stationary tail (45 s inside a 12 m cluster) and runs
+  an RDP pass at 1.5 m when *Selesai & Simpan* is pressed; corners deviate far more and are
+  kept. `createAutoPauseTracker` is the pure state machine: below 2.5 km/h (bike) or 1.5
+  (run/walk/hike) for 5 s → `paused`, resume needs +1 km/h of hysteresis.
+- `src/lib/recordingClock.ts` — the wall-clock duration model (`recordingStartedAt`,
+  `totalPausedMs`, open pause window). `active = now - startedAt - pausedMs`, so a frozen
+  `setInterval` can no longer freeze the timer while distance keeps growing (that produced a
+  ~400 km/h average). `restoreFrom` rebuilds a session from `startedAt` + `activeMs`, and a
+  backwards clock step can never yield a negative duration.
+- `src/hooks/useActivityRecorder.ts` owns the `auto-paused` phase: the clock is paused and the
+  watcher, the foreground service and the wake lock keep running so the next fix can resume
+  the session by itself. Fixes that arrive while idle (preview) or manually paused never
+  enter the filter; auto-paused fixes always do. `visibilitychange`/`focus`/`online` recompute
+  the duration from the wall clock and drain the native buffer. `src/lib/recorderSettings.ts`
+  stores the toggle (`allmova_auto_pause`, default on); disabling it while auto-paused resumes
+  immediately, otherwise nothing would notice the speed rising again.
 - `src/lib/announcements.ts` + `src/context/AnnouncementsContext.tsx` +
   `src/components/NotificationBell.tsx` — admin broadcasts from `public.announcements`
   (`is_active`, `created_at desc`, limit 20). The mapper accepts the panel's aliases
@@ -223,14 +239,29 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 
 - `android/app/src/main/java/com/allmova/app/AllmovaTrackingService.java` — foreground
   service (`allmova_tracking_channel`, id 1001) that holds a `PARTIAL_WAKE_LOCK` while a
-  recording runs, so the GPS watcher survives a locked screen. Started/stopped from the
+  recording runs **and** owns its own high-accuracy location request (API 31+:
+  `LocationRequest` with `QUALITY_HIGH_ACCURACY`, 1 s interval, 500 ms fastest, zero batching
+  delay; older releases: `GPS_PROVIDER` + `NETWORK_PROVIDER` at 1 s). Cached fixes (older than
+  30 s) and anything worse than 100 m are dropped. Started/stopped from the
   `AllmovaTrackingPlugin` (`startTrackingService` / `stopTrackingService`), which is
   registered in `MainActivity.onCreate` before `super.onCreate`.
+- `android/app/src/main/java/com/allmova/app/GpsFixBuffer.java` — every fix the service
+  receives is appended to an in-memory list (capped at 60k) **and** to
+  `filesDir/allmova_gps_buffer.jsonl`, so a throttled/frozen WebView — or a process death —
+  cannot lose the track recorded with the screen locked. `getBufferedFixes({ since })` drains
+  it by monotonic index, `clearFixBuffer` empties it on Start and after a save.
 - `src/lib/nativeTrackingService.ts` — the web-safe bridge; `useActivityRecorder` starts the
-  service on Start/Resume and stops it on Pause/Finish/Save/discard. Exposes
-  `nativeTrackingActive` for the `GPS Latar Belakang Aktif` badge in `RecordOverlay`, and
-  `saveMediaToGallery` for the MediaStore gallery write (`Pictures/ALLMOVA`,
-  `Movies/ALLMOVA`; `IS_PENDING` on API 29+, legacy path + media scan below that).
+  service on Start/Resume and stops it on Pause/Finish/Save/discard. `hasRecordingEngine`
+  tells the web layer whether this APK ships the native engine, and `addNativeLocationListener`
+  streams its fixes (`notifyListeners("location")`) so the service is the **single** GPS
+  source: one persistent notification, no duplicate `@capacitor-community/background-geolocation`
+  watcher. That plugin is now only the fallback for APKs built before the engine existed, and
+  still provides `openSettings`. `readNativeGpsBuffer` / `clearNativeGpsBuffer` expose the
+  native buffer (drained on `visibilitychange`, `focus`, `online`, every 5 s while a session
+  runs, and once more before Finish); buffered fixes skip the 60 s live-freshness gate and
+  duplicates are dropped by the filter's timestamp gate. Also exposes `saveMediaToGallery`
+  for the MediaStore gallery write (`Pictures/ALLMOVA`, `Movies/ALLMOVA`; `IS_PENDING` on
+  API 29+, legacy path + media scan below that).
 - `src/lib/otaUpdater.ts` + `src/components/OtaUpdateManager.tsx` — `@capgo/capacitor-updater`
   with `autoUpdate: false`. `AppShell` calls `notifyAppReady()` at module load (before React
   renders, so a crash in any screen cannot trigger capgo's auto-rollback). On launch the app
@@ -273,7 +304,7 @@ dev server before building, and delete `.next/` before restarting it afterwards.
 npm run test:subscription   # plan state + Postgres timestamp parsing (scripts/subscription-plan.test.mjs)
 npm run test:gpx            # GPX parser + generator (scripts/gpx.test.mjs)
 npm run test:ota            # OTA download path (scripts/ota-updater.test.mjs)
-npm run test:gps            # recording filter + auto-pause (scripts/gps-filter.test.mjs)
+npm run test:gps            # filter, adaptive gate, wall-clock clock, auto-pause (scripts/gps-filter.test.mjs)
 npm run test:announcements  # bell data mapping + unread badge (scripts/announcements.test.mjs)
 npm test                    # all of the above
 ```

@@ -3,6 +3,13 @@ import type {
   BackgroundGeolocationPlugin,
   Location as NativeLocation,
 } from '@capacitor-community/background-geolocation';
+import {
+  addNativeLocationListener,
+  hasNativeRecordingEngine,
+  startNativeTrackingService,
+  stopNativeTrackingService,
+  type NativeBufferedFix,
+} from './nativeTrackingService';
 
 export type LocationSample = {
   lng: number;
@@ -126,6 +133,47 @@ function startBrowserWatch(
   };
 }
 
+function fromNativeFix(fix: NativeBufferedFix): LocationSample {
+  return {
+    lng: fix.lng,
+    lat: fix.lat,
+    accuracy: fix.accuracy,
+    altitude: fix.altitude,
+    speed: fix.speed,
+    bearing: fix.bearing,
+    time: fix.time,
+  };
+}
+
+/**
+ * Our own foreground service is the primary source on Android: it requests
+ * 1 s / 500 ms high-accuracy fixes, holds a wake lock and buffers every fix
+ * natively, so one notification covers both the live HUD and the locked-screen
+ * recording. Returns `null` when this APK predates the engine.
+ */
+async function startNativeEngineWatch(
+  onSample: (sample: LocationSample) => void,
+): Promise<LocationWatch | null> {
+  if (!(await hasNativeRecordingEngine())) return null;
+
+  const detach = await addNativeLocationListener((fix) => onSample(fromNativeFix(fix)));
+  if (!detach) return null;
+
+  if (!(await startNativeTrackingService())) {
+    // Permission denied or the service refused to start: let the caller fall
+    // back to the community plugin, which prompts for the permission itself.
+    await detach();
+    return null;
+  }
+
+  return {
+    stop: async () => {
+      await detach();
+      await stopNativeTrackingService();
+    },
+  };
+}
+
 /**
  * Streams GPS fixes from the Android foreground service when running natively,
  * and from `navigator.geolocation` when running in a browser.
@@ -135,6 +183,9 @@ export async function startLocationWatch(
   onError: (error: LocationError) => void,
 ): Promise<LocationWatch> {
   if (isNativeLocationPlatform()) {
+    const engineWatch = await startNativeEngineWatch(onSample);
+    if (engineWatch) return engineWatch;
+
     try {
       const id = await BackgroundGeolocation.addWatcher(
         {

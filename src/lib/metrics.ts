@@ -5,8 +5,17 @@ import type { LngLat } from './polyline';
  * Fixes worse than this are too noisy to trust for distance and speed. Above
  * 25 m the phone is usually on a cell/Wi-Fi position rather than a satellite
  * one, which is what drags the line off the road under a flyover.
+ *
+ * This is the strict (initial lock / standing still) limit; while moving the
+ * recording filter relaxes it to `GPS_ACCEPTABLE_ACCURACY_METERS` so a fix
+ * taken with the phone in a jacket pocket is still recorded.
  */
 export const MAX_ACCURACY_METERS = 25;
+/**
+ * Accuracy that is still usable while moving. Must stay in step with
+ * `GPS_ACCURACY_LIMIT_MOVING_METERS` in `gpsFilter.ts`.
+ */
+export const GPS_ACCEPTABLE_ACCURACY_METERS = 45;
 /** Minimum movement from the last accepted fix; below this is GPS jitter. */
 export const MIN_MOVEMENT_METERS = 3;
 /** Speed is reported as zero once no accepted fix has arrived for this long. */
@@ -30,14 +39,14 @@ export type GpsQuality = 'good' | 'fair' | 'poor';
 export function gpsQuality(accuracyMeters: number | null): GpsQuality {
   if (accuracyMeters === null || !Number.isFinite(accuracyMeters)) return 'poor';
   if (accuracyMeters <= 8) return 'good';
-  if (accuracyMeters <= MAX_ACCURACY_METERS) return 'fair';
+  if (accuracyMeters <= GPS_ACCEPTABLE_ACCURACY_METERS) return 'fair';
   return 'poor';
 }
 
 export function gpsBadgeText(accuracyMeters: number | null): string {
   if (accuracyMeters === null || !Number.isFinite(accuracyMeters)) return 'Mencari Sinyal GPS...';
   const rounded = Math.round(accuracyMeters);
-  if (accuracyMeters > MAX_ACCURACY_METERS) return `Sinyal Lemah • Akurasi ${rounded}m`;
+  if (accuracyMeters > GPS_ACCEPTABLE_ACCURACY_METERS) return `Sinyal Lemah • Akurasi ${rounded}m`;
   return `GPS Siap • Akurasi ${rounded}m`;
 }
 

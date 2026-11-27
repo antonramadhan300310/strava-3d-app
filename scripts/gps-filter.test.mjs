@@ -46,6 +46,18 @@ function fixAt({ north = 0, east = 0, accuracy = 5, altitude = null, speed = nul
 
 const eastMeters = (point) => Math.abs((point.lng - BASE_LNG) * METERS_PER_DEG_LNG);
 
+/** An `AcceptedPoint` as the filter emits it, used by the cleanup tests. */
+function pointAt({ north = 0, east = 0, time, ele = null }) {
+  return {
+    lat: BASE_LAT + north / METERS_PER_DEG_LAT,
+    lng: BASE_LNG + east / METERS_PER_DEG_LNG,
+    ele,
+    time,
+    accuracy: 5,
+    speed: null,
+  };
+}
+
 function pathLength(points) {
   let total = 0;
   for (let i = 1; i < points.length; i += 1) {
@@ -77,6 +89,7 @@ const transpile = async (name) => {
 
 await transpile('metrics');
 await transpile('gpsFilter');
+await transpile('recordingClock');
 
 const results = [];
 async function check(name, fn) {
@@ -92,14 +105,20 @@ async function check(name, fn) {
 try {
   const {
     GPS_ACCURACY_LIMIT_METERS,
+    GPS_ACCURACY_LIMIT_MOVING_METERS,
     AUTO_PAUSE_HOLD_MS,
     autoPauseSpeedKmh,
     spikeSpeedLimitKmh,
     smoothingAlpha,
     smoothedElevationGain,
+    cleanupRecordedPolyline,
     createGpsFilter,
     createAutoPauseTracker,
   } = await import(pathToFileURL(path.join(tempDir, 'gpsFilter.mjs')).href);
+
+  const { createRecordingClock } = await import(
+    pathToFileURL(path.join(tempDir, 'recordingClock.mjs')).href
+  );
 
   await check('accuracy gate drops fixes worse than 25 m', () => {
     assert.equal(GPS_ACCURACY_LIMIT_METERS, 25);
@@ -347,6 +366,174 @@ try {
 
     assert.equal(resumed, true);
     assert.ok(filter.points.length >= 2, 'the moving fixes are recorded again');
+  });
+
+  await check('the adaptive gate accepts 30-40 m fixes while moving', () => {
+    assert.equal(GPS_ACCURACY_LIMIT_MOVING_METERS, 45);
+
+    const filter = createGpsFilter('cycling');
+    // The initial lock still demands a good satellite fix.
+    assert.equal(filter.push(fixAt({ time: T0, accuracy: 35 })).reason, 'accuracy');
+    assert.equal(filter.push(fixAt({ north: 10, accuracy: 6, time: T0 + 1000 })).accepted, true);
+
+    // Riding at 36 km/h with the phone inside a jacket pocket.
+    const pocket = filter.push(fixAt({ north: 20, accuracy: 38, time: T0 + 2000 }));
+    assert.equal(pocket.accepted, true);
+    assert.equal(pocket.reason, null);
+
+    const edge = filter.push(fixAt({ north: 30, accuracy: 44, time: T0 + 3000 }));
+    assert.equal(edge.accepted, true);
+
+    // A cell-tower position is still refused.
+    const cell = filter.push(fixAt({ north: 40, accuracy: 60, time: T0 + 4000 }));
+    assert.equal(cell.accepted, false);
+    assert.equal(cell.reason, 'accuracy');
+  });
+
+  await check('a poor accuracy fix is smoothed harder than a good one', () => {
+    assert.ok(
+      smoothingAlpha(10, 40) < smoothingAlpha(10, 5),
+      'a 40 m fix must get a smaller weight than a 5 m fix at the same offset',
+    );
+  });
+
+  await check('a lateral spike on a straight road is rejected', () => {
+    const filter = createGpsFilter('cycling');
+    filter.push(fixAt({ time: T0 }));
+    for (let i = 1; i <= 5; i += 1) {
+      filter.push(fixAt({ north: i * 10, time: T0 + i * 1000 }));
+    }
+
+    // 20 m sideways in one second at 36 km/h: a reflected-signal artefact.
+    const spike = filter.push(fixAt({ north: 55, east: 20, time: T0 + 6000 }));
+    assert.equal(spike.accepted, false);
+    assert.equal(spike.reason, 'lateral');
+
+    // The road itself continues, so the next real fix is kept.
+    const next = filter.push(fixAt({ north: 60, east: 1, time: T0 + 7000 }));
+    assert.equal(next.accepted, true);
+  });
+
+  await check('auto-pause resumes by itself when Android reports speed null', () => {
+    const filter = createGpsFilter('cycling');
+    const tracker = createAutoPauseTracker('cycling');
+    // Mirrors the recorder: the unsmoothed speed drives the state machine.
+    const feed = (fix) => {
+      const result = filter.push(fix);
+      return tracker.update(result.instantSpeedKmh ?? result.speedKmh, fix.time);
+    };
+
+    let time = T0;
+    for (let i = 0; i <= 4; i += 1) {
+      feed(fixAt({ north: i * 8, speed: null, time }));
+      time += 1000;
+    }
+    assert.equal(tracker.paused, false, 'moving with speed null must not pause');
+
+    // Stopped: the fixes do not move and still report no speed at all.
+    let pausedAt = null;
+    for (let i = 0; i < 6; i += 1) {
+      const update = feed(fixAt({ north: 32, speed: null, time }));
+      if (update.paused && pausedAt === null) pausedAt = time;
+      time += 1000;
+    }
+    assert.equal(pausedAt, T0 + 10000, 'auto-pause after five stationary seconds');
+
+    // Moving again, still without a reported speed: the net displacement has
+    // to resume the session with no manual tap.
+    let resumed = false;
+    for (let i = 1; i <= 4; i += 1) {
+      const update = feed(fixAt({ north: 32 + i * 8, speed: null, time }));
+      if (!update.paused) resumed = true;
+      time += 1000;
+    }
+    assert.equal(resumed, true, 'auto-resume must work with coords.speed === null');
+  });
+
+  await check('duration follows the wall clock across a screen-off gap', () => {
+    const clock = createRecordingClock();
+    const start = T0;
+    clock.start(start);
+
+    // The HUD tick managed 44 s before the WebView was frozen.
+    assert.equal(clock.activeMs(start + 44000), 44000);
+
+    // Six minutes later the athlete is still riding 3 km further.
+    const wake = start + 6 * 60 * 1000;
+    const activeSeconds = Math.floor(clock.activeMs(wake) / 1000);
+    assert.equal(activeSeconds, 360);
+
+    const frozenAverage = 3 / (44 / 3600);
+    assert.ok(frozenAverage > 200, 'the frozen-timer bug reads as >200 km/h');
+    const average = 3 / (activeSeconds / 3600);
+    assert.ok(average > 25 && average < 35, `wall-clock average ${average.toFixed(1)} km/h`);
+  });
+
+  await check('paused windows are excluded from the active duration', () => {
+    const clock = createRecordingClock();
+    clock.start(T0);
+    clock.pause(T0 + 10000);
+    clock.resume(T0 + 40000);
+
+    assert.equal(clock.activeMs(T0 + 50000), 20000);
+    assert.equal(clock.pausedMs(T0 + 50000), 30000);
+
+    clock.pause(T0 + 60000);
+    assert.equal(clock.activeMs(T0 + 90000), 30000, 'a pause freezes the duration');
+  });
+
+  await check('a restored session keeps its active duration', () => {
+    const clock = createRecordingClock();
+    clock.restoreFrom({ startedAt: T0, activeMs: 600000, paused: false, at: T0 + 1200000 });
+
+    assert.equal(Math.round(clock.activeMs(T0 + 1200000) / 1000), 600);
+    assert.equal(Math.round(clock.activeMs(T0 + 1260000) / 1000), 660);
+  });
+
+  await check('a clock that steps backwards never yields a negative duration', () => {
+    const clock = createRecordingClock();
+    clock.start(T0);
+    assert.equal(clock.activeMs(T0 + 10000), 10000);
+    assert.equal(clock.activeMs(T0 + 5000), 10000);
+  });
+
+  await check('post-recording cleanup drops the trailing zig-zag but keeps corners', () => {
+    const points = [];
+    // A straight 100 m leg.
+    for (let i = 0; i <= 10; i += 1) points.push(pointAt({ north: i * 10, time: T0 + i * 1000 }));
+    // A 90° corner, then another 100 m leg.
+    for (let i = 1; i <= 10; i += 1) {
+      points.push(pointAt({ north: 100, east: i * 10, time: T0 + (10 + i) * 1000 }));
+    }
+    // Stopped at the end: 30 s of jitter inside a couple of metres.
+    for (let i = 1; i <= 30; i += 1) {
+      points.push(
+        pointAt({
+          north: 100 + (i % 2 ? 1.2 : -1.2),
+          east: 100 + (i % 3 ? 0.8 : -0.8),
+          time: T0 + (20 + i) * 1000,
+        }),
+      );
+    }
+
+    const cleaned = cleanupRecordedPolyline(points);
+    assert.ok(cleaned.length < points.length, 'the zig-zag is removed');
+    assert.deepEqual(cleaned[0], points[0], 'the start is preserved');
+    assert.deepEqual(cleaned[cleaned.length - 1], points[points.length - 1], 'the finish is preserved');
+
+    const cornerLat = BASE_LAT + 100 / METERS_PER_DEG_LAT;
+    const cornerLng = BASE_LNG;
+    const cornerKept = cleaned.some(
+      (point) =>
+        turfDistance([point.lng, point.lat], [cornerLng, cornerLat], { units: 'meters' }) < 1.5,
+    );
+    assert.equal(cornerKept, true, 'the 90° corner must not be cut');
+
+    const cleanedLength = pathLength(cleaned);
+    assert.ok(
+      cleanedLength > 195 && cleanedLength < 215,
+      `cleaned length ${cleanedLength.toFixed(1)} m should stay near the two 100 m legs`,
+    );
   });
 } finally {
   await rm(tempDir, { recursive: true, force: true });
