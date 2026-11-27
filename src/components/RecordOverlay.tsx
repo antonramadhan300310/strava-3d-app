@@ -226,11 +226,11 @@ export default function RecordOverlay({
 
         {recorder.isAutoPaused && (
           <div
-            className="mx-auto flex w-full max-w-md items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-2 text-[11px] font-medium text-amber-200 shadow-lg"
+            className="mx-auto flex w-full max-w-md items-center gap-2 rounded-xl border-2 border-amber-500 bg-amber-400 px-3 py-2.5 text-[11px] font-bold text-zinc-950 shadow-lg"
             role="status"
             aria-live="polite"
           >
-            <Pause size={14} className="shrink-0" />
+            <Pause size={15} className="shrink-0 text-zinc-950" strokeWidth={2.75} />
             <span>
               Jeda Otomatis aktif — timer berhenti sementara dan rekaman lanjut sendiri saat kamu
               bergerak lagi.
@@ -263,10 +263,10 @@ export default function RecordOverlay({
               })}
             </div>
 
-            <div className="mt-1 flex items-center justify-between gap-2 rounded-xl px-2 py-1.5">
+            <div className="mt-1 flex items-center justify-between gap-2 rounded-xl border border-white/15 bg-zinc-950/90 px-2.5 py-2 shadow-md">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-slate-200">Jeda Otomatis</p>
-                <p className="text-[9px] leading-tight text-slate-400">
+                <p className="text-[11px] font-semibold text-white">Jeda Otomatis</p>
+                <p className="text-[9px] leading-tight text-zinc-300">
                   Timer berhenti saat kecepatan &lt; {recorder.autoPauseThresholdKmh} km/j selama 5
                   detik, lalu lanjut sendiri.
                 </p>

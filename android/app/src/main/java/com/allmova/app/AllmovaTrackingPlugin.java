@@ -13,6 +13,7 @@ import android.provider.MediaStore;
 
 import androidx.core.content.ContextCompat;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
@@ -21,6 +22,10 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -93,6 +98,46 @@ public class AllmovaTrackingPlugin extends Plugin {
         } catch (Exception error) {
             call.reject("Gagal menghentikan layanan GPS latar belakang.", error);
         }
+    }
+
+    /**
+     * Returns the fixes the foreground service buffered natively.
+     *
+     * The WebView is throttled while the screen is off, so the web layer calls
+     * this whenever it becomes visible again (and periodically while visible)
+     * to replay every fix recorded in the meantime. `since` is the `nextIndex`
+     * of the previous call, which makes the drain resumable and idempotent.
+     */
+    @PluginMethod
+    public void getBufferedFixes(PluginCall call) {
+        Integer sinceValue = call.getInt("since", 0);
+        long since = sinceValue == null ? 0L : sinceValue.longValue();
+
+        GpsFixBuffer buffer = GpsFixBuffer.get(getContext());
+        JSArray fixes = new JSArray();
+        JSONArray stored = buffer.since(since);
+        for (int index = 0; index < stored.length(); index += 1) {
+            JSONObject fix = stored.optJSONObject(index);
+            if (fix == null) continue;
+            try {
+                fixes.put(JSObject.fromJSONObject(fix));
+            } catch (JSONException ignored) {
+                // A single malformed row must not fail the whole drain.
+            }
+        }
+
+        JSObject result = new JSObject();
+        result.put("fixes", fixes);
+        result.put("nextIndex", buffer.nextIndex());
+        result.put("count", buffer.size());
+        call.resolve(result);
+    }
+
+    /** Drops the native buffer; called when a recording starts or is saved. */
+    @PluginMethod
+    public void clearFixBuffer(PluginCall call) {
+        GpsFixBuffer.get(getContext()).clear();
+        call.resolve();
     }
 
     /**
