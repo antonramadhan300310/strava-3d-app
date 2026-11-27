@@ -27,6 +27,15 @@ const config: Config = {
           "sans-serif",
         ],
       },
+      keyframes: {
+        "sheet-down": {
+          "0%": { opacity: "0", transform: "translateY(-12px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "sheet-down": "sheet-down 180ms ease-out",
+      },
     },
   },
   plugins: [],

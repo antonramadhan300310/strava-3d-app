@@ -104,6 +104,9 @@ dev server before building, and delete `.next/` before restarting it afterwards.
   per-account storage (`tracker3d_last_seen_announcement_v1`), is written when the sheet
   opens (not when it closes) and drives the red badge on both bells. The bell is rendered as
   `MapView`'s `topRightAccessory` and in the Activities header, so the two cannot disagree.
+  The panel is a `createPortal` to `document.body` at `z-[9999]`, anchored below the
+  safe-area top inset with `max-h-[70vh]`; the Activities tab's `z-10` stacking context would
+  otherwise clip a nested overlay under `BottomNav` (`z-20`).
   Migration: `supabase/migrations/20261128010000_announcements.sql` (idempotent, public read
   of active rows, no client writes).
 

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bell, BellOff, Loader2, Megaphone, RefreshCw, X } from 'lucide-react';
 import { useAnnouncements } from '@/context/AnnouncementsContext';
 import { formatAnnouncementTime, type Announcement, type AnnouncementKind } from '@/lib/announcements';
@@ -20,6 +21,8 @@ type Props = {
 export default function NotificationBell({ variant = 'floating' }: Props) {
   const { announcements, loading, error, unreadCount, refresh, markAllSeen } = useAnnouncements();
   const [open, setOpen] = useState(false);
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   const openSheet = useCallback(() => {
     setOpen(true);
@@ -32,11 +35,15 @@ export default function NotificationBell({ variant = 'floating' }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    closeRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      bellRef.current?.focus();
+    };
   }, [open]);
 
   const hasUnread = unreadCount > 0;
@@ -48,6 +55,7 @@ export default function NotificationBell({ variant = 'floating' }: Props) {
   return (
     <>
       <button
+        ref={bellRef}
         type="button"
         onClick={openSheet}
         aria-label={hasUnread ? `Notifikasi (${unreadCount} baru)` : 'Notifikasi'}
@@ -66,92 +74,95 @@ export default function NotificationBell({ variant = 'floating' }: Props) {
         )}
       </button>
 
-      {open && (
-        <div
-          className="fixed inset-0 z-[80] flex items-end justify-center bg-[#0D1112]/70 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="notification-sheet-title"
-        >
-          <button
-            type="button"
-            aria-label="Tutup notifikasi"
-            onClick={closeSheet}
-            className="absolute inset-0 h-full w-full cursor-default"
-          />
+      {open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="notification-sheet-title"
+          >
+            <button
+              type="button"
+              aria-label="Tutup notifikasi"
+              onClick={closeSheet}
+              className="absolute inset-0 h-full w-full cursor-default bg-black/60 backdrop-blur-sm"
+            />
 
-          <div className="relative flex max-h-[80dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#151B1D] shadow-2xl sm:mb-4 sm:rounded-2xl">
-            <header className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#B9F51E]/15 text-[#B9F51E]">
-                  <Bell size={18} />
-                </span>
-                <div>
-                  <h2 id="notification-sheet-title" className="text-sm font-semibold text-slate-100">
-                    Notifikasi
-                  </h2>
-                  <p className="text-[11px] text-slate-400">Pesan dari admin ALLMOVA</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => void refresh()}
-                  disabled={loading}
-                  aria-label="Muat ulang notifikasi"
-                  aria-busy={loading}
-                  className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition active:bg-[#1E2E16] disabled:opacity-50"
-                >
-                  <RefreshCw size={15} className={loading ? 'animate-spin' : undefined} />
-                </button>
-                <button
-                  type="button"
-                  onClick={closeSheet}
-                  aria-label="Tutup"
-                  className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition active:bg-[#1E2E16]"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </header>
-
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-              {loading && announcements.length === 0 && (
-                <p className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
-                  <Loader2 size={16} className="animate-spin" />
-                  Memuat notifikasi…
-                </p>
-              )}
-
-              {error && (
-                <p className="mb-2 rounded-xl bg-rose-500/10 px-3 py-2 text-center text-[11px] font-medium text-rose-300">
-                  {error}
-                </p>
-              )}
-
-              {!loading && announcements.length === 0 && !error && (
-                <div className="flex flex-col items-center gap-2 py-10 text-center">
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#1E2E16] text-slate-500">
-                    <BellOff size={22} />
+            <div className="animate-sheet-down absolute inset-x-3 top-[calc(env(safe-area-inset-top)+12px)] mx-auto flex max-h-[70vh] w-auto max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#151B1D] shadow-2xl">
+              <header className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#B9F51E]/15 text-[#B9F51E]">
+                    <Bell size={18} />
                   </span>
-                  <p className="text-sm font-semibold text-slate-200">Belum ada notifikasi</p>
-                  <p className="max-w-[15rem] text-[11px] leading-relaxed text-slate-400">
-                    Pengumuman dan pesan baru dari admin ALLMOVA akan muncul di sini.
-                  </p>
+                  <div>
+                    <h2 id="notification-sheet-title" className="text-sm font-semibold text-slate-100">
+                      Notifikasi
+                    </h2>
+                    <p className="text-[11px] text-slate-400">Pesan dari admin ALLMOVA</p>
+                  </div>
                 </div>
-              )}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void refresh()}
+                    disabled={loading}
+                    aria-label="Muat ulang notifikasi"
+                    aria-busy={loading}
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition active:bg-[#1E2E16] disabled:opacity-50"
+                  >
+                    <RefreshCw size={15} className={loading ? 'animate-spin' : undefined} />
+                  </button>
+                  <button
+                    ref={closeRef}
+                    type="button"
+                    onClick={closeSheet}
+                    aria-label="Tutup"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition active:bg-[#1E2E16]"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </header>
 
-              {announcements.length > 0 && (
-                <ul className="flex flex-col gap-2">
-                  {announcements.map((entry) => (
-                    <AnnouncementCard key={entry.id} announcement={entry} />
-                  ))}
-                </ul>
-              )}
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
+                {loading && announcements.length === 0 && (
+                  <p className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+                    <Loader2 size={16} className="animate-spin" />
+                    Memuat notifikasi…
+                  </p>
+                )}
+
+                {error && (
+                  <p className="mb-2 rounded-xl bg-rose-500/10 px-3 py-2 text-center text-[11px] font-medium text-rose-300">
+                    {error}
+                  </p>
+                )}
+
+                {!loading && announcements.length === 0 && !error && (
+                  <div className="flex flex-col items-center gap-2 py-10 text-center">
+                    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#1E2E16] text-slate-500">
+                      <BellOff size={22} />
+                    </span>
+                    <p className="text-sm font-semibold text-slate-200">Belum ada notifikasi</p>
+                    <p className="max-w-[15rem] text-[11px] leading-relaxed text-slate-400">
+                      Pengumuman dan pesan baru dari admin ALLMOVA akan muncul di sini.
+                    </p>
+                  </div>
+                )}
+
+                {announcements.length > 0 && (
+                  <ul className="flex flex-col gap-2">
+                    {announcements.map((entry) => (
+                      <AnnouncementCard key={entry.id} announcement={entry} />
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
